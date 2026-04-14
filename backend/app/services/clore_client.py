@@ -104,41 +104,51 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
     cuda_version = getattr(s, "cuda_version", None)
 
     # ── ServerSpecs object ─────────────────────────────────────────────────────
-    # s.specs is a typed ServerSpecs, NOT a dict — use getattr, not .get()
+    # s.specs is a typed ServerSpecs — fields are flat scalars or a nested NetworkSpecs.
+    # Verified field map (from live API debug, 2026-04-13):
+    #   specs.gpuram   → float, VRAM per GPU in GB  (e.g. 11.0)
+    #   specs.gpu      → str,   "2x NVIDIA GeForce RTX 4070"
+    #   specs.cpu      → str,   "Intel(R) Xeon(R) CPU E5-2696 v3 @ 2.30GHz"
+    #   specs.cpus     → str,   "18/36"  (physical_cores/threads)
+    #   specs.ram      → float, system RAM in GB    (e.g. 31.99)
+    #   specs.disk     → str,   "SSDx20240GBx... 174.7393GB"  (trailing float = usable GB)
+    #   specs.disk_speed → float, MB/s
+    #   specs.pcie_rev → int,   PCIe generation     (e.g. 3)
+    #   specs.pcie_width → int, PCIe width lanes    (e.g. 16)
+    #   specs.mb       → str,   motherboard model
+    #   specs.net      → NetworkSpecs object:
+    #     net.up       → float, upload Mbps
+    #     net.down     → float, download Mbps
+    #     net.cc       → str,   country code
     specs = getattr(s, "specs", None)
 
-    gpu_spec = getattr(specs, "gpu", None) if specs is not None else None
+    # VRAM: specs.gpuram is already in GB as a float
+    vram_gb = int(_to_float(getattr(specs, "gpuram", None))) if specs is not None else 0
+
+    # Network
     net_spec = getattr(specs, "net", None) if specs is not None else None
-    cpu_spec = getattr(specs, "cpu", None) if specs is not None else None
-    disk_spec = getattr(specs, "disk", None) if specs is not None else None
-
-    # VRAM: gpu_spec.ram is in MB (Clore API convention)
-    vram_gb = 0
-    if gpu_spec is not None:
-        vram_raw = _to_float(getattr(gpu_spec, "ram", None))
-        vram_gb = int(vram_raw) // 1024 if vram_raw >= 1024 else int(vram_raw)
-
-    # Network speeds
     upload_mbps = (_to_float(getattr(net_spec, "up", None)) or None) if net_spec is not None else None
     download_mbps = (_to_float(getattr(net_spec, "down", None)) or None) if net_spec is not None else None
 
-    # CPU model
-    cpu_model = (getattr(cpu_spec, "model", None)) if cpu_spec is not None else None
+    # CPU — flat string on specs
+    cpu_model = getattr(specs, "cpu", None) if specs is not None else None
 
-    # Disk (Clore reports disk.size in GB)
+    # Disk — string like "SSDx20240GBx20x20x20 174.7393GB"; extract last GB value
     disk_gb = None
-    if disk_spec is not None:
-        disk_raw = getattr(disk_spec, "size", None) or getattr(disk_spec, "total", None)
-        disk_gb = int(_to_float(disk_raw)) if disk_raw is not None else None
+    if specs is not None:
+        disk_str = getattr(specs, "disk", None)
+        if disk_str and isinstance(disk_str, str):
+            matches = re.findall(r"(\d+\.?\d*)\s*GB", disk_str, re.IGNORECASE)
+            disk_gb = int(float(matches[-1])) if matches else None
 
-    # PCIe (present on newer Clore API entries; gpu_spec attributes)
+    # PCIe — flat ints on specs (pcie_rev = generation, pcie_width = lane count)
     pcie_version = None
     pcie_width = None
-    if gpu_spec is not None:
-        pv = getattr(gpu_spec, "pcie_version", None)
+    if specs is not None:
+        pv = getattr(specs, "pcie_rev", None)
         pcie_version = str(pv) if pv is not None else None
-        pw = getattr(gpu_spec, "pcie_width", None) or getattr(gpu_spec, "pcie_lanes", None)
-        pcie_width = int(_to_float(pw)) if pw is not None else None
+        pw = getattr(specs, "pcie_width", None)
+        pcie_width = int(pw) if pw is not None else None
 
     return CloreOffer(
         id=str(s.id),
