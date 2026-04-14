@@ -145,7 +145,7 @@ export interface CloreOffer {
   gpu_count: number;
   vram_gb: number;
   cuda_version: string | null;
-  price_per_hour: number;
+  price_per_day: number;
   // Network
   upload_mbps: number | null;
   download_mbps: number | null;

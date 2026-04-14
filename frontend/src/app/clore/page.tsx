@@ -244,7 +244,7 @@ function MarketplaceTab() {
           <div className="card w-full max-w-md space-y-4 px-6 py-5">
             <h2 className="text-base font-semibold text-zinc-100">Rent {dialogOffer.gpu_name}</h2>
             <p className="text-xs text-zinc-500">
-              ${dialogOffer.price_per_hour.toFixed(3)}/hr · {dialogOffer.vram_gb} GB VRAM
+              ${dialogOffer.price_per_day.toFixed(2)}/day · {dialogOffer.vram_gb} GB VRAM
               {dialogOffer.gpu_count > 1 && ` · ${dialogOffer.gpu_count}× GPU`}
             </p>
 
@@ -332,7 +332,7 @@ function OfferCard({ offer, onRent }: { offer: CloreOffer; onRent: () => void })
 
         <div className="shrink-0 text-right space-y-1">
           <p className="text-sm font-semibold text-zinc-100">
-            ${offer.price_per_hour.toFixed(3)}<span className="text-xs text-zinc-500">/hr</span>
+            ${offer.price_per_day.toFixed(2)}<span className="text-xs text-zinc-500">/day</span>
           </p>
           {offer.upload_mbps != null && (
             <p className="text-xs text-zinc-500">

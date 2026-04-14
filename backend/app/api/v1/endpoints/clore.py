@@ -10,6 +10,56 @@ from app.services.settings_service import get_setting
 router = APIRouter()
 
 
+@router.get("/debug-sdk")
+def debug_sdk(db: Session = Depends(get_db)) -> dict:
+    """Dump raw attributes of the first marketplace server from the SDK.
+
+    Temporary endpoint — use this to verify field names and value types
+    from the live clore-ai SDK before finalising the _sdk_to_offer mapping.
+    Hit: GET /api/v1/clore/debug-sdk
+    """
+    api_key = _resolve_clore_key(db)
+    try:
+        from clore_ai import CloreAI  # type: ignore[import]
+        sdk = CloreAI(api_key=api_key)
+        servers = sdk.marketplace()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if not servers:
+        return {"count": 0, "message": "No servers returned by marketplace()"}
+
+    s = servers[0]
+
+    def _dump(obj: object, depth: int = 0) -> dict | str:
+        if obj is None:
+            return "None"
+        if depth > 2:
+            return f"<{type(obj).__name__}>"
+        result: dict = {"__type__": type(obj).__name__}
+        for attr in sorted(dir(obj)):
+            if attr.startswith("_"):
+                continue
+            try:
+                val = getattr(obj, attr)
+                if callable(val):
+                    continue
+                if isinstance(val, (int, float, str, bool)) or val is None:
+                    result[attr] = val
+                elif isinstance(val, list):
+                    result[attr] = [_dump(item, depth + 1) for item in val[:3]]
+                else:
+                    result[attr] = _dump(val, depth + 1)
+            except Exception as exc:
+                result[attr] = f"ERROR: {exc}"
+        return result
+
+    return {
+        "total_servers": len(servers),
+        "first_server": _dump(s),
+    }
+
+
 def _resolve_clore_key(db: Session) -> str:
     """Return the Clore API key or raise 503 if not configured."""
     key = get_setting("clore_api_key", db)

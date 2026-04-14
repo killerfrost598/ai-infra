@@ -55,7 +55,7 @@ class CloreOffer(BaseModel):
     gpu_count: int = 1
     vram_gb: int
     cuda_version: str | None = None
-    price_per_hour: float
+    price_per_day: float
     # Network
     upload_mbps: float | None = None
     download_mbps: float | None = None
@@ -97,9 +97,8 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
     raw_ram = getattr(s, "ram_gb", None)
     ram_gb = int(float(raw_ram)) if raw_ram is not None else None
 
-    # price_usd is the on-demand USD float property (ServerPrice.usd.on_demand_usd
-    # is accessible as s.price_usd by the SDK)
-    price_per_hour = _to_float(getattr(s, "price_usd", None))
+    # price_usd is the on-demand price in USD per day (Clore quotes daily rates)
+    price_per_day = _to_float(getattr(s, "price_usd", None))
 
     # cuda_version direct property
     cuda_version = getattr(s, "cuda_version", None)
@@ -147,7 +146,7 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
         gpu_count=gpu_count,
         vram_gb=vram_gb,
         cuda_version=cuda_version,
-        price_per_hour=price_per_hour,
+        price_per_day=price_per_day,
         upload_mbps=upload_mbps,
         download_mbps=download_mbps,
         cpu_model=cpu_model,
