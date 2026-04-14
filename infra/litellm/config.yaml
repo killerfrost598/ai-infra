@@ -1,0 +1,16 @@
+model_list:
+  - model_name: bootstrap-model
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  disable_spend_logs: true
+
+router_settings:
+  routing_strategy: simple-shuffle
+
+# NOTE:
+# This is a bootstrap config. In production, dynamically manage model routes
+# based on active deployments discovered by backend/worker orchestration.

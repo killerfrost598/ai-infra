@@ -1,0 +1,21 @@
+{
+  "name": "AI Inference Platform",
+  "short_name": "AIP",
+  "description": "Management suite for GPU rentals, model deployments, and unified inference gateway.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/static/favicon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
