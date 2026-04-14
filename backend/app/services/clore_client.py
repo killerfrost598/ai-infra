@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel
@@ -80,87 +81,65 @@ class CloreServer(BaseModel):
 
 
 def _sdk_to_offer(s: Any) -> CloreOffer:
-    """Map a clore-ai SDK marketplace server object to our CloreOffer schema.
+    """Map a clore-ai SDK MarketplaceServer object to our CloreOffer schema.
 
-    The SDK wraps the raw Clore.ai REST response. Specs live under s.specs (dict).
-    We use defensive multi-path access because the SDK attribute names differ from
-    what the underlying JSON keys are named — field names verified against live API.
+    Uses direct SDK properties (gpu_count, ram_gb, price_usd) where available,
+    then drills into the typed ServerSpecs object for the rest.
+    SDK docs: https://docs.clore.ai/python-sdk/marketplace
     """
-    # Pull nested specs dict (same structure as order objects)
-    specs: dict[str, Any] = {}
-    raw_specs = getattr(s, "specs", None)
-    if isinstance(raw_specs, dict):
-        specs = raw_specs
+    # ── Direct SDK properties ──────────────────────────────────────────────────
+    # gpu_model includes a count prefix: "2x NVIDIA GeForce RTX 4070"
+    raw_model = getattr(s, "gpu_model", None) or "Unknown"
+    gpu_name = re.sub(r"^\d+[xX]\s+", "", raw_model).strip() or raw_model
 
-    gpu_spec: dict[str, Any] = {}
-    raw_gpu = specs.get("gpu")
-    if isinstance(raw_gpu, dict):
-        gpu_spec = raw_gpu
+    # gpu_count and ram_gb are direct typed properties (no conversion needed)
+    gpu_count = int(getattr(s, "gpu_count", 1) or 1)
+    raw_ram = getattr(s, "ram_gb", None)
+    ram_gb = int(float(raw_ram)) if raw_ram is not None else None
 
-    net_spec: dict[str, Any] = {}
-    raw_net = specs.get("net")
-    if isinstance(raw_net, dict):
-        net_spec = raw_net
+    # price_usd is the on-demand USD float property (ServerPrice.usd.on_demand_usd
+    # is accessible as s.price_usd by the SDK)
+    price_per_hour = _to_float(getattr(s, "price_usd", None))
 
-    cpu_spec: dict[str, Any] = {}
-    raw_cpu = specs.get("cpu")
-    if isinstance(raw_cpu, dict):
-        cpu_spec = raw_cpu
+    # cuda_version direct property
+    cuda_version = getattr(s, "cuda_version", None)
 
-    disk_spec: dict[str, Any] = {}
-    raw_disk = specs.get("disk")
-    if isinstance(raw_disk, dict):
-        disk_spec = raw_disk
+    # ── ServerSpecs object ─────────────────────────────────────────────────────
+    # s.specs is a typed ServerSpecs, NOT a dict — use getattr, not .get()
+    specs = getattr(s, "specs", None)
 
-    # GPU name: prefer specs.gpu.model, fall back to top-level gpu_model attribute
-    gpu_name = gpu_spec.get("model") or getattr(s, "gpu_model", None) or "Unknown"
+    gpu_spec = getattr(specs, "gpu", None) if specs is not None else None
+    net_spec = getattr(specs, "net", None) if specs is not None else None
+    cpu_spec = getattr(specs, "cpu", None) if specs is not None else None
+    disk_spec = getattr(specs, "disk", None) if specs is not None else None
 
-    # GPU count
-    gpu_count = int(gpu_spec.get("count", 1) or 1)
+    # VRAM: gpu_spec.ram is in MB (Clore API convention)
+    vram_gb = 0
+    if gpu_spec is not None:
+        vram_raw = _to_float(getattr(gpu_spec, "ram", None))
+        vram_gb = int(vram_raw) // 1024 if vram_raw >= 1024 else int(vram_raw)
 
-    # VRAM: specs.gpu.ram is in MB on the Clore API — convert to GB.
-    # Fall back to any direct vram_* attribute (may already be in GB).
-    vram_mb = gpu_spec.get("ram") or 0
-    if vram_mb and int(vram_mb) > 1024:
-        vram_gb = int(vram_mb) // 1024
-    else:
-        # Fallback: try direct attribute (may be in GB already)
-        vram_gb = int(getattr(s, "vram_gb", None) or vram_mb or 0)
+    # Network speeds
+    upload_mbps = (_to_float(getattr(net_spec, "up", None)) or None) if net_spec is not None else None
+    download_mbps = (_to_float(getattr(net_spec, "down", None)) or None) if net_spec is not None else None
 
-    # Price per hour: SDK may return a ServerPrice object rather than a raw float.
-    # Try attribute names in priority order; _to_float handles all types safely.
-    raw_price = (
-        getattr(s, "min_price_on_demand", None)
-        or getattr(s, "price_on_demand", None)
-        or getattr(s, "price_per_hour", None)
-        or getattr(s, "price_usd_per_hour", None)
-        or getattr(s, "price", None)
-        or specs.get("price")
-    )
-    price_per_hour = _to_float(raw_price)
+    # CPU model
+    cpu_model = (getattr(cpu_spec, "model", None)) if cpu_spec is not None else None
 
-    # Network speeds (Mbps) — also guard against non-numeric SDK types
-    upload_mbps = _to_float(net_spec.get("up")) or None
-    download_mbps = _to_float(net_spec.get("down")) or None
+    # Disk (Clore reports disk.size in GB)
+    disk_gb = None
+    if disk_spec is not None:
+        disk_raw = getattr(disk_spec, "size", None) or getattr(disk_spec, "total", None)
+        disk_gb = int(_to_float(disk_raw)) if disk_raw is not None else None
 
-    # CPU
-    cpu_model = cpu_spec.get("model") or None
-
-    # System RAM (MB → GB)
-    ram_mb = specs.get("ram") or 0
-    ram_gb = (int(ram_mb) // 1024) if ram_mb else None
-
-    # Disk GB (Clore API reports disk.size already in GB)
-    disk_size = disk_spec.get("size") or disk_spec.get("total") or 0
-    disk_gb = int(disk_size) if disk_size else None
-
-    # PCIe info (present in GPU spec on newer Clore API versions)
-    pcie_version = str(gpu_spec.get("pcie_version") or "") or None
-    pcie_width_raw = gpu_spec.get("pcie_width") or gpu_spec.get("pcie_lanes")
-    pcie_width = int(pcie_width_raw) if pcie_width_raw else None
-
-    # CUDA version
-    cuda_version = getattr(s, "cuda_version", None) or gpu_spec.get("cuda_version")
+    # PCIe (present on newer Clore API entries; gpu_spec attributes)
+    pcie_version = None
+    pcie_width = None
+    if gpu_spec is not None:
+        pv = getattr(gpu_spec, "pcie_version", None)
+        pcie_version = str(pv) if pv is not None else None
+        pw = getattr(gpu_spec, "pcie_width", None) or getattr(gpu_spec, "pcie_lanes", None)
+        pcie_width = int(_to_float(pw)) if pw is not None else None
 
     return CloreOffer(
         id=str(s.id),
@@ -235,21 +214,6 @@ class CloreClient:
             if gpu_name:
                 kwargs["gpu"] = gpu_name
             servers = self._sdk.marketplace(**kwargs)
-            if servers:
-                # Log first raw server object once so we can verify field names.
-                first = servers[0]
-                logger.debug(
-                    "Clore SDK marketplace first object — type=%s attrs=%s",
-                    type(first).__name__,
-                    [a for a in dir(first) if not a.startswith("_")],
-                )
-                price_val = getattr(first, "price", None)
-                if price_val is not None:
-                    logger.debug(
-                        "Clore SDK price field — type=%s repr=%.200s",
-                        type(price_val).__name__,
-                        repr(price_val),
-                    )
             return [_sdk_to_offer(s) for s in (servers or [])]
         except Exception as exc:
             raise RuntimeError(f"Failed to list Clore.ai offers: {exc}") from exc
