@@ -17,6 +17,37 @@ except ImportError:
     _CloreAISDK = None  # type: ignore[assignment,misc]
 
 
+def _to_float(val: Any) -> float:
+    """Convert a value that may be a raw number or a SDK price/spec object to float.
+
+    The clore-ai SDK wraps some fields in typed objects (e.g. ServerPrice).
+    We try common numeric attribute names before falling back to 0.0.
+    """
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return 0.0
+    # SDK typed object (e.g. ServerPrice) — probe common attribute names
+    for attr in ("on_demand", "usd", "clore", "price", "value", "amount", "cost"):
+        candidate = getattr(val, attr, None)
+        if candidate is not None:
+            if isinstance(candidate, (int, float)):
+                return float(candidate)
+            if isinstance(candidate, str):
+                try:
+                    return float(candidate)
+                except (ValueError, TypeError):
+                    pass
+    # Log what we received so we can refine the mapping
+    logger.warning("_to_float: unhandled type %s — repr: %.120s", type(val).__name__, repr(val))
+    return 0.0
+
+
 class CloreOffer(BaseModel):
     id: str
     gpu_name: str
@@ -96,20 +127,21 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
         # Fallback: try direct attribute (may be in GB already)
         vram_gb = int(getattr(s, "vram_gb", None) or vram_mb or 0)
 
-    # Price per hour: try multiple attribute names (API inconsistency across SDK versions)
-    price_per_hour = float(
+    # Price per hour: SDK may return a ServerPrice object rather than a raw float.
+    # Try attribute names in priority order; _to_float handles all types safely.
+    raw_price = (
         getattr(s, "min_price_on_demand", None)
         or getattr(s, "price_on_demand", None)
         or getattr(s, "price_per_hour", None)
         or getattr(s, "price_usd_per_hour", None)
         or getattr(s, "price", None)
         or specs.get("price")
-        or 0.0
     )
+    price_per_hour = _to_float(raw_price)
 
-    # Network speeds (Mbps)
-    upload_mbps = float(net_spec.get("up") or 0) or None
-    download_mbps = float(net_spec.get("down") or 0) or None
+    # Network speeds (Mbps) — also guard against non-numeric SDK types
+    upload_mbps = _to_float(net_spec.get("up")) or None
+    download_mbps = _to_float(net_spec.get("down")) or None
 
     # CPU
     cpu_model = cpu_spec.get("model") or None
@@ -203,6 +235,21 @@ class CloreClient:
             if gpu_name:
                 kwargs["gpu"] = gpu_name
             servers = self._sdk.marketplace(**kwargs)
+            if servers:
+                # Log first raw server object once so we can verify field names.
+                first = servers[0]
+                logger.debug(
+                    "Clore SDK marketplace first object — type=%s attrs=%s",
+                    type(first).__name__,
+                    [a for a in dir(first) if not a.startswith("_")],
+                )
+                price_val = getattr(first, "price", None)
+                if price_val is not None:
+                    logger.debug(
+                        "Clore SDK price field — type=%s repr=%.200s",
+                        type(price_val).__name__,
+                        repr(price_val),
+                    )
             return [_sdk_to_offer(s) for s in (servers or [])]
         except Exception as exc:
             raise RuntimeError(f"Failed to list Clore.ai offers: {exc}") from exc
