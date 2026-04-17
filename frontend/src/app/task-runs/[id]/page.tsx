@@ -12,44 +12,81 @@ const TERMINAL = new Set(["SUCCESS", "FAILED", "PARTIAL"]);
 export default function TaskRunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [run, setRun] = useState<TaskRun | null>(null);
-  const [logs, setLogs] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string>("");
   const [logsError, setLogsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const esRef = useRef<EventSource | null>(null);
   const outputRef = useRef<HTMLPreElement>(null);
 
   function stopPoll() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }
 
-  async function fetchLogs() {
-    try { setLogs(await api.taskRuns.logs(id)); setLogsError(null); }
-    catch (e: unknown) { setLogsError(e instanceof Error ? e.message : "Logs unavailable"); }
+  function stopStream() {
+    if (esRef.current) { esRef.current.close(); esRef.current = null; }
+    setStreaming(false);
   }
+
+  // Auto-scroll log output to bottom when new content arrives
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [logs]);
 
   useEffect(() => {
     async function init() {
       try {
         const taskRun = await api.taskRuns.get(id);
         setRun(taskRun);
-        if (TERMINAL.has(taskRun.status)) { fetchLogs(); return; }
+        startLogStream(taskRun.status);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to load");
+      }
+    }
+
+    function startLogStream(initialStatus: string) {
+      const es = new EventSource(`/api/v1/task-runs/${id}/logs/stream`);
+      esRef.current = es;
+      setStreaming(!TERMINAL.has(initialStatus));
+
+      es.onmessage = (e) => {
+        setLogs((prev) => prev + e.data + "\n");
+      };
+
+      es.addEventListener("done", () => {
+        stopStream();
+        // Fetch final task run status once stream closes
+        api.taskRuns.get(id).then(setRun).catch(() => null);
+      });
+
+      es.onerror = () => {
+        stopStream();
+        setLogsError("Log stream disconnected.");
+        // Still show whatever we got; attempt final status fetch
+        api.taskRuns.get(id).then(setRun).catch(() => null);
+      };
+
+      // Poll task run metadata while active (status badge + timing)
+      if (!TERMINAL.has(initialStatus)) {
         pollRef.current = setInterval(async () => {
           try {
             const updated = await api.taskRuns.get(id);
             setRun(updated);
-            if (TERMINAL.has(updated.status)) { stopPoll(); fetchLogs(); }
-          } catch { stopPoll(); }
-        }, 1500);
-      } catch (e: unknown) { setError(e instanceof Error ? e.message : "Failed to load"); }
+            if (TERMINAL.has(updated.status)) stopPoll();
+          } catch {
+            stopPoll();
+          }
+        }, 2000);
+      }
     }
+
     init();
-    return stopPoll;
+    return () => { stopPoll(); stopStream(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  useEffect(() => {
-    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [logs]);
 
   if (error) return (
     <div className="space-y-3">
@@ -131,20 +168,28 @@ export default function TaskRunDetailPage() {
               <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
             </div>
             <p className="text-xs text-zinc-600">stdout / stderr</p>
-            {isActive && <span className="animate-pulse text-xs text-amber-400">waiting…</span>}
+            {streaming && (
+              <span className="flex items-center gap-1.5 text-xs text-amber-400">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                streaming
+              </span>
+            )}
           </div>
-          {logsError ? (
+
+          {logsError && !logs ? (
             <p className="terminal p-4 text-zinc-500">{logsError}</p>
-          ) : logs !== null ? (
-            <pre ref={outputRef} className="terminal max-h-[36rem] overflow-auto p-5 scrollbar-thin whitespace-pre-wrap">
+          ) : logs ? (
+            <pre
+              ref={outputRef}
+              className="terminal max-h-[36rem] overflow-auto p-5 scrollbar-thin whitespace-pre-wrap"
+            >
               {logs}
+              {streaming && <span className="animate-pulse text-zinc-600">▌</span>}
             </pre>
           ) : (
             <div className="terminal flex items-center gap-2 p-5 text-zinc-600">
-              {isActive
-                ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-500" /> Waiting for task to complete…</>
-                : "No log output available."
-              }
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-500" />
+              Waiting for task output…
             </div>
           )}
         </div>

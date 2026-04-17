@@ -69,7 +69,16 @@ export default function SessionsPage() {
               </div>
 
               <div className="shrink-0 text-right text-xs text-zinc-500 space-y-0.5">
-                <p>{s.command_count} cmd{s.command_count !== 1 ? "s" : ""}</p>
+                {s.has_pty_log ? (
+                  <span className="inline-flex items-center gap-1 text-indigo-400">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+                    </svg>
+                    terminal
+                  </span>
+                ) : (
+                  <p>{s.command_count} cmd{s.command_count !== 1 ? "s" : ""}</p>
+                )}
                 <p>{new Date(s.started_at).toLocaleString()}</p>
                 {s.terminated_at && (
                   <p className="text-zinc-600">ended {new Date(s.terminated_at).toLocaleString()}</p>

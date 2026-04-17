@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import type { Server, SessionListItem, SSHTestResult, TaskRun } from "@/lib/types";
+import type { InferenceBenchmark, Server, SessionListItem, SSHTestResult, TaskRun } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 
 export default function ServerDetailPage() {
@@ -26,20 +26,34 @@ export default function ServerDetailPage() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [startingSession, setStartingSession] = useState(false);
 
-  // ── Load server ─────────────────────────────────────────────────────────────
+  const [gpuBenchmarks, setGpuBenchmarks] = useState<InferenceBenchmark[]>([]);
+  const [benchmarksLoading, setBenchmarksLoading] = useState(false);
+
+  // ── Initial parallel load ────────────────────────────────────────────────────
   useEffect(() => {
-    api.servers.get(id).then(setServer).catch((e: Error) => setServerError(e.message));
+    Promise.all([
+      api.servers.get(id),
+      api.sessions.list(id, undefined, 0, 10),
+      api.taskRuns.list(0, 30, id),
+    ])
+      .then(([s, sessRes, histRes]) => {
+        setServer(s);
+        setSessions(sessRes.items);
+        setHistory(histRes.items);
+        if (s.gpu_model) {
+          setBenchmarksLoading(true);
+          api.benchmarks
+            .forGpu(s.gpu_model)
+            .then((res) => setGpuBenchmarks(res.items))
+            .finally(() => setBenchmarksLoading(false));
+        }
+      })
+      .catch((e: Error) => setServerError(e.message))
+      .finally(() => {
+        setSessionsLoading(false);
+        setHistoryLoading(false);
+      });
   }, [id]);
-
-  // ── SSH sessions ─────────────────────────────────────────────────────────────
-  const loadSessions = useCallback(() => {
-    api.sessions
-      .list(id, undefined, 0, 10)
-      .then((res) => setSessions(res.items))
-      .finally(() => setSessionsLoading(false));
-  }, [id]);
-
-  useEffect(() => { loadSessions(); }, [loadSessions]);
 
   async function startSession() {
     setStartingSession(true);
@@ -51,15 +65,6 @@ export default function ServerDetailPage() {
       setStartingSession(false);
     }
   }
-
-  // ── Task run history ─────────────────────────────────────────────────────────
-  const loadHistory = useCallback(() => {
-    api.taskRuns.list(0, 30, id)
-      .then((res) => setHistory(res.items))
-      .finally(() => setHistoryLoading(false));
-  }, [id]);
-
-  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   // ── SSH test ─────────────────────────────────────────────────────────────────
   async function testSSH() {
@@ -193,11 +198,18 @@ export default function ServerDetailPage() {
             <button
               onClick={startSession}
               disabled={startingSession}
-              className="btn-primary text-xs py-1.5 px-3"
+              className="btn-primary text-xs py-1.5 px-3 inline-flex items-center gap-1.5"
             >
               {startingSession ? (
-                <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-400/40 border-t-white" /> Starting…</>
-              ) : "Start session"}
+                <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-400/40 border-t-white" /> Connecting…</>
+              ) : (
+                <>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+                  </svg>
+                  Open terminal
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -231,6 +243,50 @@ export default function ServerDetailPage() {
         </div>
       </div>
 
+      {/* GPU Benchmarks */}
+      {server.gpu_model && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="section-label">GPU Benchmarks</h2>
+            <Link href={`/benchmarks?gpu=${encodeURIComponent(server.gpu_model)}`} className="text-xs text-zinc-500 hover:text-zinc-300">
+              View all →
+            </Link>
+          </div>
+          {benchmarksLoading && (
+            <div className="flex items-center gap-2 text-xs text-zinc-500">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+              Loading…
+            </div>
+          )}
+          {!benchmarksLoading && gpuBenchmarks.length === 0 && (
+            <p className="text-xs text-zinc-600">
+              No benchmarks for {server.gpu_model} yet.{" "}
+              <Link href="/benchmarks" className="text-indigo-400 hover:text-indigo-300">Record one →</Link>
+            </p>
+          )}
+          {gpuBenchmarks.length > 0 && (
+            <div className="space-y-2">
+              {gpuBenchmarks.slice(0, 5).map((b) => (
+                <div key={b.id} className="card px-4 py-3 flex items-center gap-4 text-sm">
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate text-zinc-300">{b.model_name}</p>
+                    {b.quantization && <p className="text-xs text-zinc-600">{b.quantization}</p>}
+                  </div>
+                  {b.tokens_per_second_avg != null && (
+                    <div className="shrink-0 text-right">
+                      <p className="font-mono text-emerald-400">{b.tokens_per_second_avg.toFixed(1)} t/s</p>
+                      {b.max_parallel_connections != null && (
+                        <p className="text-xs text-zinc-600">{b.max_parallel_connections} concurrent</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Task history */}
       <div className="space-y-3">
         <h2 className="section-label">Task History</h2>
@@ -253,7 +309,7 @@ export default function ServerDetailPage() {
               <StatusBadge status={r.status} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-zinc-200">{r.task_type}</p>
-                {r.metadata_json?.command && (
+                {r.metadata_json?.command != null && (
                   <p className="mt-0.5 truncate font-mono text-xs text-zinc-600">
                     $ {String(r.metadata_json.command)}
                   </p>

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.entities import Playbook
+from app.models.entities import Playbook, Server
 from app.schemas.playbooks import PlaybookCreate, PlaybookListResponse, PlaybookResponse, PlaybookUpdate
 
 router = APIRouter()
@@ -57,3 +57,22 @@ def delete_playbook(playbook_id: UUID, db: Session = Depends(get_db)) -> None:
         raise HTTPException(status_code=404, detail="Playbook not found")
     db.delete(playbook)
     db.commit()
+
+
+@router.post("/{playbook_id}/run", status_code=202)
+def run_playbook(
+    playbook_id: UUID,
+    server_id: UUID = Query(..., description="ID of the server to run the playbook on"),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Dispatch a Celery task to clone and execute the playbook on a server."""
+    playbook = db.query(Playbook).filter(Playbook.id == playbook_id).first()
+    if not playbook:
+        raise HTTPException(status_code=404, detail="Playbook not found")
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    from app.workers.tasks import run_playbook_task
+    result = run_playbook_task.delay(str(server_id), str(playbook_id))
+    return {"task_id": result.id, "status": "queued"}

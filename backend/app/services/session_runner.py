@@ -35,6 +35,11 @@ _ANSI_RE = re.compile(
 _INITIAL_PROMPT_DRAIN_TIMEOUT = 5.0
 _INITIAL_PROMPT_SETTLE_SLEEP = 0.1
 
+# PS1 marker injected via PROMPT_COMMAND so every command boundary is timestamped.
+# Format: __PS1__<epoch_ms>__<exit_code>__
+_PROMPT_COMMAND = "export PROMPT_COMMAND='echo \"__PS1__$(date +%s%3N)__$?__\"'"
+_PS1_RE = re.compile(r"__PS1__(\d+)__(\d+)__")
+
 # Control characters to strip from stored PTY logs (not printable, not meaningful for display)
 _CTRL_STRIP = re.compile(r"[\x00-\x06\x0e-\x1a\x1c-\x1f]")
 
@@ -119,6 +124,17 @@ def open_session(server: Server) -> SessionHandle:
         if not channel.recv_ready():
             break
 
+    # Inject PROMPT_COMMAND so every command completion is timestamped with an
+    # __PS1__<ms>__<exit_code>__ marker. This enables parse_pty_commands() later.
+    channel.sendall(f"{_PROMPT_COMMAND}\n".encode())
+    time.sleep(0.3)
+    drain_deadline = time.monotonic() + 1.0
+    while time.monotonic() < drain_deadline:
+        if channel.recv_ready():
+            channel.recv(4096)
+        else:
+            break
+
     logger.info("PTY session opened for server %s", server.id)
     return SessionHandle(client=client, channel=channel)
 
@@ -196,6 +212,60 @@ def execute_command(
 
     stdout = chr(10).join(filtered).strip()
     return stdout, "", exit_code
+
+
+def parse_pty_commands(pty_log: str) -> list[dict]:
+    """Parse PS1 boundary markers from a PTY log into discrete command records.
+
+    Requires that PROMPT_COMMAND was injected by open_session() (sessions started
+    after this version will have markers; older sessions return an empty list).
+
+    Each record: {command, output, started_ms, completed_ms, duration_ms, exit_code}
+    """
+    markers = list(_PS1_RE.finditer(pty_log))
+    if len(markers) < 2:
+        return []
+
+    commands: list[dict] = []
+    for i in range(len(markers) - 1):
+        start_m = markers[i]
+        end_m = markers[i + 1]
+
+        started_ms = int(start_m.group(1))
+        completed_ms = int(end_m.group(1))
+        # exit_code in the END marker is the exit code of the command in THIS block
+        exit_code = int(end_m.group(2))
+        duration_ms = max(0, completed_ms - started_ms)
+
+        block = pty_log[start_m.end():end_m.start()]
+        # Strip ANSI escape sequences and process backspace/control chars so stored
+        # commands and output are human-readable, not raw PTY bytes.
+        block = strip_ansi(block).strip()
+        block = block.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [ln for ln in block.split("\n") if ln.strip()]
+        if not lines:
+            continue
+
+        # Strip shell prompt prefix (e.g. "root@host:~# ", "user@host:~$ ") from first line
+        first = lines[0].strip()
+        command = re.sub(r"^[^#$]*[#$]\s+", "", first).strip()
+        # Skip the PROMPT_COMMAND setup line itself
+        if not command or command.startswith("export PROMPT_COMMAND"):
+            continue
+
+        output = "\n".join(lines[1:]).strip()
+        commands.append(
+            {
+                "command": command,
+                "output": output,
+                "started_ms": started_ms,
+                "completed_ms": completed_ms,
+                "duration_ms": duration_ms,
+                "exit_code": exit_code,
+            }
+        )
+
+    return commands
 
 
 def close_session(handle: SessionHandle) -> None:

@@ -1,11 +1,16 @@
 import type {
   ApiKey,
+  CloreBalance,
   CloreOffer,
   CloreRental,
+  CommandsSummary,
   ExecResult,
+  InferenceBenchmark,
+  InferenceBenchmarkCreate,
   ListResponse,
   ModelDeployment,
   Playbook,
+  RentRequest,
   Server,
   ServerCreate,
   Session,
@@ -16,6 +21,7 @@ import type {
   SettingsResponse,
   SSHTestResult,
   TaskRun,
+  ToPlaybookResult,
 } from "./types";
 
 // Empty string → relative URLs. The browser calls /api/v1/... on the same
@@ -112,6 +118,8 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ value }),
       }),
+    delete: (key: string) =>
+      fetch(`${BASE_URL}/api/v1/settings/${key}`, { method: "DELETE" }),
   },
 
   clore: {
@@ -122,13 +130,14 @@ export const api = {
       return apiFetch<{ offers: CloreOffer[] }>(`/api/v1/clore/offers${q ? `?${q}` : ""}`);
     },
     rentals: () => apiFetch<{ rentals: CloreRental[] }>("/api/v1/clore/rentals"),
-    rent: (offerId: string, image: string, sshPassword?: string) => {
-      const params = new URLSearchParams({ offer_id: offerId, image });
-      if (sshPassword) params.set("ssh_password", sshPassword);
-      return apiFetch<Server>(`/api/v1/clore/rentals?${params}`, { method: "POST" });
-    },
+    rent: (req: RentRequest) =>
+      apiFetch<Server>("/api/v1/clore/rentals", {
+        method: "POST",
+        body: JSON.stringify(req),
+      }),
     terminate: (rentalId: string) =>
       fetch(`${BASE_URL}/api/v1/clore/rentals/${rentalId}`, { method: "DELETE" }),
+    balance: () => apiFetch<CloreBalance>("/api/v1/clore/balance"),
   },
 
   apiKeys: {
@@ -140,6 +149,30 @@ export const api = {
       }),
     revoke: (id: string) =>
       fetch(`${BASE_URL}/api/v1/api-keys/${id}`, { method: "DELETE" }),
+  },
+
+  benchmarks: {
+    list: (gpuModel?: string, modelName?: string, skip = 0, limit = 50) => {
+      const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+      if (gpuModel) params.set("gpu_model", gpuModel);
+      if (modelName) params.set("model_name", modelName);
+      return apiFetch<ListResponse<InferenceBenchmark>>(`/api/v1/benchmarks?${params}`);
+    },
+    forGpu: (gpuModel: string, modelName?: string) => {
+      const params = new URLSearchParams();
+      if (modelName) params.set("model_name", modelName);
+      const q = params.toString();
+      return apiFetch<ListResponse<InferenceBenchmark>>(
+        `/api/v1/benchmarks/gpu/${encodeURIComponent(gpuModel)}${q ? `?${q}` : ""}`
+      );
+    },
+    create: (data: InferenceBenchmarkCreate) =>
+      apiFetch<InferenceBenchmark>("/api/v1/benchmarks", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetch(`${BASE_URL}/api/v1/benchmarks/${id}`, { method: "DELETE" }),
   },
 
   sessions: {
@@ -161,6 +194,13 @@ export const api = {
       }),
     interrupt: (id: string) =>
       fetch(`${BASE_URL}/api/v1/sessions/${id}/interrupt`, { method: "POST" }),
+    commandsSummary: (id: string) =>
+      apiFetch<CommandsSummary>(`/api/v1/sessions/${id}/commands/summary`),
+    toPlaybook: (id: string, context?: string) =>
+      apiFetch<ToPlaybookResult>(`/api/v1/sessions/${id}/to-playbook`, {
+        method: "POST",
+        body: JSON.stringify({ context: context ?? "" }),
+      }),
     downloadTranscriptUrl: (id: string) => `${BASE_URL}/api/v1/sessions/${id}/download`,
     downloadCommandUrl: (sessionId: string, cmdId: string) =>
       `${BASE_URL}/api/v1/sessions/${sessionId}/commands/${cmdId}/download`,

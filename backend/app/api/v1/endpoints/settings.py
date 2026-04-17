@@ -52,3 +52,17 @@ def set_setting(
         raise HTTPException(status_code=422, detail="Value cannot be empty")
     row = upsert_setting(key, payload.value.strip(), db)
     return SettingResponse(key=row.key, is_configured=True, updated_at=row.updated_at)
+
+
+@router.delete("/{key}", status_code=204)
+def delete_setting(key: str, db: Session = Depends(get_db)) -> None:
+    """Delete a setting from the DB (env var fallback still applies after deletion)."""
+    if key not in KNOWN_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown setting key: {key!r}. Valid keys: {list(KNOWN_KEYS)}",
+        )
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == key).first()
+    if row:
+        db.delete(row)
+        db.commit()

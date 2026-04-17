@@ -68,6 +68,10 @@ class CloreOffer(BaseModel):
     pcie_width: int | None = None
 
 
+class CloreBalance(BaseModel):
+    balances: list[dict] = []
+
+
 class CloreServer(BaseModel):
     id: str
     gpu_name: str
@@ -247,25 +251,73 @@ class CloreClient:
         self,
         offer_id: str,
         image: str = "cloreai/ubuntu22.04-cuda12",
+        order_type: str = "on-demand",
+        currency: str = "CLORE-Blockchain",
         ssh_password: str | None = None,
-    ) -> CloreServer:
-        """Rent a server from Clore.ai and return its details."""
+        ssh_key: str | None = None,
+        ports: dict[str, str] | None = None,
+        env: dict[str, str] | None = None,
+        command: str | None = None,
+        jupyter_token: str | None = None,
+        spot_price: float | None = None,
+        required_price: float | None = None,
+    ) -> tuple[CloreServer, str | None]:
+        """Rent a server from Clore.ai and return (CloreServer, ssh_password_used).
+
+        Returns the ssh_password so callers can persist it on the Server record.
+        """
         try:
             kwargs: dict[str, Any] = {
                 "server_id": int(offer_id),
                 "image": image,
-                "type": "on-demand",
-                "currency": "CLORE-Blockchain",
+                "type": order_type,
+                "currency": currency,
             }
             if ssh_password:
                 kwargs["ssh_password"] = ssh_password
+            if ssh_key:
+                kwargs["ssh_key"] = ssh_key
+            if ports:
+                kwargs["ports"] = ports
+            if env:
+                kwargs["env"] = env
+            if command:
+                kwargs["command"] = command
+            if jupyter_token:
+                kwargs["jupyter_token"] = jupyter_token
+            if spot_price is not None and order_type == "spot":
+                kwargs["spot_price"] = spot_price
+            if required_price is not None:
+                kwargs["required_price"] = required_price
+
             order = self._sdk.create_order(**kwargs)
             order_id = str(getattr(order, "id", "") or "")
-            return self.get_rental(order_id)
+            clore_server = self.get_rental(order_id)
+            # Propagate back the ssh_password so it can be stored for later SSH connections
+            returned_pw = getattr(order, "ssh_password", None) or ssh_password
+            return clore_server, returned_pw
         except RuntimeError:
             raise
         except Exception as exc:
             raise RuntimeError(f"Failed to rent server from Clore.ai: {exc}") from exc
+
+    def get_balance(self) -> CloreBalance:
+        """Return wallet balances for the authenticated Clore.ai account."""
+        try:
+            wallets = self._sdk.wallets()
+            balances: list[dict] = []
+            if isinstance(wallets, list):
+                for w in wallets:
+                    balances.append({
+                        "currency": str(getattr(w, "name", getattr(w, "currency", "unknown"))),
+                        "amount": float(getattr(w, "balance", getattr(w, "amount", 0)) or 0),
+                    })
+            elif isinstance(wallets, dict):
+                for k, v in wallets.items():
+                    balances.append({"currency": str(k), "amount": float(v or 0)})
+            return CloreBalance(balances=balances)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to get Clore.ai balance: {exc}") from exc
 
     def terminate_rental(self, rental_id: str) -> bool:
         """Terminate a rental."""

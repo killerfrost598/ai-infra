@@ -27,6 +27,7 @@ class SessionListItem(BaseSchema):
     terminated_at: datetime | None
     created_at: datetime
     command_count: int
+    has_pty_log: bool = False
 
 
 class SessionResponse(UUIDSchema):

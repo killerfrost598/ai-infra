@@ -8,6 +8,15 @@ import { StatusBadge } from "@/components/StatusBadge";
 
 const ACTIVE = new Set(["PENDING", "RUNNING"]);
 
+const TASK_LABELS: Record<string, string> = {
+  "servers.provision": "Server Provision",
+  "servers.terminate": "Server Terminate",
+  "deployments.deploy": "Model Deploy",
+  "ssh.execute_command": "SSH Command",
+  "playbooks.run": "Playbook Run",
+  "health.ping": "Health Check",
+};
+
 export default function TaskRunsPage() {
   const [runs, setRuns] = useState<TaskRun[]>([]);
   const [total, setTotal] = useState(0);
@@ -65,8 +74,8 @@ export default function TaskRunsPage() {
           >
             <StatusBadge status={r.status} />
             <div className="flex-1 min-w-0">
-              <p className="font-medium text-zinc-100">{r.task_type}</p>
-              {r.metadata_json?.command && (
+              <p className="font-medium text-zinc-100">{TASK_LABELS[r.task_type] ?? r.task_type}</p>
+              {r.metadata_json?.command != null && (
                 <p className="mt-0.5 truncate font-mono text-xs text-zinc-600">
                   $ {String(r.metadata_json.command)}
                 </p>

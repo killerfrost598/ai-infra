@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints.api_keys import router as api_keys_router
+from app.api.v1.endpoints.benchmarks import router as benchmarks_router
 from app.api.v1.endpoints.clore import router as clore_router
 from app.api.v1.endpoints.sessions import router as sessions_router
 from app.api.v1.endpoints.health import router as health_router
@@ -23,3 +24,4 @@ api_router.include_router(api_keys_router, prefix="/api-keys", tags=["api-keys"]
 api_router.include_router(settings_router, prefix="/settings", tags=["settings"])
 api_router.include_router(clore_router, prefix="/clore", tags=["clore"])
 api_router.include_router(sessions_router, prefix="/sessions", tags=["sessions"])
+api_router.include_router(benchmarks_router, prefix="/benchmarks", tags=["benchmarks"])

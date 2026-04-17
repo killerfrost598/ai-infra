@@ -7,10 +7,6 @@ services:
     env_file:
       - ./.env
       - ./frontend/.env.example
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules   # keep container's node_modules intact
-      - /app/.next          # keep Next.js build cache inside container
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
@@ -33,7 +29,7 @@ services:
     volumes:
       - ./backend:/app
       - ./infra/ansible:/ansible
-      - backend_logs:/var/log/aip
+      - ./data/logs:/var/log/aip
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -62,7 +58,7 @@ services:
     volumes:
       - ./backend:/app
       - ./infra/ansible:/ansible
-      - backend_logs:/var/log/aip
+      - ./data/logs:/var/log/aip
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,23 +103,14 @@ services:
       retries: 10
       start_period: 5s
 
-  litellm:
-    image: ghcr.io/berriai/litellm:main-stable
-    container_name: aip_litellm
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    environment:
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-change-me}
-    ports:
-      - "${LITELLM_PORT:-4000}:4000"
-    volumes:
-      - ./infra/litellm/config.yaml:/app/config.yaml:ro
-    networks:
-      - platform
+# postgres_data and redis_data are named volumes stored in the WSL2 VHD (Linux FS),
+# so PostgreSQL chmod/chown works correctly on Windows/WSL2 hosts.
+# They survive "docker compose down" but are wiped by "docker compose down -v".
+# Logs are bind-mounted to ./data/logs (file writes only, no permission changes needed).
 
 volumes:
   postgres_data:
   redis_data:
-  backend_logs:
 
 networks:
   platform:

@@ -1,15 +1,18 @@
+import asyncio
 import os
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
-from app.models.entities import TaskRun
+from app.db.session import SessionLocal, get_db
+from app.models.entities import TaskRun, TaskStatus
 from app.schemas.task_runs import TaskRunCreate, TaskRunListResponse, TaskRunResponse, TaskRunUpdate
 
 router = APIRouter()
+
+_TERMINAL: frozenset[TaskStatus] = frozenset({TaskStatus.SUCCESS, TaskStatus.FAILED, TaskStatus.PARTIAL})
 
 
 @router.get("", response_model=TaskRunListResponse)
@@ -68,3 +71,73 @@ def get_task_run_logs(task_run_id: UUID, db: Session = Depends(get_db)) -> str:
         raise HTTPException(status_code=404, detail="Log file not found on disk")
     with open(task_run.logs_path) as f:
         return f.read()
+
+
+@router.get("/{task_run_id}/logs/stream")
+async def stream_task_run_logs(task_run_id: UUID, request: Request) -> StreamingResponse:
+    """Tail the task log as a Server-Sent Events stream.
+
+    Emits ``data:`` events for each new chunk of log text.
+    Emits ``event: done`` when the task reaches a terminal state, then closes.
+    Suitable for use with the browser ``EventSource`` API.
+    """
+    # Initial lookup — separate short-lived session
+    db = SessionLocal()
+    try:
+        task_run = db.query(TaskRun).filter(TaskRun.id == task_run_id).first()
+        if not task_run:
+            raise HTTPException(status_code=404, detail="Task run not found")
+        log_path: str | None = task_run.logs_path
+    finally:
+        db.close()
+
+    async def _generate():
+        nonlocal log_path
+        pos = 0  # character offset into the log file
+
+        # Poll until the client disconnects or the task finishes
+        while True:
+            if await request.is_disconnected():
+                break
+
+            # Re-fetch task run status and log path from DB
+            db2 = SessionLocal()
+            try:
+                tr = db2.query(TaskRun).filter(TaskRun.id == task_run_id).first()
+                if tr is None:
+                    break
+                if log_path is None and tr.logs_path:
+                    log_path = tr.logs_path
+                is_done = tr.status in _TERMINAL
+            finally:
+                db2.close()
+
+            # Stream any new log bytes
+            if log_path and os.path.exists(log_path):
+                with open(log_path) as f:
+                    f.seek(pos)
+                    chunk = f.read()
+                    if chunk:
+                        pos += len(chunk)
+                        # Send each line as a separate SSE data event so browsers
+                        # receive content immediately without buffering a large frame.
+                        for line in chunk.splitlines():
+                            yield f"data: {line}\n\n"
+
+            if is_done:
+                yield "event: done\ndata: closed\n\n"
+                break
+
+            await asyncio.sleep(0.4)
+
+    # If the task is already in terminal state and already_done, the generator
+    # will flush the full log and immediately emit done — no long poll needed.
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

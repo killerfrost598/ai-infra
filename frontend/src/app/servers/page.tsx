@@ -94,7 +94,7 @@ export default function ServersPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
           </svg>
-          Register Server
+          Add Server
         </button>
       </div>
 
@@ -102,7 +102,7 @@ export default function ServersPage() {
       {showForm && (
         <div className="card overflow-hidden">
           <div className="border-b border-zinc-800 px-5 py-3">
-            <h2 className="text-sm font-semibold text-zinc-200">Register external server</h2>
+            <h2 className="text-sm font-semibold text-zinc-200">Add external server</h2>
           </div>
           <form onSubmit={handleSubmit} className="p-5">
             <div className="grid grid-cols-2 gap-4">
@@ -188,7 +188,7 @@ export default function ServersPage() {
 
             <div className="mt-4 flex items-center gap-3">
               <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? "Registering…" : "Register & Provision"}
+                {submitting ? "Adding…" : "Add & Provision"}
               </button>
               <button type="button" onClick={() => setShowForm(false)} className="btn-ghost">
                 Cancel

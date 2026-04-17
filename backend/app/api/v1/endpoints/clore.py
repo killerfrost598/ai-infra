@@ -1,11 +1,22 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.entities import ProviderAccount, Server, ServerStatus
 from app.schemas.servers import ServerResponse
-from app.services.clore_client import CloreClient
+from app.services.clore_client import CloreClient, CloreOffer
 from app.services.settings_service import get_setting
+
+_OFFERS_CACHE_KEY = "clore:offers:all"
+_OFFERS_TTL = 60  # seconds
+
+
+def _get_redis():
+    import redis as _redis
+    return _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=2)
 
 router = APIRouter()
 
@@ -71,19 +82,69 @@ def _resolve_clore_key(db: Session) -> str:
     return key
 
 
-@router.get("/offers")
-def list_offers(
-    gpu_name: str | None = None,
-    db: Session = Depends(get_db),
-) -> dict:
-    """List available GPU marketplace offers from Clore.ai."""
+@router.get("/balance")
+def get_balance(db: Session = Depends(get_db)) -> dict:
+    """Return wallet balances for the authenticated Clore.ai account."""
     api_key = _resolve_clore_key(db)
     try:
         with CloreClient(api_key) as client:
-            offers = client.list_offers(gpu_name=gpu_name)
-        return {"offers": [o.model_dump() for o in offers]}
+            balance = client.get_balance()
+        return balance.model_dump()
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/offers")
+def list_offers(
+    gpu_name: str | None = None,
+    min_vram_gb: int | None = None,
+    min_disk_gb: int | None = None,
+    min_pcie_version: int | None = None,
+    min_pcie_width: int | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    """List available GPU marketplace offers from Clore.ai with optional server-side pre-filtering.
+
+    Results are cached in Redis for 60 s so repeated page loads don't hit the Clore SDK.
+    """
+    api_key = _resolve_clore_key(db)
+
+    offers: list[CloreOffer] | None = None
+
+    # Try Redis cache first (full unfiltered list)
+    try:
+        r = _get_redis()
+        cached = r.get(_OFFERS_CACHE_KEY)
+        if cached:
+            offers = [CloreOffer(**o) for o in json.loads(cached)]
+    except Exception:
+        pass  # Redis unavailable — fall through to live API
+
+    if offers is None:
+        try:
+            with CloreClient(api_key) as client:
+                offers = client.list_offers()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        try:
+            r = _get_redis()
+            r.setex(_OFFERS_CACHE_KEY, _OFFERS_TTL, json.dumps([o.model_dump() for o in offers]))
+        except Exception:
+            pass  # Non-fatal if caching fails
+
+    # Apply filters against the full list
+    if gpu_name:
+        offers = [o for o in offers if gpu_name.lower() in o.gpu_name.lower()]
+    if min_vram_gb:
+        offers = [o for o in offers if o.vram_gb >= min_vram_gb]
+    if min_disk_gb:
+        offers = [o for o in offers if (o.disk_gb or 0) >= min_disk_gb]
+    if min_pcie_version:
+        offers = [o for o in offers if o.pcie_version is not None and int(o.pcie_version) >= min_pcie_version]
+    if min_pcie_width:
+        offers = [o for o in offers if (o.pcie_width or 0) >= min_pcie_width]
+
+    return {"offers": [o.model_dump() for o in offers]}
 
 
 @router.get("/rentals")
@@ -110,21 +171,51 @@ def get_rental(rental_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+class RentRequest(BaseModel):
+    offer_id: str
+    image: str = "cloreai/ubuntu22.04-cuda12"
+    order_type: str = Field(default="on-demand", pattern="^(on-demand|spot)$")
+    currency: str = "CLORE-Blockchain"
+    ssh_password: str | None = None
+    ssh_key: str | None = None
+    ports: dict[str, str] | None = None
+    env: dict[str, str] | None = None
+    command: str | None = None
+    jupyter_token: str | None = None
+    spot_price: float | None = None
+    required_price: float | None = None
+
+
 @router.post("/rentals", response_model=ServerResponse, status_code=201)
-def rent_server(
-    offer_id: str,
-    image: str = "cloreai/ubuntu22.04-cuda12",
-    ssh_password: str | None = None,
-    db: Session = Depends(get_db),
-) -> Server:
-    """Rent a server from Clore.ai and register it in the database."""
+def rent_server(payload: RentRequest, db: Session = Depends(get_db)) -> Server:
+    """Rent a server from Clore.ai and register it in the database.
+
+    Supports all Clore.ai create_order parameters including SSH key auth,
+    custom Docker images, port mappings, env vars, and spot pricing.
+    The ssh_password (if provided or returned by the API) is stored on
+    the Server record so terminal sessions can connect without re-entry.
+    """
+    if not payload.ssh_password and not payload.ssh_key:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either ssh_password or ssh_key for server access.",
+        )
     api_key = _resolve_clore_key(db)
     try:
         with CloreClient(api_key) as client:
-            clore_server = client.rent_server(
-                offer_id=offer_id,
-                image=image,
-                ssh_password=ssh_password,
+            clore_server, returned_pw = client.rent_server(
+                offer_id=payload.offer_id,
+                image=payload.image,
+                order_type=payload.order_type,
+                currency=payload.currency,
+                ssh_password=payload.ssh_password,
+                ssh_key=payload.ssh_key,
+                ports=payload.ports,
+                env=payload.env,
+                command=payload.command,
+                jupyter_token=payload.jupyter_token,
+                spot_price=payload.spot_price,
+                required_price=payload.required_price,
             )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -138,12 +229,20 @@ def rent_server(
         db.commit()
         db.refresh(provider_account)
 
+    # When the user authenticated with an SSH key, retrieve the platform's stored
+    # private key so terminal sessions can connect without a password.
+    platform_private_key: str | None = None
+    if payload.ssh_key:
+        platform_private_key = get_setting("ssh_private_key", db)
+
     server = Server(
         provider_account_id=provider_account.id,
         external_server_id=clore_server.id,
         hostname=clore_server.hostname,
         ssh_port=clore_server.ssh_port,
         ssh_username=clore_server.ssh_username,
+        ssh_password=returned_pw,
+        ssh_private_key=platform_private_key,
         gpu_model=clore_server.gpu_name,
         vram_gb=clore_server.vram_gb,
         cuda_version=clore_server.cuda_version,

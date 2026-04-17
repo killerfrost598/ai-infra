@@ -13,12 +13,16 @@ from app.models.entities import PlatformSetting
 logger = logging.getLogger(__name__)
 
 # Ordered tuple of all known setting keys.
-KNOWN_KEYS: tuple[str, ...] = ("clore_api_key", "litellm_master_key")
+KNOWN_KEYS: tuple[str, ...] = (
+    "clore_api_key",
+    "anthropic_api_key",
+    "ssh_private_key",  # Platform-wide SSH private key for server connections
+)
 
 # Environment variable names used as fallback when a key is absent from the DB.
 _ENV_FALLBACKS: dict[str, str] = {
     "clore_api_key": "CLORE_API_KEY",
-    "litellm_master_key": "LITELLM_MASTER_KEY",
+    "anthropic_api_key": "ANTHROPIC_API_KEY",
 }
 
 

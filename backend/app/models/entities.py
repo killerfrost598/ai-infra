@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -182,6 +182,24 @@ class SessionCommand(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     session: Mapped["Session"] = relationship("Session", back_populates="commands")
+
+
+class InferenceBenchmark(Base):
+    __tablename__ = "inference_benchmarks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    gpu_model: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    gpu_vram_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model_name: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    model_family: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quantization: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tokens_per_second_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tokens_per_second_p95: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_parallel_connections: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vram_used_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    measured_at: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class AuditLog(Base):

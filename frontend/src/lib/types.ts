@@ -127,6 +127,11 @@ export interface SessionListItem {
   terminated_at: string | null;
   created_at: string;
   command_count: number;
+  has_pty_log: boolean;
+}
+
+export interface CloreBalance {
+  balances: Array<{ currency: string; amount: number }>;
 }
 
 export interface SessionCreate {
@@ -137,6 +142,25 @@ export interface SessionCreate {
 export interface CommandRequest {
   command: string;
   timeout?: number; // seconds, default 30, max 300
+}
+
+export interface ParsedCommand {
+  command: string;
+  output: string;
+  started_ms: number;
+  completed_ms: number;
+  duration_ms: number;
+  exit_code: number;
+}
+
+export interface CommandsSummary {
+  commands: ParsedCommand[];
+  total: number;
+}
+
+export interface ToPlaybookResult {
+  playbook_yaml: string;
+  command_count: number;
 }
 
 export interface CloreOffer {
@@ -170,6 +194,21 @@ export interface CloreRental {
   status: string;
 }
 
+export interface RentRequest {
+  offer_id: string;
+  image: string;
+  order_type: "on-demand" | "spot";
+  currency: string;
+  ssh_password?: string;
+  ssh_key?: string;
+  ports?: Record<string, string>;
+  env?: Record<string, string>;
+  command?: string;
+  jupyter_token?: string;
+  spot_price?: number;
+  required_price?: number;
+}
+
 export interface ApiKey {
   id: string;
   key_name: string;
@@ -187,4 +226,34 @@ export interface SettingEntry {
 
 export interface SettingsResponse {
   settings: SettingEntry[];
+}
+
+export interface InferenceBenchmark {
+  id: string;
+  gpu_model: string;
+  gpu_vram_gb: number | null;
+  model_name: string;
+  model_family: string | null;
+  quantization: string | null;
+  tokens_per_second_avg: number | null;
+  tokens_per_second_p95: number | null;
+  max_parallel_connections: number | null;
+  vram_used_gb: number | null;
+  measured_at: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface InferenceBenchmarkCreate {
+  gpu_model: string;
+  gpu_vram_gb?: number | null;
+  model_name: string;
+  model_family?: string | null;
+  quantization?: string | null;
+  tokens_per_second_avg?: number | null;
+  tokens_per_second_p95?: number | null;
+  max_parallel_connections?: number | null;
+  vram_used_gb?: number | null;
+  measured_at?: string | null;
+  notes?: string | null;
 }

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime, timezone
 from uuid import UUID
@@ -23,6 +24,8 @@ from app.schemas.sessions import (
 )
 from app.services import session_runner, session_store
 from app.services.session_runner import strip_ansi
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -101,6 +104,20 @@ def list_sessions(
     else:
         hostname_map = {}
 
+    # Detect which sessions have PTY content without loading the full log text
+    pty_set: set[str] = set()
+    if sessions:
+        pty_rows = (
+            db.query(SessionModel.id)
+            .filter(
+                SessionModel.id.in_(session_ids),
+                SessionModel.pty_log.isnot(None),
+                SessionModel.pty_log != "",
+            )
+            .all()
+        )
+        pty_set = {str(row[0]) for row in pty_rows}
+
     items = [
         SessionListItem(
             id=s.id,
@@ -112,6 +129,7 @@ def list_sessions(
             terminated_at=s.terminated_at,
             created_at=s.created_at,
             command_count=counts.get(str(s.id), 0),
+            has_pty_log=str(s.id) in pty_set,
         )
         for s in sessions
     ]
@@ -400,6 +418,94 @@ def download_session_transcript(session_id: UUID, db: Session = Depends(get_db))
         lines.append("-" * 40)
 
     return chr(10).join(lines)
+
+
+@router.get("/{session_id}/commands/summary")
+def get_commands_summary(session_id: UUID, db: Session = Depends(get_db)) -> dict:
+    """Parse PTY log markers into a structured command history.
+
+    Requires PROMPT_COMMAND to have been injected (sessions opened after 5A.2).
+    Returns empty list for older sessions or sessions without a PTY log.
+    """
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.pty_log:
+        return {"commands": [], "total": 0}
+    commands = session_runner.parse_pty_commands(session.pty_log)
+    return {"commands": commands, "total": len(commands)}
+
+
+@router.post("/{session_id}/to-playbook")
+def convert_to_playbook(
+    session_id: UUID,
+    body: dict = {},
+    db: Session = Depends(get_db),
+) -> dict:
+    """Use Claude (Haiku) to convert PTY command history into an Ansible playbook.
+
+    Requires `anthropic_api_key` in platform_settings.
+    Optional body: {"context": "Deploy vLLM on GPU server"}
+    """
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.pty_log:
+        raise HTTPException(status_code=422, detail="No PTY log available for this session")
+
+    commands = session_runner.parse_pty_commands(session.pty_log)
+    if not commands:
+        raise HTTPException(
+            status_code=422,
+            detail="No parseable commands found. Session may predate PROMPT_COMMAND injection.",
+        )
+
+    # Resolve Anthropic API key from platform_settings → env var
+    from app.models.entities import PlatformSetting
+    import os
+
+    setting_row = (
+        db.query(PlatformSetting)
+        .filter(PlatformSetting.key == "anthropic_api_key")
+        .first()
+    )
+    api_key = (setting_row.value if setting_row else None) or os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="anthropic_api_key not configured. Set it in Profile > Settings.",
+        )
+
+    context = (body or {}).get("context", "")
+    cmd_lines = "\n".join(
+        f"[exit={c['exit_code']} {c['duration_ms']}ms] $ {c['command']}"
+        + (f"\n{c['output']}" if c.get("output") else "")
+        for c in commands
+    )
+
+    prompt = (
+        f"Here are shell commands run on a GPU server{' to ' + context if context else ''}.\n"
+        f"Convert them into an idempotent Ansible playbook (YAML). "
+        f"Skip commands that failed (exit code != 0). "
+        f"Add a brief task name for each step.\n\n"
+        f"Commands:\n{cmd_lines}"
+    )
+
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        playbook_yaml = message.content[0].text
+    except Exception as exc:
+        logger.error("Anthropic API error in to-playbook: %s", exc)
+        raise HTTPException(status_code=502, detail=f"LLM error: {exc}") from exc
+
+    return {"playbook_yaml": playbook_yaml, "command_count": len(commands)}
 
 
 @router.get("/{session_id}/commands/{cmd_id}/download", response_class=PlainTextResponse)
