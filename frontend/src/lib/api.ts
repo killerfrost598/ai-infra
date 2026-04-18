@@ -120,6 +120,8 @@ export const api = {
       }),
     delete: (key: string) =>
       fetch(`${BASE_URL}/api/v1/settings/${key}`, { method: "DELETE" }),
+    generateKeypair: () =>
+      apiFetch<{ public_key: string }>("/api/v1/settings/generate-ssh-keypair", { method: "POST" }),
   },
 
   clore: {

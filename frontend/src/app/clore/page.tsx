@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import type { CloreOffer, CloreRental, InferenceBenchmark, RentRequest } from "@/lib/types";
+import type { CloreOffer, CloreRental, InferenceBenchmark, RentRequest, Server } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 
 type Tab = "marketplace" | "gpu-groups" | "rentals";
@@ -676,17 +677,30 @@ function GpuGroupCard({
 // ── Rentals tab ────────────────────────────────────────────────────────────────
 
 function RentalsTab() {
+  const router = useRouter();
   const [rentals, setRentals] = useState<CloreRental[]>([]);
+  const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [terminating, setTerminating] = useState<string | null>(null);
+  const [startingSSH, setStartingSSH] = useState<string | null>(null);
+  const [registeringId, setRegisteringId] = useState<string | null>(null);
+
+  // Map externalServerId → Server for quick lookup
+  const serverByExtId = useMemo(
+    () => new Map(servers.map((s) => [s.external_server_id, s])),
+    [servers]
+  );
 
   function load() {
     setLoading(true);
-    api.clore
-      .rentals()
-      .then((res) => setRentals(res.rentals))
-      .catch((e: Error) => setError(e.message))
+    Promise.all([
+      api.clore.rentals().catch(() => ({ rentals: [] as CloreRental[] })),
+      api.servers.list(0, 100).catch(() => ({ items: [] as Server[], total: 0 })),
+    ]).then(([rentRes, srvRes]) => {
+      setRentals(rentRes.rentals);
+      setServers(srvRes.items);
+    }).catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }
 
@@ -702,6 +716,18 @@ function RentalsTab() {
       alert(e instanceof Error ? e.message : "Terminate failed");
     } finally {
       setTerminating(null);
+    }
+  }
+
+  async function handleStartSSH(serverId: string) {
+    setStartingSSH(serverId);
+    try {
+      const session = await api.sessions.create({ server_id: serverId });
+      sessionStorage.setItem("lab_session_id", session.id);
+      router.push("/lab");
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Failed to start SSH session");
+      setStartingSSH(null);
     }
   }
 
@@ -724,29 +750,179 @@ function RentalsTab() {
       )}
 
       <div className="space-y-2">
-        {rentals.map((r) => (
-          <div key={r.id} className="card flex items-center gap-4 px-5 py-4">
-            <StatusBadge status={r.status.toUpperCase()} />
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-zinc-100">{r.gpu_name}</p>
-              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0 text-xs text-zinc-500">
-                <span>{r.hostname}:{r.ssh_port}</span>
-                <span>{r.ssh_username}</span>
-                {r.vram_gb > 0 && <span>{r.vram_gb} GB VRAM</span>}
-                {r.cuda_version && <span>CUDA {r.cuda_version}</span>}
+        {rentals.map((r) => {
+          const server = serverByExtId.get(r.id);
+          const isRegistering = registeringId === r.id;
+
+          return (
+            <div key={r.id} className="card overflow-hidden">
+              <div className="flex items-center gap-4 px-5 py-4">
+                <StatusBadge status={r.status.toUpperCase()} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-zinc-100">{r.gpu_name}</p>
+                    {!server && (
+                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                        not registered
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0 text-xs text-zinc-500">
+                    <span>{r.hostname}:{r.ssh_port}</span>
+                    <span>{r.ssh_username}</span>
+                    {r.vram_gb > 0 && <span>{r.vram_gb} GB VRAM</span>}
+                    {r.cuda_version && <span>CUDA {r.cuda_version}</span>}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {server ? (
+                    <button
+                      onClick={() => handleStartSSH(server.id)}
+                      disabled={startingSSH === server.id}
+                      className="btn-secondary text-xs py-1.5 px-3"
+                    >
+                      {startingSSH === server.id ? "Starting…" : "Start SSH"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setRegisteringId(isRegistering ? null : r.id)}
+                      className="btn-secondary text-xs py-1.5 px-3"
+                    >
+                      {isRegistering ? "Cancel" : "Register"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleTerminate(r.id)}
+                    disabled={terminating === r.id}
+                    className="btn-danger text-xs py-1.5 px-3"
+                  >
+                    {terminating === r.id ? "Terminating…" : "Terminate"}
+                  </button>
+                </div>
               </div>
+              {isRegistering && (
+                <RegisterRentalForm
+                  rental={r}
+                  onSuccess={() => { setRegisteringId(null); load(); }}
+                  onCancel={() => setRegisteringId(null)}
+                />
+              )}
             </div>
-            <button
-              onClick={() => handleTerminate(r.id)}
-              disabled={terminating === r.id}
-              className="btn-danger text-xs py-1.5 px-3 shrink-0"
-            >
-              {terminating === r.id ? "Terminating…" : "Terminate"}
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </>
+  );
+}
+
+function RegisterRentalForm({
+  rental, onSuccess, onCancel,
+}: {
+  rental: CloreRental;
+  onSuccess: () => void;
+  onCancel: () => void;
+}) {
+  const [authMode, setAuthMode] = useState<"password" | "key">("password");
+  const [password, setPassword] = useState("");
+  const [privateKey, setPrivateKey] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [generatingKey, setGeneratingKey] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (authMode === "password" && !password) { setError("Password required"); return; }
+    if (authMode === "key" && !privateKey.trim()) { setError("Private key required"); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.servers.create({
+        external_server_id: rental.id,
+        hostname: rental.hostname,
+        ssh_port: rental.ssh_port,
+        ssh_username: rental.ssh_username,
+        gpu_model: rental.gpu_name || undefined,
+        vram_gb: rental.vram_gb || undefined,
+        ...(authMode === "password" ? { ssh_password: password } : { ssh_private_key: privateKey.trim() }),
+      });
+      onSuccess();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Registration failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="border-t border-zinc-800 bg-zinc-900/40 px-5 py-4 space-y-3"
+    >
+      <p className="text-xs text-zinc-400">
+        Register this rental so you can start SSH sessions from this platform.
+        Provide the SSH credentials you used when renting on Clore.
+      </p>
+      <div className="flex gap-1 rounded border border-zinc-800 bg-zinc-900 p-0.5 w-fit">
+        {(["password", "key"] as const).map((m) => (
+          <button
+            key={m} type="button" onClick={() => setAuthMode(m)}
+            className={`rounded px-3 py-1 text-xs transition-colors ${
+              authMode === m ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {m === "password" ? "Password" : "Private Key"}
+          </button>
+        ))}
+      </div>
+      {authMode === "password" ? (
+        <input
+          type="password" className="input w-full text-sm"
+          placeholder="SSH password"
+          value={password} onChange={(e) => setPassword(e.target.value)}
+        />
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-xs text-zinc-500">Private key (PEM) — stored securely in the platform</p>
+            <button
+              type="button"
+              disabled={generatingKey}
+              onClick={async () => {
+                setGeneratingKey(true);
+                try {
+                  await api.settings.generateKeypair();
+                  const stored = await api.settings.list();
+                  setPrivateKey("(using platform stored key — generated via Settings)");
+                  void stored;
+                  setError("Key pair generated. The private key is saved in Settings. Note: the public key was NOT sent to this existing rental — use password auth if the server was rented without our key.");
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Generation failed");
+                } finally {
+                  setGeneratingKey(false);
+                }
+              }}
+              className="rounded bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-40"
+            >
+              {generatingKey ? "Generating…" : "Generate"}
+            </button>
+          </div>
+          <textarea
+            className="input w-full text-sm font-mono resize-none"
+            rows={4}
+            placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}
+            value={privateKey}
+            onChange={(e) => setPrivateKey(e.target.value)}
+          />
+        </div>
+      )}
+      {error && <p className="text-xs text-rose-400">{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" disabled={submitting} className="btn-primary text-xs">
+          {submitting ? "Registering…" : "Register Server"}
+        </button>
+        <button type="button" onClick={onCancel} className="btn-ghost text-xs">Cancel</button>
+      </div>
+    </form>
   );
 }
 
@@ -786,6 +962,8 @@ function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void
   const [jupyterToken, setJupyterToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generatingKey, setGeneratingKey] = useState(false);
+  const [keyGenMsg, setKeyGenMsg] = useState<string | null>(null);
 
   const image = imagePreset === "__custom__" ? customImage.trim() : imagePreset;
 
@@ -920,22 +1098,45 @@ function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void
             />
           ) : (
             <div className="space-y-2">
-              <div>
-                <p className="mb-1 text-xs text-zinc-400">
+              <div className="flex items-center gap-2">
+                <p className="flex-1 text-xs text-zinc-400">
                   Public key <span className="text-zinc-600">(sent to Clore → injected into authorized_keys)</span>
                 </p>
-                <textarea
-                  className="input w-full text-sm font-mono resize-none"
-                  rows={2}
-                  placeholder="ssh-ed25519 AAAA… or ssh-rsa AAAA…"
-                  value={sshKey}
-                  onChange={(e) => setSshKey(e.target.value)}
-                />
+                <button
+                  type="button"
+                  disabled={generatingKey}
+                  onClick={async () => {
+                    setGeneratingKey(true);
+                    setKeyGenMsg(null);
+                    try {
+                      const { public_key } = await api.settings.generateKeypair();
+                      setSshKey(public_key);
+                      setKeyGenMsg("Key pair generated — private key saved to platform settings.");
+                    } catch (e) {
+                      setKeyGenMsg(e instanceof Error ? e.message : "Generation failed");
+                    } finally {
+                      setGeneratingKey(false);
+                    }
+                  }}
+                  className="shrink-0 rounded bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-40"
+                >
+                  {generatingKey ? "Generating…" : "Generate"}
+                </button>
               </div>
+              <textarea
+                className="input w-full text-sm font-mono resize-none"
+                rows={2}
+                placeholder="ssh-ed25519 AAAA… or ssh-rsa AAAA… (or click Generate)"
+                value={sshKey}
+                onChange={(e) => setSshKey(e.target.value)}
+              />
+              {keyGenMsg && (
+                <p className="text-[11px] text-emerald-400">{keyGenMsg}</p>
+              )}
               <div className="rounded bg-zinc-900/60 border border-zinc-800 px-3 py-2 text-xs text-zinc-500">
                 <span className="text-zinc-400 font-medium">Private key:</span> the platform will use the SSH private key
-                stored in <span className="text-indigo-400">Profile → SSH section</span> to connect terminal sessions.
-                Configure it there before renting if you haven&apos;t already.
+                stored in <span className="text-indigo-400">Settings → SSH Key</span> to connect terminal sessions.
+                Use <span className="text-zinc-300">Generate</span> to create a fresh pair automatically, or paste your own public key if you manage your own keys.
               </div>
             </div>
           )}

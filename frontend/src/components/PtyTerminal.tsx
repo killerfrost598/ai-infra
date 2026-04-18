@@ -3,9 +3,6 @@
 import { useEffect, useRef } from "react";
 import "xterm/css/xterm.css";
 
-// WS_BASE is derived at runtime from window.location so it works from any
-// host (localhost, Tailscale IP, custom domain) without build-time config.
-// Next.js rewrites proxy the upgrade at /api/** → backend:8000.
 function getWsBase(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}`;
@@ -18,13 +15,17 @@ interface PtyTerminalProps {
 
 export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Store onDisconnect in a ref so the main effect only re-runs when sessionId
+  // changes — not every time the parent re-renders with a new function reference.
+  // Without this, the terminal would reconnect on every parent state update.
+  const onDisconnectRef = useRef(onDisconnect);
+  useEffect(() => { onDisconnectRef.current = onDisconnect; });
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     let disposed = false;
 
-    // Dynamic imports prevent SSR from touching xterm DOM APIs.
     async function init() {
       const { Terminal } = await import("xterm");
       const { FitAddon } = await import("xterm-addon-fit");
@@ -41,8 +42,7 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
           black: "#18181b",
           brightBlack: "#3f3f46",
         },
-        fontFamily:
-          "ui-monospace, 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace",
+        fontFamily: "ui-monospace, 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace",
         fontSize: 13,
         lineHeight: 1.4,
         cursorBlink: true,
@@ -56,9 +56,7 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
       term.open(containerRef.current);
       fitAddon.fit();
 
-      const ws = new WebSocket(
-        `${getWsBase()}/api/v1/sessions/${sessionId}/pty`
-      );
+      const ws = new WebSocket(`${getWsBase()}/api/v1/sessions/${sessionId}/pty`);
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
@@ -74,23 +72,24 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
         }
       };
 
-      ws.onclose = () => {
-        if (!disposed) {
+      // onerror fires before onclose — let onclose handle the message with the code
+      ws.onerror = () => {};
+
+      ws.onclose = (event) => {
+        if (disposed) return;
+        if (event.code === 1008) {
+          // Backend closes with 1008 when session is not found, terminated,
+          // or already has an active PTY connection from another tab.
           term.writeln(
-            "\r\n\x1b[90m─── connection closed ───\x1b[0m"
+            `\r\n\x1b[33m─── ${event.reason || "session unavailable"} ───\x1b[0m`
           );
-          onDisconnect?.();
+          // Don't call onDisconnect — session wasn't disconnected by us
+        } else {
+          term.writeln("\r\n\x1b[90m─── connection closed ───\x1b[0m");
+          onDisconnectRef.current?.();
         }
       };
 
-      ws.onerror = () => {
-        term.writeln(
-          "\r\n\x1b[31m[WebSocket error — is the session still active?]\x1b[0m"
-        );
-      };
-
-      // Keyboard input → SSH channel (send as binary so the backend
-      // can distinguish PTY bytes from JSON control messages)
       const encoder = new TextEncoder();
       term.onData((data) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -98,24 +97,17 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
         }
       });
 
-      // Resize → propagate to remote PTY
       term.onResize(({ cols, rows }) => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "resize", cols, rows }));
         }
       });
 
-      // Fit terminal when container resizes
       const observer = new ResizeObserver(() => {
-        try {
-          fitAddon.fit();
-        } catch {
-          // ignore if terminal already disposed
-        }
+        try { fitAddon.fit(); } catch { /* terminal already disposed */ }
       });
       if (containerRef.current) observer.observe(containerRef.current);
 
-      // Cleanup
       return () => {
         disposed = true;
         observer.disconnect();
@@ -131,7 +123,7 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
       disposed = true;
       cleanup?.();
     };
-  }, [sessionId, onDisconnect]);
+  }, [sessionId]); // onDisconnect intentionally excluded — read via ref above
 
   return (
     <div

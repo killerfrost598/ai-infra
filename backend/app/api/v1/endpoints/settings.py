@@ -54,6 +54,38 @@ def set_setting(
     return SettingResponse(key=row.key, is_configured=True, updated_at=row.updated_at)
 
 
+@router.post("/generate-ssh-keypair")
+def generate_ssh_keypair(db: Session = Depends(get_db)) -> dict:
+    """Generate an Ed25519 SSH keypair.
+
+    Stores the private key in platform_settings['ssh_private_key'] and returns
+    the OpenSSH public key. Use the public key in Clore.ai rent requests so the
+    platform's stored private key can authenticate terminal sessions.
+    """
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives import serialization as _ser
+
+        private_key = Ed25519PrivateKey.generate()
+
+        private_pem = private_key.private_bytes(
+            encoding=_ser.Encoding.PEM,
+            format=_ser.PrivateFormat.OpenSSH,
+            encryption_algorithm=_ser.NoEncryption(),
+        ).decode()
+
+        public_key = private_key.public_key().public_bytes(
+            encoding=_ser.Encoding.OpenSSH,
+            format=_ser.PublicFormat.OpenSSH,
+        ).decode().strip()
+
+        upsert_setting("ssh_private_key", private_pem, db)
+
+        return {"public_key": public_key}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Key generation failed: {exc}") from exc
+
+
 @router.delete("/{key}", status_code=204)
 def delete_setting(key: str, db: Session = Depends(get_db)) -> None:
     """Delete a setting from the DB (env var fallback still applies after deletion)."""

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { ParsedCommand, Session, SessionListItem } from "@/lib/types";
 import { PtyTerminal } from "@/components/PtyTerminal";
@@ -31,7 +31,18 @@ export default function LabPage() {
   const terminalKey = useRef(0);
 
   useEffect(() => {
-    api.sessions.list(undefined, "ACTIVE", 0, 50).then((r) => setSessions(r.items));
+    // Check if another page created a session for us to open (e.g. from Clore rentals)
+    const target = typeof window !== "undefined"
+      ? sessionStorage.getItem("lab_session_id")
+      : null;
+    if (target) sessionStorage.removeItem("lab_session_id");
+
+    api.sessions.list(undefined, "ACTIVE", 0, 50).then((r) => {
+      setSessions(r.items);
+      if (target && r.items.some((s) => s.id === target)) {
+        setSelectedId(target);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -53,7 +64,9 @@ export default function LabPage() {
     }).finally(() => setCmdLoading(false));
   }, [selectedId]);
 
-  async function refreshCommands() {
+  // useCallback prevents a new function reference on every render, which was
+  // previously causing PtyTerminal to remount (and reconnect) on each state update.
+  const refreshCommands = useCallback(async () => {
     if (!selectedId) return;
     setCmdLoading(true);
     try {
@@ -62,7 +75,7 @@ export default function LabPage() {
     } finally {
       setCmdLoading(false);
     }
-  }
+  }, [selectedId]);
 
   async function handleConvert() {
     if (!selectedId) return;
@@ -142,7 +155,6 @@ export default function LabPage() {
 
           {/* Right: panel */}
           <div className="flex flex-col border-l border-zinc-800/70" style={{ width: "40%", minWidth: 0 }}>
-            {/* Tab bar */}
             <div className="flex h-8 shrink-0 items-center border-b border-zinc-800/60 bg-zinc-900/40">
               {(["commands", "output", "log", "playbook"] as RightTab[]).map((tab) => (
                 <button
@@ -171,7 +183,6 @@ export default function LabPage() {
               )}
             </div>
 
-            {/* Tab content */}
             <div className="flex-1 overflow-y-auto">
               {activeTab === "commands" && (
                 <CommandsTab
@@ -211,10 +222,7 @@ export default function LabPage() {
 }
 
 function CommandsTab({
-  commands,
-  loading,
-  selectedCmd,
-  onSelect,
+  commands, loading, selectedCmd, onSelect,
 }: {
   commands: ParsedCommand[];
   loading: boolean;
@@ -241,11 +249,7 @@ function CommandsTab({
           }`}
         >
           <div className="flex items-center gap-2">
-            <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                cmd.exit_code === 0 ? "bg-emerald-500" : "bg-red-500"
-              }`}
-            />
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${cmd.exit_code === 0 ? "bg-emerald-500" : "bg-red-500"}`} />
             <code className="flex-1 truncate text-xs text-zinc-200">{cmd.command}</code>
             <span className="shrink-0 text-[10px] text-zinc-600">{formatDuration(cmd.duration_ms)}</span>
           </div>
@@ -267,16 +271,10 @@ function OutputTab({ cmd, onBack }: { cmd: ParsedCommand | null; onBack: () => v
   return (
     <div className="p-3">
       <div className="mb-3 flex items-center gap-2">
-        <button onClick={onBack} className="text-[10px] text-zinc-500 hover:text-zinc-300">
-          ← back
-        </button>
-        <span
-          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-            cmd.exit_code === 0
-              ? "bg-emerald-900/40 text-emerald-400"
-              : "bg-red-900/40 text-red-400"
-          }`}
-        >
+        <button onClick={onBack} className="text-[10px] text-zinc-500 hover:text-zinc-300">← back</button>
+        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+          cmd.exit_code === 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"
+        }`}>
           exit {cmd.exit_code}
         </span>
         <span className="text-[10px] text-zinc-600">{formatDuration(cmd.duration_ms)}</span>
@@ -284,9 +282,7 @@ function OutputTab({ cmd, onBack }: { cmd: ParsedCommand | null; onBack: () => v
       </div>
       <code className="mb-2 block text-xs text-indigo-300">$ {cmd.command}</code>
       {cmd.output ? (
-        <pre className="terminal overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">
-          {cmd.output}
-        </pre>
+        <pre className="terminal overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">{cmd.output}</pre>
       ) : (
         <p className="text-xs text-zinc-600">(no output)</p>
       )}
@@ -295,24 +291,14 @@ function OutputTab({ cmd, onBack }: { cmd: ParsedCommand | null; onBack: () => v
 }
 
 function LogTab({ ptyLog }: { ptyLog: string | null }) {
-  if (!ptyLog)
-    return <div className="p-4 text-xs text-zinc-500">No PTY log available for this session.</div>;
+  if (!ptyLog) return <div className="p-4 text-xs text-zinc-500">No PTY log available for this session.</div>;
   return (
-    <pre className="terminal m-3 overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">
-      {ptyLog}
-    </pre>
+    <pre className="terminal m-3 overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">{ptyLog}</pre>
   );
 }
 
 function PlaybookTab({
-  commands,
-  context,
-  onContextChange,
-  onConvert,
-  loading,
-  error,
-  yaml,
-  onCopy,
+  commands, context, onContextChange, onConvert, loading, error, yaml, onCopy,
 }: {
   commands: ParsedCommand[];
   context: string;
@@ -328,7 +314,7 @@ function PlaybookTab({
   return (
     <div className="p-3">
       <p className="mb-3 text-xs text-zinc-400">
-        Convert {successCount} successful command{successCount !== 1 ? "s" : ""} into an Ansible playbook using Claude.
+        Convert {successCount} successful command{successCount !== 1 ? "s" : ""} into a shell playbook using Claude.
       </p>
       <label className="section-label mb-1 block">Context (optional)</label>
       <input
@@ -351,13 +337,9 @@ function PlaybookTab({
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between">
             <span className="section-label">Generated Playbook</span>
-            <button onClick={onCopy} className="btn-ghost text-[10px]">
-              Copy
-            </button>
+            <button onClick={onCopy} className="btn-ghost text-[10px]">Copy</button>
           </div>
-          <pre className="terminal overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">
-            {yaml}
-          </pre>
+          <pre className="terminal overflow-x-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">{yaml}</pre>
         </div>
       )}
     </div>
