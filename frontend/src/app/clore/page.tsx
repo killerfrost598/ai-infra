@@ -763,7 +763,7 @@ const PRESET_IMAGES = [
   { label: "Custom…", value: "__custom__" },
 ];
 
-const CURRENCIES = ["CLORE-Blockchain", "CLORE-USD", "bitcoin"];
+const ALL_CURRENCIES = ["CLORE-Blockchain", "USD-Blockchain", "bitcoin"];
 
 function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void }) {
   const [imagePreset, setImagePreset] = useState("cloreai/ubuntu22.04-cuda12");
@@ -772,7 +772,12 @@ function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void
   const [sshPassword, setSshPassword] = useState("");
   const [sshKey, setSshKey] = useState("");
   const [orderType, setOrderType] = useState<"on-demand" | "spot">("on-demand");
-  const [currency, setCurrency] = useState("CLORE-Blockchain");
+  const availableCurrencies = offer.allowed_coins?.length
+    ? ALL_CURRENCIES.filter((c) => offer.allowed_coins.includes(c))
+    : ALL_CURRENCIES;
+  const [currency, setCurrency] = useState(
+    availableCurrencies.includes("CLORE-Blockchain") ? "CLORE-Blockchain" : availableCurrencies[0] ?? "CLORE-Blockchain"
+  );
   const [spotPrice, setSpotPrice] = useState("");
   const [portsRaw, setPortsRaw] = useState('{"22": "tcp"}');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -956,7 +961,7 @@ function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void
               value={currency}
               onChange={(e) => setCurrency(e.target.value)}
             >
-              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {availableCurrencies.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
         </div>

@@ -186,6 +186,38 @@ class RentRequest(BaseModel):
     required_price: float | None = None
 
 
+@router.post("/rentals/dry-run")
+def rent_server_dry_run(payload: RentRequest, db: Session = Depends(get_db)) -> dict:
+    """Return the exact parameters that would be sent to Clore.ai without placing the order.
+
+    Use this to verify your rent payload before committing. Does NOT charge your account.
+    """
+    _resolve_clore_key(db)  # Validate key is configured
+    params: dict = {
+        "server_id": int(payload.offer_id),
+        "image": payload.image,
+        "type": payload.order_type,
+        "currency": payload.currency,
+    }
+    if payload.ssh_password:
+        params["ssh_password"] = "***"
+    if payload.ssh_key:
+        params["ssh_key"] = f"{payload.ssh_key[:20]}…" if len(payload.ssh_key) > 20 else payload.ssh_key
+    if payload.ports:
+        params["ports"] = payload.ports
+    if payload.env:
+        params["env"] = payload.env
+    if payload.command:
+        params["command"] = payload.command
+    if payload.jupyter_token:
+        params["jupyter_token"] = "***"
+    if payload.spot_price is not None and payload.order_type == "spot":
+        params["spot_price"] = payload.spot_price
+    if payload.required_price is not None:
+        params["required_price"] = payload.required_price
+    return {"would_send": params}
+
+
 @router.post("/rentals", response_model=ServerResponse, status_code=201)
 def rent_server(payload: RentRequest, db: Session = Depends(get_db)) -> Server:
     """Rent a server from Clore.ai and register it in the database.

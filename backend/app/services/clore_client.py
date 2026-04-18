@@ -1,14 +1,30 @@
-"""Clore.ai provider client — adapter over the clore-ai SDK (ADR-006)."""
+"""Clore.ai provider client — adapter over the clore-ai SDK (ADR-006).
+
+For operations where the SDK's Pydantic models don't match the real API
+(my_orders response shape, create_order response shape), we bypass the SDK
+and make direct httpx calls. The SDK is still used for marketplace() and
+wallets() which work correctly.
+
+Confirmed SDK bugs (clore-ai==0.1.1, verified 2026-04-18):
+- my_orders: pub_cluster is List[str] not str; tcp_ports is List[str] not Dict;
+  server_id field is "si" not via alias; always throws ValidationError.
+- create_order: real API returns {"code": 0} with no order body; SDK always
+  throws ValidationError("id: Field required") even on success.
+"""
 
 from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 
+import httpx
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+_CLORE_API_BASE = "https://api.clore.ai/v1"
 
 try:
     from clore_ai import CloreAI as _CloreAISDK
@@ -19,11 +35,7 @@ except ImportError:
 
 
 def _to_float(val: Any) -> float:
-    """Convert a value that may be a raw number or a SDK price/spec object to float.
-
-    The clore-ai SDK wraps some fields in typed objects (e.g. ServerPrice).
-    We try common numeric attribute names before falling back to 0.0.
-    """
+    """Convert a value that may be a raw number or a SDK price/spec object to float."""
     if val is None:
         return 0.0
     if isinstance(val, (int, float)):
@@ -33,7 +45,6 @@ def _to_float(val: Any) -> float:
             return float(val)
         except (ValueError, TypeError):
             return 0.0
-    # SDK typed object (e.g. ServerPrice) — probe common attribute names
     for attr in ("on_demand", "usd", "clore", "price", "value", "amount", "cost"):
         candidate = getattr(val, attr, None)
         if candidate is not None:
@@ -44,7 +55,6 @@ def _to_float(val: Any) -> float:
                     return float(candidate)
                 except (ValueError, TypeError):
                     pass
-    # Log what we received so we can refine the mapping
     logger.warning("_to_float: unhandled type %s — repr: %.120s", type(val).__name__, repr(val))
     return 0.0
 
@@ -66,6 +76,8 @@ class CloreOffer(BaseModel):
     # PCIe (critical for AI inference GPU ↔ host bandwidth)
     pcie_version: str | None = None
     pcie_width: int | None = None
+    # Currencies this server accepts — use before calling rent_server()
+    allowed_coins: list[str] = []
 
 
 class CloreBalance(BaseModel):
@@ -85,59 +97,28 @@ class CloreServer(BaseModel):
 
 
 def _sdk_to_offer(s: Any) -> CloreOffer:
-    """Map a clore-ai SDK MarketplaceServer object to our CloreOffer schema.
-
-    Uses direct SDK properties (gpu_count, ram_gb, price_usd) where available,
-    then drills into the typed ServerSpecs object for the rest.
-    SDK docs: https://docs.clore.ai/python-sdk/marketplace
-    """
-    # ── Direct SDK properties ──────────────────────────────────────────────────
+    """Map a clore-ai SDK MarketplaceServer object to our CloreOffer schema."""
     # gpu_model includes a count prefix: "2x NVIDIA GeForce RTX 4070"
     raw_model = getattr(s, "gpu_model", None) or "Unknown"
     gpu_name = re.sub(r"^\d+[xX]\s+", "", raw_model).strip() or raw_model
 
-    # gpu_count and ram_gb are direct typed properties (no conversion needed)
     gpu_count = int(getattr(s, "gpu_count", 1) or 1)
     raw_ram = getattr(s, "ram_gb", None)
     ram_gb = int(float(raw_ram)) if raw_ram is not None else None
 
-    # price_usd is the on-demand price in USD per day (Clore quotes daily rates)
     price_per_day = _to_float(getattr(s, "price_usd", None))
-
-    # cuda_version direct property
     cuda_version = getattr(s, "cuda_version", None)
 
-    # ── ServerSpecs object ─────────────────────────────────────────────────────
-    # s.specs is a typed ServerSpecs — fields are flat scalars or a nested NetworkSpecs.
-    # Verified field map (from live API debug, 2026-04-13):
-    #   specs.gpuram   → float, VRAM per GPU in GB  (e.g. 11.0)
-    #   specs.gpu      → str,   "2x NVIDIA GeForce RTX 4070"
-    #   specs.cpu      → str,   "Intel(R) Xeon(R) CPU E5-2696 v3 @ 2.30GHz"
-    #   specs.cpus     → str,   "18/36"  (physical_cores/threads)
-    #   specs.ram      → float, system RAM in GB    (e.g. 31.99)
-    #   specs.disk     → str,   "SSDx20240GBx... 174.7393GB"  (trailing float = usable GB)
-    #   specs.disk_speed → float, MB/s
-    #   specs.pcie_rev → int,   PCIe generation     (e.g. 3)
-    #   specs.pcie_width → int, PCIe width lanes    (e.g. 16)
-    #   specs.mb       → str,   motherboard model
-    #   specs.net      → NetworkSpecs object:
-    #     net.up       → float, upload Mbps
-    #     net.down     → float, download Mbps
-    #     net.cc       → str,   country code
     specs = getattr(s, "specs", None)
 
-    # VRAM: specs.gpuram is already in GB as a float
     vram_gb = int(_to_float(getattr(specs, "gpuram", None))) if specs is not None else 0
 
-    # Network
     net_spec = getattr(specs, "net", None) if specs is not None else None
     upload_mbps = (_to_float(getattr(net_spec, "up", None)) or None) if net_spec is not None else None
     download_mbps = (_to_float(getattr(net_spec, "down", None)) or None) if net_spec is not None else None
 
-    # CPU — flat string on specs
     cpu_model = getattr(specs, "cpu", None) if specs is not None else None
 
-    # Disk — string like "SSDx20240GBx20x20x20 174.7393GB"; extract last GB value
     disk_gb = None
     if specs is not None:
         disk_str = getattr(specs, "disk", None)
@@ -145,7 +126,6 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
             matches = re.findall(r"(\d+\.?\d*)\s*GB", disk_str, re.IGNORECASE)
             disk_gb = int(float(matches[-1])) if matches else None
 
-    # PCIe — flat ints on specs (pcie_rev = generation, pcie_width = lane count)
     pcie_version = None
     pcie_width = None
     if specs is not None:
@@ -153,6 +133,8 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
         pcie_version = str(pv) if pv is not None else None
         pw = getattr(specs, "pcie_width", None)
         pcie_width = int(pw) if pw is not None else None
+
+    allowed_coins = list(getattr(s, "allowed_coins", None) or [])
 
     return CloreOffer(
         id=str(s.id),
@@ -168,49 +150,88 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
         disk_gb=disk_gb,
         pcie_version=pcie_version,
         pcie_width=pcie_width,
+        allowed_coins=allowed_coins,
     )
 
 
-def _sdk_order_to_server(order: Any) -> CloreServer:
-    cluster = getattr(order, "pub_cluster", None)
-    if isinstance(cluster, list) and cluster:
-        net = cluster[0]
-    else:
-        net = {}
-    if isinstance(net, dict):
-        hostname = str(net.get("address") or "")
-        ports = net.get("ports") or {}
-        ssh_port = int(ports.get("22/tcp", 22)) if isinstance(ports, dict) else 22
-    else:
-        hostname = str(getattr(net, "address", ""))
-        ssh_port = int(getattr(net, "ssh_port", 22))
+def _raw_order_to_server(raw: dict) -> CloreServer:
+    """Parse a raw my_orders API dict into CloreServer.
 
-    # Guard gpu field against non-dict shapes (fixes AttributeError from old client)
-    specs = getattr(order, "specs", None)
-    gpu: dict[str, Any] = {}
-    if isinstance(specs, dict):
-        gpu_raw = specs.get("gpu")
-        if isinstance(gpu_raw, dict):
-            gpu = gpu_raw
+    Real API shapes (verified 2026-04-18):
+    - pub_cluster: List[str]  e.g. ["n1.msk.cloreai.ru"]
+    - tcp_ports:   List[str]  e.g. ["22:1277"]  (container_port:host_port)
+    - specs.gpu:   str with count prefix "1x NVIDIA GeForce RTX 3090"
+    - specs.gpuram: float, VRAM in GB
+    """
+    pub_cluster = raw.get("pub_cluster", [])
+    hostname = ""
+    if isinstance(pub_cluster, list) and pub_cluster:
+        hostname = str(pub_cluster[0])
+    elif isinstance(pub_cluster, str):
+        hostname = pub_cluster
+
+    tcp_ports_raw = raw.get("tcp_ports", [])
+    ssh_port = 22
+    if isinstance(tcp_ports_raw, list):
+        for entry in tcp_ports_raw:
+            if isinstance(entry, str) and entry.startswith("22:"):
+                try:
+                    ssh_port = int(entry.split(":")[1])
+                except (ValueError, IndexError):
+                    pass
+                break
+    elif isinstance(tcp_ports_raw, dict):
+        for key in ("22/tcp", "22"):
+            if key in tcp_ports_raw:
+                try:
+                    ssh_port = int(tcp_ports_raw[key])
+                except (ValueError, TypeError):
+                    pass
+                break
+
+    specs = raw.get("specs") or {}
+    gpu_raw = specs.get("gpu", "") or ""
+    gpu_name = re.sub(r"^\d+[xX]\s+", "", gpu_raw).strip() or "Unknown"
+    vram_gb = int(float(specs.get("gpuram") or 0))
+
+    online = raw.get("online", False)
+    status = "active" if online else "offline"
 
     return CloreServer(
-        id=str(order.id),
-        gpu_name=gpu.get("model") or getattr(order, "gpu_model", None) or "Unknown",
-        vram_gb=int(gpu.get("ram") or 0) // 1024,
+        id=str(raw.get("id", "")),
+        gpu_name=gpu_name,
+        vram_gb=vram_gb,
         hostname=hostname,
         ssh_port=ssh_port,
         ssh_username="root",
-        ssh_password=getattr(order, "ssh_password", None),
-        cuda_version=getattr(order, "cuda_version", None),
-        status=str(getattr(order, "status", "unknown")),
+        ssh_password=raw.get("ssh_password"),
+        cuda_version=None,
+        status=status,
     )
+
+
+def _raise_clore_api_error(code: int | None, result: dict) -> None:
+    """Translate Clore API error codes into descriptive RuntimeErrors."""
+    if code == 1:
+        raise RuntimeError(
+            "Clore API code 1 (DB error) — most common causes: "
+            "(1) insufficient balance, (2) server just rented by someone else"
+        )
+    if code == 2:
+        raise RuntimeError(f"Clore API invalid input (code 2) — check parameters: {result}")
+    if code == 3:
+        raise RuntimeError("Clore API auth error (code 3) — check your Clore API key")
+    if code == 5:
+        raise RuntimeError("Clore API rate limit (code 5) — too many requests, retry later")
+    raise RuntimeError(f"Clore API returned unexpected code {code}: {result}")
 
 
 class CloreClient:
     """Thin adapter over the clore-ai SDK for GPU marketplace operations.
 
-    Preserves the same interface previously provided by the hand-rolled HTTP
-    client so that the endpoint layer in clore.py needs no changes.
+    Uses the SDK for marketplace() and wallets() (which work correctly).
+    Uses direct httpx calls for my_orders and create_order (SDK models are
+    incompatible with the real API response shapes).
     """
 
     def __init__(self, api_key: str) -> None:
@@ -219,6 +240,30 @@ class CloreClient:
                 "clore-ai SDK not installed — run: pip install clore-ai"
             )
         self._sdk: Any = _CloreAISDK(api_key=api_key)
+        self._api_key = api_key
+        self._http = httpx.Client(
+            base_url=_CLORE_API_BASE,
+            headers={"auth": api_key},
+            timeout=30.0,
+        )
+
+    def _raw_get(self, endpoint: str, params: dict | None = None) -> dict:
+        r = self._http.get(f"/{endpoint}", params=params)
+        r.raise_for_status()
+        return r.json()
+
+    def _raw_post(self, endpoint: str, data: dict) -> dict:
+        r = self._http.post(f"/{endpoint}", json=data)
+        r.raise_for_status()
+        return r.json()
+
+    def _raw_my_orders(self, return_completed: bool = False) -> list[dict]:
+        """Fetch orders via raw HTTP, bypassing the broken SDK Order model."""
+        result = self._raw_get(
+            "my_orders",
+            params={"return_completed": "true" if return_completed else "false"},
+        )
+        return result.get("orders", [])
 
     def list_offers(self, gpu_name: str | None = None) -> list[CloreOffer]:
         """List available GPU marketplace offers."""
@@ -232,10 +277,15 @@ class CloreClient:
             raise RuntimeError(f"Failed to list Clore.ai offers: {exc}") from exc
 
     def list_rentals(self) -> list[CloreServer]:
-        """List all active rentals."""
+        """List all active rentals via raw HTTP.
+
+        The SDK's my_orders() throws ValidationError on every order because
+        the real API shape doesn't match the SDK's Order model (pub_cluster
+        is List[str] not str, tcp_ports is List[str] not Dict, etc.).
+        """
         try:
-            orders = self._sdk.my_orders()
-            return [_sdk_order_to_server(o) for o in (orders or [])]
+            raw_orders = self._raw_my_orders(return_completed=False)
+            return [_raw_order_to_server(o) for o in raw_orders]
         except Exception as exc:
             raise RuntimeError(f"Failed to list Clore.ai rentals: {exc}") from exc
 
@@ -264,41 +314,74 @@ class CloreClient:
     ) -> tuple[CloreServer, str | None]:
         """Rent a server from Clore.ai and return (CloreServer, ssh_password_used).
 
-        Returns the ssh_password so callers can persist it on the Server record.
+        Uses direct HTTP instead of sdk.create_order() because the real API
+        returns {"code": 0} with no order body, causing the SDK to always raise
+        ValidationError("id: Field required") even when the order succeeds.
         """
         try:
-            kwargs: dict[str, Any] = {
-                "server_id": int(offer_id),
+            payload: dict[str, Any] = {
+                "renting_server": int(offer_id),
                 "image": image,
                 "type": order_type,
                 "currency": currency,
             }
             if ssh_password:
-                kwargs["ssh_password"] = ssh_password
+                payload["ssh_password"] = ssh_password
             if ssh_key:
-                kwargs["ssh_key"] = ssh_key
+                payload["ssh_key"] = ssh_key
             if ports:
-                kwargs["ports"] = ports
+                payload["ports"] = ports
             if env:
-                kwargs["env"] = env
+                payload["env"] = env
             if command:
-                kwargs["command"] = command
+                payload["command"] = command
             if jupyter_token:
-                kwargs["jupyter_token"] = jupyter_token
+                payload["jupyter_token"] = jupyter_token
             if spot_price is not None and order_type == "spot":
-                kwargs["spot_price"] = spot_price
+                payload["spot_price"] = spot_price
             if required_price is not None:
-                kwargs["required_price"] = required_price
+                payload["required_price"] = required_price
 
-            order = self._sdk.create_order(**kwargs)
-            order_id = str(getattr(order, "id", "") or "")
-            clore_server = self.get_rental(order_id)
-            # Propagate back the ssh_password so it can be stored for later SSH connections
-            returned_pw = getattr(order, "ssh_password", None) or ssh_password
-            return clore_server, returned_pw
+            log_payload = {k: "***" if k in ("ssh_password", "ssh_key") else v for k, v in payload.items()}
+            logger.info("create_order params: %s", log_payload)
+
+            result = self._raw_post("create_order", payload)
+            code = result.get("code")
+
+            if code != 0:
+                logger.error("create_order failed — code=%s result=%r", code, result)
+                _raise_clore_api_error(code, result)
+
+            logger.info("create_order succeeded (code=0), fetching order details from my_orders")
+
+            # Give Clore a moment to register the new order before polling
+            time.sleep(3)
+
+            raw_orders = self._raw_my_orders(return_completed=False)
+            server_id_int = int(offer_id)
+            matching = [o for o in raw_orders if o.get("si") == server_id_int]
+
+            if not matching:
+                raise RuntimeError(
+                    f"Order placed (code=0) for server {server_id_int} but it does not "
+                    "appear in active orders yet — check Clore.ai dashboard"
+                )
+
+            # Most recently created order wins if there are somehow multiple
+            matching.sort(key=lambda o: o.get("ct", 0), reverse=True)
+            raw_order = matching[0]
+            logger.info("Found new order id=%s for server %s", raw_order.get("id"), server_id_int)
+
+            clore_server = _raw_order_to_server(raw_order)
+            return clore_server, ssh_password
+
         except RuntimeError:
             raise
+        except httpx.HTTPStatusError as exc:
+            logger.error("create_order HTTP error: %s", exc)
+            raise RuntimeError(f"Failed to rent server from Clore.ai: HTTP error {exc.response.status_code}") from exc
         except Exception as exc:
+            logger.error("create_order unexpected error: %r", exc)
             raise RuntimeError(f"Failed to rent server from Clore.ai: {exc}") from exc
 
     def get_balance(self) -> CloreBalance:
@@ -330,7 +413,7 @@ class CloreClient:
             ) from exc
 
     def close(self) -> None:
-        """No-op: SDK manages its own HTTP sessions."""
+        self._http.close()
 
     def __enter__(self) -> CloreClient:
         return self

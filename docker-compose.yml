@@ -3,6 +3,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
     container_name: aip_frontend
     env_file:
       - ./.env

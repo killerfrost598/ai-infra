@@ -1,16 +1,12 @@
 # AI Inference Server Management Platform
 
-One control plane to rent GPU servers (Clore.ai), connect via SSH terminal, deploy AI models with vLLM, and route all traffic through a unified OpenAI-compatible API (LiteLLM Proxy).
+One control plane to rent GPU servers (Clore.ai), connect via SSH terminal, run playbooks, deploy AI models with vLLM, and track inference benchmarks.
 
 ## Why this exists
 
-Running inference workloads on rented GPU infrastructure is usually fragmented:
-- renting/provisioning is one workflow
-- SSH access and command execution are another
-- deployment and troubleshooting are a third
-- API exposure and routing are a fourth
+Running inference workloads on rented GPU infrastructure is usually fragmented — renting, SSH access, deployment, and API exposure are all separate workflows. This platform consolidates them and builds a long-term knowledge base from session logs, deployment history, and inference benchmarks.
 
-This platform consolidates all four and builds a long-term knowledge base from session logs, deployment history, and inference benchmarks.
+---
 
 ## Core stack
 
@@ -21,70 +17,71 @@ This platform consolidates all four and builds a long-term knowledge base from s
 | Task Queue | Celery 5, Redis 7 |
 | Database | PostgreSQL 16 |
 | SSH | Paramiko (PTY sessions + key/password auth) |
-| Clore.ai | `clore-ai` SDK |
-| Model Gateway | LiteLLM Proxy |
+| GPU Marketplace | Clore.ai (`clore-ai` SDK + raw httpx) |
 | Infrastructure | Docker Compose |
+
+---
 
 ## Quick start
 
-### Prerequisites
-- Docker Desktop (with Linux containers)
-- Git
+**Prerequisites:** Docker Desktop (Linux containers), Git
 
-### Configure environment
 ```bash
+# 1. Configure environment
 cp .env.example .env
-# CLORE_API_KEY is optional here — set it from the Settings page after startup
-# Set LITELLM_MASTER_KEY for the model gateway
-```
+# Edit .env — set POSTGRES_PASSWORD at minimum
+# CLORE_API_KEY is optional here; set it from the Settings page after startup
 
-### Run
-```bash
-# Full reset (fresh DB):
-docker compose down -v && docker compose up --build
-
-# Normal restart (keeps DB data):
+# 2. Start (keeps DB data between restarts)
 docker compose up --build
+
+# Full reset (wipes all data):
+docker compose down -v && docker compose up --build
 ```
 
 DB migrations run automatically on backend startup (`alembic upgrade head`).
 
-### Service endpoints
+**Service endpoints:**
 
 | Service | URL |
 |---|---|
 | Frontend dashboard | http://localhost:3000 |
 | Backend API + Swagger | http://localhost:8000/docs |
-| LiteLLM Proxy | http://localhost:4000 |
+
+---
+
+## Features
+
+- **Clore.ai marketplace** — browse ~2,300 GPU servers, filter by GPU model, VRAM, PCIe, price; rent with SSH key or password; currency auto-filtered to what each server accepts
+- **Interactive SSH terminal** — xterm.js PTY sessions with command history, exit codes, and duration tracking
+- **Playbooks** — register a git repo + script, run it on any server via SSH, stream live logs
+- **Task runs** — all async operations logged with SSE live streaming
+- **Inference benchmarks** — track tokens/s by GPU model, integrated into marketplace offer cards
+- **Lab page** — live terminal + parsed command history + one-click "convert session to playbook" via Claude Haiku
+
+---
 
 ## API surface (`/api/v1/`)
 
-| Prefix | Operations | Frontend |
-|---|---|---|
-| `GET /health` | health check | — |
-| `/servers` | CRUD + auto-provision on create | ✅ |
-| `/servers/{id}/ssh/test` | connectivity test | ✅ |
-| `/model-deployments` | CRUD + auto-deploy on create | ✅ |
-| `/playbooks` | CRUD | ✅ |
-| `/provider-accounts` | CRUD | — (auto-managed) |
-| `/task-runs` | list + get + logs | ✅ |
-| `/api-keys` | list + create + revoke | ✅ |
-| `/settings` | get keys (presence only) + upsert | ✅ |
-| `/clore/offers` | list GPU marketplace offers | ✅ with filters |
-| `/clore/rentals` | list + create (rent+register) + terminate | ✅ |
-| `/sessions` | list + create + get + terminate | ✅ |
-| `WS /sessions/{id}/pty` | interactive PTY terminal | ✅ xterm.js |
-| `/sessions/{id}/commands` | scripted command execution | API only |
-| `/sessions/{id}/download` | transcript download | ✅ |
-
-## SSH authentication
-
-| Method | How |
+| Prefix | Operations |
 |---|---|
-| Password | Enter in the server registration form |
-| Private key | Paste full PEM block (RSA, Ed25519, ECDSA, DSS) |
+| `GET /health` | health check |
+| `/servers` | CRUD + SSH test |
+| `/model-deployments` | CRUD |
+| `/playbooks` | CRUD + `POST /{id}/run` |
+| `/task-runs` | list + get + SSE log stream |
+| `/api-keys` | list + create + revoke |
+| `/settings` | get (presence flags only) + upsert |
+| `/clore/offers` | list with filters + Redis cache |
+| `/clore/rentals` | list + create (rent+register) + terminate + dry-run |
+| `/clore/balance` | wallet balances |
+| `/sessions` | list + create + get + terminate |
+| `WS /sessions/{id}/pty` | interactive PTY terminal |
+| `/sessions/{id}/commands/summary` | parsed command history |
+| `/sessions/{id}/to-playbook` | convert session to playbook via Claude Haiku |
+| `/benchmarks` | CRUD + `GET /gpu/{model}` |
 
-Credentials are stored in the DB and never returned through the API (only `has_ssh_password` / `has_ssh_key` booleans are exposed).
+---
 
 ## Monorepo layout
 
@@ -92,30 +89,45 @@ Credentials are stored in the DB and never returned through the API (only `has_s
 ai-infra/
 ├── docker-compose.yml
 ├── .env.example
-├── ARCHITECTURE.md        # System design, components, ADRs
-├── DEVELOPMENT.md         # Data model, roadmap, phase plans, conventions
+├── ARCHITECTURE.md     # system design, ADRs, data flow
+├── DEVELOPMENT.md      # roadmap, conventions, bugs, SDK notes
 ├── README.md
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/endpoints/  # servers, sessions, clore, settings, …
-│   │   ├── services/          # ssh_manager, session_runner, clore_client, …
+│   │   ├── api/v1/endpoints/   # servers, sessions, clore, benchmarks, settings, …
+│   │   ├── services/           # clore_client, ssh_manager, session_runner, …
 │   │   ├── models/entities.py
 │   │   ├── schemas/
-│   │   └── workers/           # celery_app, tasks
+│   │   └── workers/            # celery_app, tasks
 │   └── alembic/versions/
 ├── frontend/
 │   └── src/
-│       ├── app/               # pages: servers, sessions, clore, deployments, …
-│       ├── components/        # PtyTerminal, Sidebar, StatusBadge
-│       └── lib/               # api.ts, types.ts
-└── infra/
-    ├── litellm/config.yaml
-    └── nginx/
+│       ├── app/        # pages: servers, sessions, clore, lab, benchmarks, …
+│       ├── components/ # PtyTerminal, Sidebar, StatusBadge
+│       └── lib/        # api.ts, types.ts
+├── infra/
+│   └── ansible/playbooks/   # playbook scripts (setup.sh convention)
+└── data/               # bind-mounted DB + Redis data (survives restarts)
 ```
 
-## Docker volume note
+---
 
-`docker compose down` keeps volumes (DB data intact). To fully reset:
+## SSH authentication
+
+| Method | How |
+|---|---|
+| Password | Enter in the rent/register form |
+| Private key | Paste full PEM block (RSA, Ed25519, ECDSA, DSS) |
+
+Credentials are stored in the DB. The API never returns raw credentials — only `has_ssh_password` / `has_ssh_key` booleans are exposed.
+
+---
+
+## Data persistence
+
+`docker compose up --build` keeps volume data intact. To fully reset:
 ```bash
 docker compose down -v
 ```
+
+Bind mounts (`./data/postgres`, `./data/redis`) also survive `down -v` — they persist on the host.

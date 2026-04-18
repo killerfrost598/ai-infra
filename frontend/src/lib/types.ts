@@ -180,6 +180,7 @@ export interface CloreOffer {
   // PCIe
   pcie_version: string | null;
   pcie_width: number | null;
+  allowed_coins: string[];
 }
 
 export interface CloreRental {

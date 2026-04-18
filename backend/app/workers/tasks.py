@@ -224,10 +224,13 @@ def terminate_server(self, server_id: str) -> dict:
         db.add(task_run)
         db.commit()
 
-        from app.core.config import settings
+        from app.services.settings_service import get_setting
 
         try:
-            with CloreClient(settings.clore_api_key) as client:
+            clore_key = get_setting("clore_api_key", db)
+            if not clore_key:
+                raise RuntimeError("Clore API key not configured in settings")
+            with CloreClient(clore_key) as client:
                 client.terminate_rental(server.external_server_id)
             server.status = ServerStatus.TERMINATED
             task_run.status = TaskStatus.SUCCESS

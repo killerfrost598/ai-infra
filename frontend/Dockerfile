@@ -1,5 +1,9 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
+# BACKEND_INTERNAL_URL must be available at build time so Next.js bakes the
+# correct rewrite destination into routes-manifest.json.
+ARG BACKEND_INTERNAL_URL=http://backend:8000
+ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
 COPY package.json package-lock.json* ./
 RUN npm ci --frozen-lockfile
 COPY . .

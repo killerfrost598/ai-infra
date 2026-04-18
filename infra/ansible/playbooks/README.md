@@ -1,59 +1,49 @@
-# Playbooks Directory
+# Playbooks
 
-This directory is the default mounted location for Ansible playbooks used by workers.
-Mounted into both `backend` and `worker` containers at `/ansible`.
+Playbooks are **shell scripts** executed over SSH via Paramiko. Despite the directory name (`ansible/`), the runner does not use Ansible — it uses SSH + shell.
 
-## Collaboration model
+## How it works
 
-Recommended approach:
-1. Keep canonical playbooks in a dedicated Git repository
-2. Sync/clone into this directory on startup or before execution
-3. Track playbook commit hash in the `playbooks` DB table for reproducibility
+1. Register a playbook in the DB: name, git repo URL, script path (e.g. `setup.sh`), target branch.
+2. `POST /playbooks/{id}/run` dispatches a Celery task that:
+   - SSH-connects to the target server
+   - `git clone` (or pull) the repo to a temp dir on the server
+   - Executes the script via PTY
+   - Streams stdout/stderr to a log file (`/var/log/aip/{task_run_id}/`)
+   - Updates the `TaskRun` record with final status
+3. Live output is available via `GET /task-runs/{id}/logs/stream` (SSE).
 
-## Directory structure (recommended)
+## Script convention
 
-```text
-infra/ansible/
-└── playbooks/
-    ├── vllm-deploy/
-    │   ├── site.yml              # main playbook
-    │   ├── meta.yml              # compatibility metadata (see below)
-    │   └── roles/
-    │       ├── install-cuda/
-    │       └── install-vllm/
-    └── healthcheck/
-        └── site.yml
+Each playbook repo should have a shell script at the configured path. The platform executes it as:
+```bash
+bash <script_path>
 ```
 
-## Metadata convention (`meta.yml`)
+Recommended structure for a playbook repo:
+```
+my-playbook/
+├── setup.sh         # main entry point
+├── install_cuda.sh  # sourced by setup.sh
+└── config/
+    └── vllm.yaml
+```
 
-Each playbook should have a companion `meta.yml`:
+`setup.sh` should be idempotent — the platform may re-run it on retry.
 
+## Exit codes
+
+The platform captures the exit code. Non-zero → `TaskRun.status = FAILED`.
+
+## Metadata (optional)
+
+Playbooks can carry metadata in a `meta.yaml` at the repo root for future compatibility scoring (F5):
 ```yaml
 name: vllm-deploy
-description: Installs and launches vLLM on a GPU server
-supported_os:
-  - ubuntu:22.04
-  - ubuntu:20.04
+supported_os: [ubuntu:22.04]
 min_cuda_version: "11.8"
 min_vram_gb: 16
-model_families:
-  - llama
-  - mistral
-  - qwen
-known_caveats:
-  - Requires Docker to be pre-installed
-  - Not compatible with A10 + CUDA 12.4 (known driver issue)
+model_families: [llama, mistral, qwen]
 ```
 
-This metadata is intended to power the Phase 4 compatibility scoring feature.
-
-## Integration status
-
-- `backend/app/services/playbook_runner.py` is currently a **stub**
-- Phase 3 task: implement `ansible-runner` execution pipeline that:
-  1. Clones/pulls the playbook git repo
-  2. Runs the playbook via `ansible_runner.run()`
-  3. Streams stdout/stderr to a log file at `LOGS_BASE_PATH/{task_run_id}/`
-  4. Updates the `TaskRun` record with `logs_path` and final status
-  5. Records playbook commit hash on the `task_runs.metadata_json`
+This metadata is not yet consumed by the platform but is reserved for the F5 compatibility scoring feature.
