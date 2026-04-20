@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Card } from "@/components/ui/card";
 
 const sections = [
   {
@@ -33,7 +34,7 @@ const sections = [
   {
     href: "/playbooks",
     label: "Playbooks",
-    description: "Git-tracked Ansible playbooks for repeatable infrastructure automation.",
+    description: "Git-tracked shell playbooks for repeatable infrastructure automation.",
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -57,12 +58,38 @@ const sections = [
     color: "text-violet-400",
     bg: "bg-violet-500/10",
   },
+  {
+    href: "/lab",
+    label: "Lab",
+    description: "Split-pane terminal + command history + playbook builder in one view.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v11m0 0H5a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-4m-6 0h6" />
+      </svg>
+    ),
+    color: "text-sky-400",
+    bg: "bg-sky-500/10",
+  },
+  {
+    href: "/benchmarks",
+    label: "Benchmarks",
+    description: "Record and query GPU inference benchmarks by model and quantization.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="18" y1="20" x2="18" y2="10" />
+        <line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+        <line x1="2" y1="20" x2="22" y2="20" />
+      </svg>
+    ),
+    color: "text-rose-400",
+    bg: "bg-rose-500/10",
+  },
 ];
 
-export default function HomePage() {
+export default function DocsPage() {
   return (
-    <div className="space-y-10">
-      {/* Hero */}
+    <div className="space-y-8">
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950/60 px-2.5 py-0.5 text-xs text-emerald-400">
@@ -70,53 +97,65 @@ export default function HomePage() {
             System online
           </span>
         </div>
-        <h1 className="text-4xl font-bold tracking-tight text-zinc-100">
-          AI Inference Platform
-        </h1>
-        <p className="max-w-xl text-zinc-400">
-          One control plane to rent GPU servers, provision them over SSH, deploy vLLM models,
-          and route all traffic through a unified OpenAI-compatible gateway.
+        <h1 className="text-3xl font-bold tracking-tight">AI Inference Platform</h1>
+        <p className="max-w-xl text-muted-foreground">
+          Single-operator GPU ops platform. Rent Clore.ai servers, provision them over SSH,
+          deploy vLLM models, and track inference benchmarks.
         </p>
       </div>
 
-      {/* Quick nav cards */}
       <div className="grid gap-4 sm:grid-cols-2">
         {sections.map((s) => (
-          <Link
-            key={s.href}
-            href={s.href}
-            className="card group flex gap-4 p-5 transition-all hover:border-zinc-700 hover:shadow-lg hover:shadow-black/20"
-          >
-            <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${s.bg} ${s.color}`}>
-              {s.icon}
-            </div>
-            <div>
-              <p className="font-semibold text-zinc-100 group-hover:text-white">{s.label}</p>
-              <p className="mt-0.5 text-sm text-zinc-500">{s.description}</p>
-            </div>
+          <Link key={s.href} href={s.href}>
+            <Card className="group flex gap-4 p-5 cursor-pointer transition-all hover:border-muted-foreground/30 hover:shadow-lg hover:shadow-black/20">
+              <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${s.bg} ${s.color}`}>
+                {s.icon}
+              </div>
+              <div>
+                <p className="font-semibold group-hover:text-foreground">{s.label}</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">{s.description}</p>
+              </div>
+            </Card>
           </Link>
         ))}
       </div>
 
-      {/* Stack info */}
-      <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/30 px-5 py-4">
-        <p className="section-label mb-3">Stack</p>
-        <div className="grid grid-cols-3 gap-4 text-sm sm:grid-cols-6">
+      <Card className="px-5 py-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Stack</p>
+        <div className="grid grid-cols-3 gap-4 text-sm sm:grid-cols-5">
           {[
             ["FastAPI", "API"],
             ["Celery", "Workers"],
             ["PostgreSQL", "Database"],
             ["Redis", "Broker"],
             ["vLLM", "Inference"],
-            ["LiteLLM", "Gateway"],
           ].map(([name, role]) => (
             <div key={name}>
-              <p className="font-medium text-zinc-200">{name}</p>
-              <p className="text-xs text-zinc-500">{role}</p>
+              <p className="font-medium">{name}</p>
+              <p className="text-xs text-muted-foreground">{role}</p>
             </div>
           ))}
         </div>
-      </div>
+      </Card>
+
+      <Card className="px-5 py-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Architecture decisions</p>
+        <div className="space-y-2 text-sm text-muted-foreground">
+          {[
+            ["ADR-001", "Single-user app — internal ops tool, no auth middleware"],
+            ["ADR-002", "Celery for async tasks; sync handlers for interactive SSH sessions"],
+            ["ADR-003", "Sentinel pattern for SSH output capture (PROMPT_COMMAND injection)"],
+            ["ADR-006", "Partial clore-ai SDK bypass — my_orders/create_order via raw httpx"],
+            ["ADR-007", "LiteLLM removed — vLLM speaks OpenAI natively; saved ~400 MB RAM"],
+            ["ADR-010", "shadcn/ui + Tailwind v4 rewrite with TanStack Query"],
+          ].map(([id, desc]) => (
+            <div key={id} className="flex gap-3">
+              <span className="shrink-0 font-mono text-xs text-muted-foreground/50 mt-0.5">{id}</span>
+              <span>{desc}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

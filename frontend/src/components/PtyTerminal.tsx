@@ -25,6 +25,9 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
     if (!containerRef.current) return;
 
     let disposed = false;
+    let term: { dispose: () => void } | null = null;
+    let ws: WebSocket | null = null;
+    let observer: ResizeObserver | null = null;
 
     async function init() {
       const { Terminal } = await import("xterm");
@@ -32,7 +35,7 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
 
       if (disposed || !containerRef.current) return;
 
-      const term = new Terminal({
+      const terminal = new Terminal({
         theme: {
           background: "#09090b",
           foreground: "#e4e4e7",
@@ -50,78 +53,106 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
         scrollback: 5000,
         allowProposedApi: true,
       });
+      term = terminal;
 
       const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(containerRef.current);
+      terminal.loadAddon(fitAddon);
+      terminal.open(containerRef.current);
       fitAddon.fit();
 
-      const ws = new WebSocket(`${getWsBase()}/api/v1/sessions/${sessionId}/pty`);
-      ws.binaryType = "arraybuffer";
+      const socket = new WebSocket(`${getWsBase()}/api/v1/sessions/${sessionId}/pty`);
+      ws = socket;
+      socket.binaryType = "arraybuffer";
 
-      ws.onopen = () => {
-        const { cols, rows } = term;
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
+      socket.onopen = () => {
+        const { cols, rows } = terminal;
+        socket.send(JSON.stringify({ type: "resize", cols, rows }));
       };
 
-      ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-          term.write(new Uint8Array(event.data));
+          terminal.write(new Uint8Array(event.data));
         } else {
-          term.write(event.data as string);
+          terminal.write(event.data as string);
         }
       };
 
       // onerror fires before onclose — let onclose handle the message with the code
-      ws.onerror = () => {};
+      socket.onerror = () => {};
 
-      ws.onclose = (event) => {
+      socket.onclose = (event) => {
         if (disposed) return;
         if (event.code === 1008) {
           // Backend closes with 1008 when session is not found, terminated,
           // or already has an active PTY connection from another tab.
-          term.writeln(
+          terminal.writeln(
             `\r\n\x1b[33m─── ${event.reason || "session unavailable"} ───\x1b[0m`
           );
           // Don't call onDisconnect — session wasn't disconnected by us
         } else {
-          term.writeln("\r\n\x1b[90m─── connection closed ───\x1b[0m");
+          terminal.writeln("\r\n\x1b[90m─── connection closed ───\x1b[0m");
           onDisconnectRef.current?.();
         }
       };
 
       const encoder = new TextEncoder();
-      term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(encoder.encode(data));
+      terminal.onData((data) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(encoder.encode(data));
         }
       });
 
-      term.onResize(({ cols, rows }) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "resize", cols, rows }));
+      terminal.onResize(({ cols, rows }) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "resize", cols, rows }));
         }
       });
 
-      const observer = new ResizeObserver(() => {
-        try { fitAddon.fit(); } catch { /* terminal already disposed */ }
+      observer = new ResizeObserver(() => {
+        try {
+          fitAddon.fit();
+        } catch (error) {
+          if (!disposed) {
+            console.warn("Terminal resize failed", error);
+          }
+        }
       });
       if (containerRef.current) observer.observe(containerRef.current);
 
       return () => {
         disposed = true;
-        observer.disconnect();
-        ws.close();
-        term.dispose();
+        observer?.disconnect();
+        socket.close();
+        terminal.dispose();
       };
     }
 
     let cleanup: (() => void) | undefined;
-    init().then((fn) => { cleanup = fn; });
+    init()
+      .then((fn) => {
+        if (disposed) {
+          fn?.();
+          return;
+        }
+        cleanup = fn;
+      })
+      .catch((error) => {
+        if (!disposed) {
+          console.error("Terminal initialization failed", error);
+        }
+      });
 
     return () => {
       disposed = true;
-      cleanup?.();
+      if (cleanup) {
+        cleanup();
+        return;
+      }
+      observer?.disconnect();
+      if (ws && ws.readyState < WebSocket.CLOSING) {
+        ws.close();
+      }
+      term?.dispose();
     };
   }, [sessionId]); // onDisconnect intentionally excluded — read via ref above
 

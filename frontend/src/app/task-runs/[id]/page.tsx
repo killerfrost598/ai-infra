@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { TaskRun } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Card } from "@/components/ui/card";
 
 const TERMINAL = new Set(["SUCCESS", "FAILED", "PARTIAL"]);
 
@@ -90,16 +91,16 @@ export default function TaskRunDetailPage() {
 
   if (error) return (
     <div className="space-y-3">
-      <Link href="/task-runs" className="btn-ghost px-0 text-zinc-500">← Task Runs</Link>
-      <p className="rounded-lg border border-rose-900 bg-rose-950/40 px-4 py-3 text-sm text-rose-400">{error}</p>
+      <Link href="/task-runs" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Task Runs</Link>
+      <p className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p>
     </div>
   );
 
   if (!run) return (
     <div className="space-y-3">
-      <Link href="/task-runs" className="btn-ghost px-0 text-zinc-500">← Task Runs</Link>
-      <div className="flex items-center gap-2 text-sm text-zinc-500">
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+      <Link href="/task-runs" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Task Runs</Link>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
         Loading…
       </div>
     </div>
@@ -110,15 +111,15 @@ export default function TaskRunDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/task-runs" className="btn-ghost px-0 text-zinc-500">← Task Runs</Link>
+      <Link href="/task-runs" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Task Runs</Link>
 
       {/* Metadata card */}
-      <div className="card px-6 py-5">
+      <Card className="px-6 py-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-lg font-bold text-zinc-100">{run.task_type}</h1>
+            <h1 className="text-lg font-bold">{run.task_type}</h1>
             {command && (
-              <p className="mt-1 font-mono text-sm text-zinc-500">$ {command}</p>
+              <p className="mt-1 font-mono text-sm text-muted-foreground">$ {command}</p>
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -134,9 +135,9 @@ export default function TaskRunDetailPage() {
             { label: "Duration", value: run.duration_seconds != null ? `${run.duration_seconds}s` : "—" },
             { label: "Run ID", value: run.id.slice(0, 8) + "…" },
           ].map(({ label, value }) => (
-            <div key={label} className="rounded-lg bg-zinc-900/60 px-3 py-2.5">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">{label}</p>
-              <p className="mt-0.5 truncate text-sm text-zinc-300">{value}</p>
+            <div key={label} className="rounded-lg bg-muted/40 px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">{label}</p>
+              <p className="mt-0.5 truncate text-sm text-foreground/80">{value}</p>
             </div>
           ))}
         </div>
@@ -150,24 +151,24 @@ export default function TaskRunDetailPage() {
         )}
 
         {run.error_summary && (
-          <div className="mt-4 rounded-lg border border-rose-900 bg-rose-950/40 px-4 py-3">
-            <p className="text-xs font-medium text-rose-500">Error</p>
-            <p className="mt-1 text-sm text-rose-300">{run.error_summary}</p>
+          <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
+            <p className="text-xs font-medium text-destructive">Error</p>
+            <p className="mt-1 text-sm text-destructive/80">{run.error_summary}</p>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* Log viewer */}
       <div className="space-y-2">
-        <h2 className="section-label">Output</h2>
-        <div className="overflow-hidden rounded-xl border border-zinc-800">
-          <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4 py-2.5">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Output</h2>
+        <div className="overflow-hidden rounded-xl border border-border">
+          <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2.5">
             <div className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
-              <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
-              <span className="h-2.5 w-2.5 rounded-full bg-zinc-700" />
+              <span className="h-2.5 w-2.5 rounded-full bg-border" />
+              <span className="h-2.5 w-2.5 rounded-full bg-border" />
+              <span className="h-2.5 w-2.5 rounded-full bg-border" />
             </div>
-            <p className="text-xs text-zinc-600">stdout / stderr</p>
+            <p className="text-xs text-muted-foreground/60">stdout / stderr</p>
             {streaming && (
               <span className="flex items-center gap-1.5 text-xs text-amber-400">
                 <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
@@ -187,8 +188,8 @@ export default function TaskRunDetailPage() {
               {streaming && <span className="animate-pulse text-zinc-600">▌</span>}
             </pre>
           ) : (
-            <div className="terminal flex items-center gap-2 p-5 text-zinc-600">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-500" />
+            <div className="terminal flex items-center gap-2 p-5 text-muted-foreground">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
               Waiting for task output…
             </div>
           )}

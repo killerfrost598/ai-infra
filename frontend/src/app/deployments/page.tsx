@@ -1,197 +1,201 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useDeployments, useServers, useCreateDeployment } from "@/lib/queries";
 import type { ModelDeployment, Server } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
+import { deploymentSchema, type DeploymentFormValues } from "@/lib/schemas";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 export default function DeploymentsPage() {
-  const [deployments, setDeployments] = useState<ModelDeployment[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isLoading, error } = useDeployments();
+  const deployments: ModelDeployment[] = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   const [showForm, setShowForm] = useState(false);
-  const [servers, setServers] = useState<Server[]>([]);
-  const [form, setForm] = useState({
-    server_id: "",
-    model_name: "",
-    model_alias: "",
-    quantization: "",
-    remote_port: "8000",
-    litellm_route_name: "",
+  const { data: serversData } = useServers(0, 100);
+  const servers: Server[] = serversData?.items ?? [];
+
+  const createDeployment = useCreateDeployment();
+
+  const form = useForm<DeploymentFormValues>({
+    resolver: zodResolver(deploymentSchema),
+    defaultValues: {
+      server_id: "", model_name: "", model_alias: "",
+      quantization: "", remote_port: 8000,
+    },
   });
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
 
-  function load() {
-    api.deployments.list()
-      .then((res) => { setDeployments(res.items); setTotal(res.total); })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => { load(); }, []);
-
-  useEffect(() => {
-    if (showForm && servers.length === 0) {
-      api.servers.list(0, 100).then((res) => setServers(res.items));
-    }
-  }, [showForm, servers.length]);
-
-  function setField(key: keyof typeof form, value: string) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.server_id || !form.model_name.trim()) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await api.deployments.create({
-        server_id: form.server_id,
-        model_name: form.model_name.trim(),
-        model_alias: form.model_alias.trim() || undefined,
-        quantization: form.quantization.trim() || undefined,
-        remote_port: parseInt(form.remote_port) || 8000,
-        litellm_route_name: form.litellm_route_name.trim() || undefined,
-      });
-      setForm({ server_id: "", model_name: "", model_alias: "", quantization: "", remote_port: "8000", litellm_route_name: "" });
-      setShowForm(false);
-      load();
-    } catch (err: unknown) {
-      setCreateError(err instanceof Error ? err.message : "Create failed");
-    } finally {
-      setCreating(false);
-    }
+  function onSubmit(values: DeploymentFormValues) {
+    createDeployment.mutate(
+      {
+        server_id: values.server_id,
+        model_name: values.model_name,
+        model_alias: values.model_alias || undefined,
+        quantization: values.quantization || undefined,
+        remote_port: values.remote_port,
+      },
+      { onSuccess: () => { form.reset(); setShowForm(false); } }
+    );
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-zinc-100">Deployments</h1>
-          {!loading && <p className="mt-0.5 text-sm text-zinc-500">{total} total</p>}
+          <h1 className="text-2xl font-bold">Deployments</h1>
+          {!isLoading && <p className="mt-0.5 text-sm text-muted-foreground">{total} total</p>}
         </div>
-        <button onClick={() => setShowForm((s) => !s)} className="btn-primary text-sm">
+        <Button onClick={() => setShowForm((s) => !s)}>
           {showForm ? "Cancel" : "New deployment"}
-        </button>
+        </Button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="card px-5 py-4 space-y-4">
-          <h2 className="text-sm font-semibold text-zinc-300">New model deployment</h2>
-          {createError && <p className="text-xs text-rose-400">{createError}</p>}
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)}>
+            <Card className="px-5 py-4 space-y-4">
+              <h2 className="text-sm font-semibold">New model deployment</h2>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="mb-1 block text-xs font-medium text-zinc-400">Server</label>
-              <select
-                className="input w-full text-sm"
-                value={form.server_id}
-                onChange={(e) => setField("server_id", e.target.value)}
-                required
-              >
-                <option value="">Select a server…</option>
-                {servers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.hostname} ({s.gpu_model ?? "no GPU"}) — {s.status}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">Model name</label>
-              <input
-                className="input w-full text-sm"
-                placeholder="meta-llama/Llama-3-8b-instruct"
-                value={form.model_name}
-                onChange={(e) => setField("model_name", e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">Alias <span className="text-zinc-600">(optional)</span></label>
-              <input
-                className="input w-full text-sm"
-                placeholder="llama3-8b"
-                value={form.model_alias}
-                onChange={(e) => setField("model_alias", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">Quantization <span className="text-zinc-600">(optional)</span></label>
-              <input
-                className="input w-full text-sm"
-                placeholder="awq, gptq, fp8…"
-                value={form.quantization}
-                onChange={(e) => setField("quantization", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">Remote port</label>
-              <input
-                className="input w-full text-sm"
-                type="number"
-                value={form.remote_port}
-                onChange={(e) => setField("remote_port", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">LiteLLM route <span className="text-zinc-600">(optional)</span></label>
-              <input
-                className="input w-full text-sm"
-                placeholder="llama3"
-                value={form.litellm_route_name}
-                onChange={(e) => setField("litellm_route_name", e.target.value)}
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <FormField
+                    control={form.control}
+                    name="server_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs font-medium text-muted-foreground">Server</FormLabel>
+                        <FormControl>
+                          <select className="input w-full text-sm" {...field}>
+                            <option value="">Select a server…</option>
+                            {servers.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.hostname} ({s.gpu_model ?? "no GPU"}) — {s.status}
+                              </option>
+                            ))}
+                          </select>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
-          <div className="flex justify-end">
-            <button type="submit" disabled={creating || !form.server_id || !form.model_name.trim()} className="btn-primary text-sm">
-              {creating ? "Creating…" : "Create deployment"}
-            </button>
-          </div>
-        </form>
+                <FormField
+                  control={form.control}
+                  name="model_name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium text-muted-foreground">Model name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="meta-llama/Llama-3-8b-instruct" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="model_alias"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium text-muted-foreground">
+                        Alias <span className="text-muted-foreground/50">(optional)</span>
+                      </FormLabel>
+                      <FormControl>
+                        <Input placeholder="llama3-8b" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="quantization"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium text-muted-foreground">
+                        Quantization <span className="text-muted-foreground/50">(optional)</span>
+                      </FormLabel>
+                      <FormControl>
+                        <Input placeholder="awq, gptq, fp8…" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="remote_port"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium text-muted-foreground">Remote port</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          {...field}
+                          onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+              </div>
+
+              <div className="flex justify-end">
+                <Button type="submit" loading={createDeployment.isPending}>Create deployment</Button>
+              </div>
+            </Card>
+          </form>
+        </Form>
       )}
 
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-zinc-500">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+      {isLoading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
           Loading…
         </div>
       )}
-      {error && <p className="rounded-lg border border-rose-900 bg-rose-950/40 px-4 py-3 text-sm text-rose-400">{error}</p>}
-      {!loading && !error && deployments.length === 0 && !showForm && (
-        <div className="card flex flex-col items-center gap-2 py-12 text-center">
-          <p className="text-sm text-zinc-500">No deployments yet.</p>
-          <p className="text-xs text-zinc-600">Create a deployment from a provisioned server.</p>
+      {error && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error.message}
         </div>
+      )}
+      {!isLoading && !error && deployments.length === 0 && !showForm && (
+        <Card className="flex flex-col items-center gap-2 py-12 text-center">
+          <p className="text-sm text-muted-foreground">No deployments yet.</p>
+          <p className="text-xs text-muted-foreground/60">Create a deployment from a provisioned server.</p>
+        </Card>
       )}
 
       <div className="space-y-2">
         {deployments.map((d) => (
-          <div key={d.id} className="card flex items-start gap-4 px-5 py-4">
+          <Card key={d.id} className="flex items-start gap-4 px-5 py-4">
             <StatusBadge status={d.status} />
             <div className="flex-1 min-w-0">
-              <p className="font-medium text-zinc-100">{d.model_name}</p>
-              {d.model_alias && (
-                <p className="text-xs text-zinc-500">alias: {d.model_alias}</p>
-              )}
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-600">
+              <p className="font-medium">{d.model_name}</p>
+              {d.model_alias && <p className="text-xs text-muted-foreground">alias: {d.model_alias}</p>}
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground/70">
                 <span>port {d.remote_port}</span>
                 {d.quantization && <span>{d.quantization}</span>}
-                {d.litellm_route_name && <span>route: {d.litellm_route_name}</span>}
               </div>
             </div>
-            <div className="shrink-0 text-right text-xs text-zinc-500">
+            <div className="shrink-0 text-right text-xs text-muted-foreground">
               {d.started_at
                 ? <p>Started {new Date(d.started_at).toLocaleDateString()}</p>
                 : <p>Not started</p>}
             </div>
-          </div>
+          </Card>
         ))}
       </div>
     </div>

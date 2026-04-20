@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-import type { CloreBalance, SettingEntry } from "@/lib/types";
+import { useState } from "react";
+import { useSettings, useSaveSetting, useDeleteSetting, useCloreBalance } from "@/lib/queries";
+import type { SettingEntry } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 interface SettingMeta {
   label: string;
   description: string;
   placeholder: string;
   inputType?: "password" | "text" | "textarea";
-  sensitive?: boolean;
 }
 
 const SETTING_META: Record<string, SettingMeta> = {
@@ -18,14 +20,12 @@ const SETTING_META: Record<string, SettingMeta> = {
     description: "Required to browse the GPU marketplace, rent servers, and manage rentals.",
     placeholder: "Paste your Clore.ai API key…",
     inputType: "password",
-    sensitive: true,
   },
   anthropic_api_key: {
     label: "Anthropic API Key",
     description: "Used by the Lab page to convert command history into Ansible playbooks via Claude Haiku.",
     placeholder: "sk-ant-…",
     inputType: "password",
-    sensitive: true,
   },
   ssh_private_key: {
     label: "Platform SSH Private Key",
@@ -33,106 +33,87 @@ const SETTING_META: Record<string, SettingMeta> = {
       "PEM private key used to connect to servers rented via SSH key auth. When you rent a server and provide your SSH public key to Clore, this private key is automatically stored on the new server record so terminal sessions can connect.",
     placeholder: "-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----",
     inputType: "textarea",
-    sensitive: true,
   },
 };
 
-// Keys shown in the API Keys section
 const API_KEY_KEYS = ["clore_api_key", "anthropic_api_key"];
-// Keys shown in the SSH section
 const SSH_KEY_KEYS = ["ssh_private_key"];
 
 function ConfiguredBadge({ configured }: { configured: boolean }) {
   if (configured) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-900 bg-emerald-950/40 px-2.5 py-0.5 text-xs text-emerald-400">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-600/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
         Configured
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800/60 px-2.5 py-0.5 text-xs text-zinc-500">
-      <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground">
+      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
       Not configured
     </span>
   );
 }
 
-function SettingCard({
-  setting,
-  meta,
-  onSaved,
-  onDeleted,
-}: {
-  setting: SettingEntry;
-  meta: SettingMeta;
-  onSaved: (updated: SettingEntry) => void;
-  onDeleted: (key: string) => void;
-}) {
+function SettingCard({ setting, meta }: { setting: SettingEntry; meta: SettingMeta }) {
+  const saveSetting = useSaveSetting();
+  const deleteSetting = useDeleteSetting();
   const [input, setInput] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSave() {
     const value = input.trim();
     if (!value) return;
-    setSaving(true);
     setError("");
-    try {
-      const updated = await api.settings.set(setting.key, value);
-      onSaved(updated);
-      setInput("");
-      setJustSaved(true);
-      setTimeout(() => setJustSaved(false), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
+    saveSetting.mutate(
+      { key: setting.key, value },
+      {
+        onSuccess: () => {
+          setInput("");
+          setJustSaved(true);
+          setTimeout(() => setJustSaved(false), 3000);
+        },
+        onError: (err) => setError(err.message),
+      }
+    );
   }
 
-  async function handleDelete() {
-    if (!confirm(`Clear "${meta.label}"? The value will be removed from the database. Environment variable fallback (if any) will still apply.`)) return;
-    setDeleting(true);
+  function handleDelete() {
+    if (!confirm(`Clear "${meta.label}"? The value will be removed from the database.`)) return;
     setError("");
-    try {
-      await api.settings.delete(setting.key);
-      onDeleted(setting.key);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
-    } finally {
-      setDeleting(false);
-    }
+    deleteSetting.mutate(setting.key, {
+      onError: (err) => setError(err.message),
+    });
   }
 
   const isTextarea = meta.inputType === "textarea";
 
   return (
-    <div className="card px-6 py-5">
+    <Card className="px-6 py-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-semibold text-zinc-100">{meta.label}</p>
+            <p className="font-semibold">{meta.label}</p>
             <ConfiguredBadge configured={setting.is_configured} />
           </div>
-          <p className="mt-1 max-w-xl text-sm text-zinc-500">{meta.description}</p>
+          <p className="mt-1 max-w-xl text-sm text-muted-foreground">{meta.description}</p>
           {setting.updated_at && (
-            <p className="mt-0.5 text-xs text-zinc-600">
+            <p className="mt-0.5 text-xs text-muted-foreground/50">
               Last updated {new Date(setting.updated_at).toLocaleString()}
             </p>
           )}
         </div>
         {setting.is_configured && (
-          <button
+          <Button
+            variant="destructive"
+            size="sm"
+            loading={deleteSetting.isPending}
             onClick={handleDelete}
-            disabled={deleting}
-            className="btn-danger shrink-0 py-1 px-3 text-xs disabled:opacity-40"
           >
-            {deleting ? "Clearing…" : "Clear"}
-          </button>
+            Clear
+          </Button>
         )}
       </div>
       <div className="mt-4 flex gap-2">
@@ -146,107 +127,70 @@ function SettingCard({
             onChange={(e) => setInput(e.target.value)}
           />
         ) : (
-          <input
+          <Input
             type={meta.inputType ?? "text"}
-            className="input flex-1"
+            className="flex-1"
             placeholder={meta.placeholder}
             value={input}
             autoComplete="off"
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !isTextarea && handleSave()}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
           />
         )}
-        <button
-          className="btn-primary shrink-0"
+        <Button
           onClick={handleSave}
-          disabled={!input.trim() || saving}
+          loading={saveSetting.isPending}
+          disabled={!input.trim()}
         >
-          {saving ? "Saving…" : justSaved ? "Saved ✓" : "Save"}
-        </button>
+          {justSaved ? "Saved ✓" : "Save"}
+        </Button>
       </div>
-      {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
-    </div>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+    </Card>
   );
 }
 
 function BalanceCard({ cloreConfigured }: { cloreConfigured: boolean }) {
-  const [balance, setBalance] = useState<CloreBalance | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function load() {
-    setLoading(true);
-    setError(null);
-    api.clore
-      .balance()
-      .then(setBalance)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    if (cloreConfigured) load();
-  }, [cloreConfigured]);
-
+  const { data: balance, isLoading, error, refetch } = useCloreBalance(cloreConfigured);
   if (!cloreConfigured) return null;
 
   return (
-    <div className="card px-6 py-5">
+    <Card className="px-6 py-5">
       <div className="flex items-center justify-between">
-        <p className="font-semibold text-zinc-100">Clore.ai Balance</p>
-        <button onClick={load} disabled={loading} className="btn-ghost text-xs py-1 px-2">
-          {loading ? "…" : "Refresh"}
-        </button>
+        <p className="font-semibold">Clore.ai Balance</p>
+        <Button variant="ghost" size="sm" loading={isLoading} onClick={() => refetch()}>
+          Refresh
+        </Button>
       </div>
-      {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
-      {!loading && !error && balance && (
+      {error && <p className="mt-2 text-xs text-destructive">{error.message}</p>}
+      {!isLoading && !error && balance && (
         <div className="mt-3 flex flex-wrap gap-3">
           {balance.balances.length === 0 && (
-            <p className="text-sm text-zinc-500">No wallet data available.</p>
+            <p className="text-sm text-muted-foreground">No wallet data available.</p>
           )}
           {balance.balances.map((w) => (
-            <div key={w.currency} className="rounded-lg bg-zinc-900/60 px-4 py-3 min-w-[120px]">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">{w.currency}</p>
-              <p className="mt-1 text-xl font-bold text-zinc-100">
+            <div key={w.currency} className="rounded-lg bg-muted/40 px-4 py-3 min-w-[120px]">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">{w.currency}</p>
+              <p className="mt-1 text-xl font-bold">
                 {w.currency.toLowerCase().includes("usd") ? "$" : ""}{w.amount.toFixed(4)}
               </p>
             </div>
           ))}
         </div>
       )}
-      {loading && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-zinc-500">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+      {isLoading && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
           Loading balance…
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
 export default function SettingsPage() {
-  const [settings, setSettings] = useState<SettingEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.settings
-      .list()
-      .then((data) => setSettings(data.settings))
-      .catch((e: Error) => setLoadError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  function handleSaved(updated: SettingEntry) {
-    setSettings((prev) => prev.map((s) => (s.key === updated.key ? updated : s)));
-  }
-
-  function handleDeleted(key: string) {
-    setSettings((prev) =>
-      prev.map((s) => (s.key === key ? { ...s, is_configured: false, updated_at: null } : s))
-    );
-  }
-
+  const { data, isLoading, error } = useSettings();
+  const settings: SettingEntry[] = data?.settings ?? [];
   const cloreConfigured = settings.find((s) => s.key === "clore_api_key")?.is_configured ?? false;
 
   function renderSection(keys: string[]) {
@@ -254,15 +198,7 @@ export default function SettingsPage() {
       const setting = settings.find((s) => s.key === key);
       const meta = SETTING_META[key];
       if (!setting || !meta) return null;
-      return (
-        <SettingCard
-          key={key}
-          setting={setting}
-          meta={meta}
-          onSaved={handleSaved}
-          onDeleted={handleDeleted}
-        />
-      );
+      return <SettingCard key={key} setting={setting} meta={meta} />;
     });
   }
 
@@ -270,41 +206,41 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Profile</h1>
-        <p className="mt-0.5 text-sm text-zinc-500">
+        <p className="mt-0.5 text-sm text-muted-foreground">
           API keys and platform configuration — stored in DB, takes precedence over env vars.
           Values are write-only; use Clear to remove.
         </p>
       </div>
 
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-zinc-500">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+      {isLoading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
           Loading…
         </div>
       )}
-      {loadError && (
-        <p className="rounded-lg border border-rose-900 bg-rose-950/40 px-4 py-3 text-sm text-rose-400">
-          {loadError}
-        </p>
+      {error && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error.message}
+        </div>
       )}
 
-      {!loading && !loadError && (
+      {!isLoading && !error && (
         <>
           <BalanceCard cloreConfigured={cloreConfigured} />
 
-          <p className="section-label">API Keys</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">API Keys</p>
           <div className="space-y-4">{renderSection(API_KEY_KEYS)}</div>
 
-          <p className="section-label">SSH</p>
-          <div className="card px-6 py-4 mb-2 text-sm text-zinc-400 bg-zinc-900/40">
-            <p className="font-medium text-zinc-300 mb-1">How SSH key auth works with Clore rentals</p>
-            <ul className="list-disc list-inside space-y-1 text-xs text-zinc-500">
-              <li>You generate a key pair: <code className="text-zinc-400">ssh-keygen -t ed25519</code></li>
-              <li>The <strong>public key</strong> (e.g. <code className="text-zinc-400">~/.ssh/id_ed25519.pub</code>) is sent to Clore and injected into the container&apos;s <code className="text-zinc-400">authorized_keys</code></li>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">SSH</p>
+          <Card className="px-6 py-4 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground mb-1">How SSH key auth works with Clore rentals</p>
+            <ul className="list-disc list-inside space-y-1 text-xs text-muted-foreground">
+              <li>You generate a key pair: <code className="text-foreground/70">ssh-keygen -t ed25519</code></li>
+              <li>The <strong>public key</strong> (e.g. <code className="text-foreground/70">~/.ssh/id_ed25519.pub</code>) is sent to Clore and injected into the container&apos;s <code className="text-foreground/70">authorized_keys</code></li>
               <li>The <strong>private key</strong> stored here is automatically saved on new Server records so the platform can open terminal sessions without a password</li>
               <li>If you use password auth instead, the password is stored on the Server record directly</li>
             </ul>
-          </div>
+          </Card>
           <div className="space-y-4">{renderSection(SSH_KEY_KEYS)}</div>
         </>
       )}

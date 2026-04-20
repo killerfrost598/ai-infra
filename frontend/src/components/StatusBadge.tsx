@@ -1,25 +1,32 @@
-const config: Record<string, { dot: string; text: string; label?: string; pulse?: boolean }> = {
-  NEW:          { dot: "bg-zinc-500",    text: "text-zinc-400" },
-  PROVISIONING: { dot: "bg-amber-400",   text: "text-amber-400", pulse: true },
-  READY:        { dot: "bg-emerald-400", text: "text-emerald-400" },
-  FAILED:       { dot: "bg-rose-500",    text: "text-rose-400" },
-  TERMINATED:   { dot: "bg-zinc-600",    text: "text-zinc-500" },
-  PENDING:      { dot: "bg-zinc-500",    text: "text-zinc-400" },
-  DEPLOYING:    { dot: "bg-amber-400",   text: "text-amber-400", pulse: true },
-  RUNNING:      { dot: "bg-emerald-400", text: "text-emerald-400", pulse: true },
-  STOPPED:      { dot: "bg-zinc-600",    text: "text-zinc-500" },
-  SUCCESS:      { dot: "bg-emerald-400", text: "text-emerald-400" },
-  PARTIAL:      { dot: "bg-amber-400",   text: "text-amber-400" },
+import { Badge } from "@/components/ui/badge";
+
+type StatusConfig = {
+  variant: "success" | "error" | "warning" | "secondary" | "outline";
+  pulse?: boolean;
+};
+
+const STATUS_CONFIG: Record<string, StatusConfig> = {
+  NEW:          { variant: "secondary" },
+  PROVISIONING: { variant: "warning",  pulse: true },
+  READY:        { variant: "success" },
+  FAILED:       { variant: "error" },
+  TERMINATED:   { variant: "secondary" },
+  PENDING:      { variant: "secondary" },
+  DEPLOYING:    { variant: "warning",  pulse: true },
+  RUNNING:      { variant: "success",  pulse: true },
+  STOPPED:      { variant: "secondary" },
+  SUCCESS:      { variant: "success" },
+  PARTIAL:      { variant: "warning" },
 };
 
 export function StatusBadge({ status }: { status: string }) {
-  const c = config[status] ?? { dot: "bg-zinc-500", text: "text-zinc-400" };
+  const config = STATUS_CONFIG[status] ?? { variant: "secondary" as const };
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${c.text}`}>
-      <span
-        className={`inline-block h-1.5 w-1.5 rounded-full ${c.dot} ${c.pulse ? "animate-pulse" : ""}`}
-      />
+    <Badge
+      variant={config.variant}
+      className={config.pulse ? "animate-pulse" : undefined}
+    >
       {status}
-    </span>
+    </Badge>
   );
 }
