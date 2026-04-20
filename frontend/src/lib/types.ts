@@ -43,7 +43,6 @@ export interface ModelDeployment {
   quantization: string | null;
   tunnel_local_port: number | null;
   remote_port: number;
-  litellm_route_name: string | null;
   status: DeploymentStatus;
   started_at: string | null;
   ended_at: string | null;
@@ -141,7 +140,7 @@ export interface SessionCreate {
 
 export interface CommandRequest {
   command: string;
-  timeout?: number; // seconds, default 30, max 300
+  timeout?: number;
 }
 
 export interface ParsedCommand {
@@ -170,14 +169,11 @@ export interface CloreOffer {
   vram_gb: number;
   cuda_version: string | null;
   price_per_day: number;
-  // Network
   upload_mbps: number | null;
   download_mbps: number | null;
-  // Hardware
   cpu_model: string | null;
   ram_gb: number | null;
   disk_gb: number | null;
-  // PCIe
   pcie_version: string | null;
   pcie_width: number | null;
   allowed_coins: string[];
@@ -208,15 +204,6 @@ export interface RentRequest {
   jupyter_token?: string;
   spot_price?: number;
   required_price?: number;
-}
-
-export interface ApiKey {
-  id: string;
-  key_name: string;
-  key_prefix: string;
-  provider_name: string | null;
-  is_revoked: boolean;
-  created_at: string;
 }
 
 export interface SettingEntry {

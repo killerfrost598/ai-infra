@@ -1,5 +1,4 @@
 import type {
-  ApiKey,
   CloreBalance,
   CloreOffer,
   CloreRental,
@@ -140,17 +139,6 @@ export const api = {
     terminate: (rentalId: string) =>
       fetch(`${BASE_URL}/api/v1/clore/rentals/${rentalId}`, { method: "DELETE" }),
     balance: () => apiFetch<CloreBalance>("/api/v1/clore/balance"),
-  },
-
-  apiKeys: {
-    list: () => apiFetch<ListResponse<ApiKey>>("/api/v1/api-keys"),
-    create: (keyName: string, keyPrefix: string, providerName?: string) =>
-      apiFetch<ApiKey>("/api/v1/api-keys", {
-        method: "POST",
-        body: JSON.stringify({ key_name: keyName, key_prefix: keyPrefix, provider_name: providerName ?? null }),
-      }),
-    revoke: (id: string) =>
-      fetch(`${BASE_URL}/api/v1/api-keys/${id}`, { method: "DELETE" }),
   },
 
   benchmarks: {

@@ -131,7 +131,7 @@ def provision_server(self, server_id: str) -> dict:
 
 @celery_app.task(bind=True, name="deployments.deploy")
 def deploy_model(self, deployment_id: str) -> dict:
-    """Launch vLLM via Docker on the target server, then register a LiteLLM route."""
+    """Launch vLLM via Docker on the target server."""
     db = SessionLocal()
     try:
         deployment = db.query(ModelDeployment).filter(ModelDeployment.id == UUID(deployment_id)).first()

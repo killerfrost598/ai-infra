@@ -92,7 +92,6 @@ class ModelDeployment(Base):
     quantization: Mapped[str | None] = mapped_column(String(64), nullable=True)
     tunnel_local_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     remote_port: Mapped[int] = mapped_column(Integer, default=8000, nullable=False)
-    litellm_route_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[DeploymentStatus] = mapped_column(
         Enum(DeploymentStatus), default=DeploymentStatus.PENDING, nullable=False
     )
