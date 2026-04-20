@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   reactStrictMode: true,
   async rewrites() {
     // Server-side URL — resolved inside Docker network (or localhost for local dev).

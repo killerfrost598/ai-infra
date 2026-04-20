@@ -1,6 +1,11 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import Sidebar from "@/components/Sidebar";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
+import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/nav/app-sidebar";
+import { Providers } from "@/components/providers";
+import { MainContent } from "@/components/layouts/main-content";
 
 export const metadata: Metadata = {
   title: "AI Inference Platform",
@@ -13,14 +18,19 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-zinc-950 text-zinc-100">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <div className="ml-56 flex-1">
-            <main className="mx-auto max-w-5xl px-8 py-8">{children}</main>
-          </div>
-        </div>
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen bg-background text-foreground">
+        <ThemeProvider attribute="class" defaultTheme="dark" disableTransitionOnChange>
+          <Providers>
+            <SidebarProvider>
+              <AppSidebar />
+              <SidebarInset>
+                <MainContent>{children}</MainContent>
+              </SidebarInset>
+            </SidebarProvider>
+            <Toaster />
+          </Providers>
+        </ThemeProvider>
       </body>
     </html>
   );
