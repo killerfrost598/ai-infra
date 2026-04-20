@@ -4,7 +4,6 @@ export type TaskStatus = "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "PARTIAL
 
 export interface Server {
   id: string;
-  provider_account_id: string | null;
   external_server_id: string;
   hostname: string;
   ssh_port: number;

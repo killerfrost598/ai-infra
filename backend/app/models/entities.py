@@ -100,16 +100,6 @@ class ModelDeployment(Base):
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
-class ApiKey(Base):
-    __tablename__ = "api_keys"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    key_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    key_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
-    provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    is_revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
 
 class TaskRun(Base):
     __tablename__ = "task_runs"
@@ -201,13 +191,3 @@ class InferenceBenchmark(Base):
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
-class AuditLog(Base):
-    __tablename__ = "audit_logs"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
-    actor: Mapped[str] = mapped_column(String(255), nullable=False, default="system")
-    entity_type: Mapped[str] = mapped_column(String(128), nullable=False)
-    entity_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
