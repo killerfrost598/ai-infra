@@ -1,21 +1,57 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Check,
-  Copy,
-  FileText,
-  History,
-  Power,
-  RefreshCw,
-  Terminal,
-  type LucideIcon,
-} from "lucide-react";
+import Link from "next/link";
+import { History, Plus, Power, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ParsedCommand, Session, SessionListItem } from "@/lib/types";
+import { useCreateSession, useServers } from "@/lib/queries";
+import type { ParsedCommand, Server, Session, SessionListItem } from "@/lib/types";
+
+// Fallback for non-secure contexts (HTTP) where crypto.randomUUID is unavailable
+function genId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return genId();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// ── Live PTY parsing utilities (port of session_runner.py) ────────────────────
+
+const _ANSI_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[P^_][^\x1b]*\x1b\\|[ -/]*[0-~])/g;
+const _CTRL_RE = /[\x00-\x06\x0e-\x1a\x1c-\x1f]/g;
+const _PS1_RE = /__PS1__(\d+)__(\d+)__/g;
+
+function _stripAnsi(s: string): string {
+  return s.replace(_ANSI_RE, "").replace(_CTRL_RE, "");
+}
+
+function _parsePtyBlock(
+  block: string,
+  startedMs: number,
+  completedMs: number,
+  exitCode: number,
+): ParsedCommand | null {
+  const cleaned = _stripAnsi(block).trim().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = cleaned.split("\n").filter((l) => l.trim());
+  if (!lines.length) return null;
+  const command = lines[0].trim().replace(/^[^#$]*[#$]\s+/, "").trim();
+  if (!command || command.startsWith("export PROMPT_COMMAND")) return null;
+  const output = lines.slice(1).join("\n").trim();
+  return {
+    command,
+    output,
+    started_ms: startedMs,
+    completed_ms: completedMs,
+    duration_ms: Math.max(0, completedMs - startedMs),
+    exit_code: exitCode,
+  };
+}
 import { PtyTerminal } from "@/components/PtyTerminal";
+import { SessionLogsModal } from "@/components/SessionLogsModal";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { StatusBadge } from "@/components/StatusBadge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,48 +63,73 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { StatusBadge } from "@/components/StatusBadge";
 
-type RightTab = "commands" | "output" | "history";
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString();
+interface LabTab {
+  tabId: string;
+  sessionId: string;
+  label: string;
+  status: "ACTIVE" | "TERMINATED";
 }
 
 export default function LabPage() {
-  const [sessions, setSessions] = useState<SessionListItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sessionListLoading, setSessionListLoading] = useState(false);
-  const [isSessionDrawerOpen, setIsSessionDrawerOpen] = useState(false);
+  const [tabs, setTabs] = useState<LabTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [showServerPicker, setShowServerPicker] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [closingTabId, setClosingTabId] = useState<string | null>(null);
+  const [isTerminatingActive, setIsTerminatingActive] = useState(false);
+
+  // Active tab's session data — drives the logs panel
   const [session, setSession] = useState<Session | null>(null);
   const [commands, setCommands] = useState<ParsedCommand[]>([]);
-  const [activeTab, setActiveTab] = useState<RightTab>("commands");
-  const [selectedCmd, setSelectedCmd] = useState<ParsedCommand | null>(null);
   const [cmdLoading, setCmdLoading] = useState(false);
-  const [isTerminatingSession, setIsTerminatingSession] = useState(false);
-  const terminalKey = useRef(0);
+
+  // History drawer
+  const [historySessions, setHistorySessions] = useState<SessionListItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // L4 — live command tracking per tab
+  const ptyBufferRef = useRef<Record<string, string>>({});
+  const [liveCommandsMap, setLiveCommandsMap] = useState<Record<string, ParsedCommand[]>>({});
+
   const hasAppliedInitialTarget = useRef(false);
+  const activeTab = tabs.find((t) => t.tabId === activeTabId) ?? null;
+  const activeSessionId = activeTab?.sessionId ?? null;
 
-  const loadSessions = useCallback(async () => {
-    setSessionListLoading(true);
-    try {
-      const response = await api.sessions.list(undefined, undefined, 0, 50);
-      setSessions(response.items);
-      return response.items;
-    } finally {
-      setSessionListLoading(false);
+  // ── Load session data when active tab changes ──────────────────────────────
+  useEffect(() => {
+    if (!activeSessionId) {
+      setSession(null);
+      setCommands([]);
+      return;
     }
-  }, []);
+    let cancelled = false;
+    setCmdLoading(true);
+    setCommands([]);
 
+    Promise.all([
+      api.sessions.get(activeSessionId),
+      api.sessions.commandsSummary(activeSessionId),
+    ]).then(([s, summary]) => {
+      if (cancelled) return;
+      setSession(s);
+      setCommands(summary.commands);
+    }).catch(() => {
+      if (cancelled) return;
+      setSession(null);
+    }).finally(() => {
+      if (cancelled) return;
+      setCmdLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [activeSessionId]);
+
+  // ── Load from URL or sessionStorage on mount ───────────────────────────────
   useEffect(() => {
     if (hasAppliedInitialTarget.current) return;
     hasAppliedInitialTarget.current = true;
-    let isCancelled = false;
 
     const queryTarget = typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("session")
@@ -77,150 +138,206 @@ export default function LabPage() {
       ? sessionStorage.getItem("lab_session_id")
       : null;
 
-    if (storageTarget) {
-      sessionStorage.removeItem("lab_session_id");
-    }
+    if (storageTarget) sessionStorage.removeItem("lab_session_id");
+    if (typeof window !== "undefined") window.history.replaceState({}, "", "/lab");
 
-    loadSessions().then((items) => {
-      if (isCancelled) return;
-      if (queryTarget) {
-        setSelectedId(queryTarget);
-        if (typeof window !== "undefined") {
-          window.history.replaceState({}, "", "/lab");
-        }
-        return;
-      }
+    const targetId = queryTarget || storageTarget;
+    if (!targetId) return;
 
-      if (storageTarget && items.some((s) => s.id === storageTarget)) {
-        setSelectedId(storageTarget);
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [loadSessions]);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    let isCancelled = false;
-    setCommands([]);
-    setSelectedCmd(null);
-    setCmdLoading(true);
-
-    Promise.all([
-      api.sessions.get(selectedId),
-      api.sessions.commandsSummary(selectedId),
-    ]).then(([s, summary]) => {
-      if (isCancelled) return;
-      setSession(s);
-      setCommands(summary.commands);
-    }).catch(() => {
-      if (isCancelled) return;
-      setSession(null);
-    }).finally(() => {
-      if (isCancelled) return;
-      setCmdLoading(false);
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [selectedId]);
-
-  // useCallback prevents a new function reference on every render, which was
-  // previously causing PtyTerminal to remount (and reconnect) on each state update.
-  const refreshCommands = useCallback(async () => {
-    if (!selectedId) return;
-    setCmdLoading(true);
-    try {
-      const summary = await api.sessions.commandsSummary(selectedId);
-      setCommands(summary.commands);
-    } finally {
-      setCmdLoading(false);
-    }
-  }, [selectedId]);
-
-  const handleSessionSelect = useCallback((id: string) => {
-    terminalKey.current += 1;
-    setSelectedId(id);
-    if (typeof window !== "undefined") {
-      window.history.replaceState({}, "", `/lab?session=${encodeURIComponent(id)}`);
-    }
-    setIsSessionDrawerOpen(false);
+    api.sessions.get(targetId).then((s) => {
+      const newTab: LabTab = {
+        tabId: genId(),
+        sessionId: s.id,
+        label: s.label ?? `Session ${s.id.slice(0, 8)}`,
+        status: s.status,
+      };
+      setTabs([newTab]);
+      setActiveTabId(newTab.tabId);
+    }).catch(() => {});
   }, []);
 
-  const handleTerminateSession = useCallback(async () => {
-    if (!selectedId || session?.status !== "ACTIVE") return;
-
-    setIsTerminatingSession(true);
-    try {
-      const response = await api.sessions.terminate(selectedId);
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "Failed to terminate session");
+  // ── Tab management ─────────────────────────────────────────────────────────
+  const addTab = useCallback((sessionId: string, label: string, status: "ACTIVE" | "TERMINATED") => {
+    setTabs((prev) => {
+      const existing = prev.find((t) => t.sessionId === sessionId);
+      if (existing) {
+        setActiveTabId(existing.tabId);
+        return prev;
       }
+      const newTab: LabTab = { tabId: genId(), sessionId, label, status };
+      setActiveTabId(newTab.tabId);
+      return [...prev, newTab];
+    });
+  }, []);
 
-      terminalKey.current += 1;
-      setSelectedCmd(null);
+  const confirmCloseTab = useCallback((tabId: string) => {
+    const tab = tabs.find((t) => t.tabId === tabId);
+    if (!tab) return;
+    if (tab.status === "ACTIVE") {
+      setClosingTabId(tabId);
+    } else {
+      doCloseTab(tabId);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs]);
 
-      const [nextSession] = await Promise.all([
-        api.sessions.get(selectedId).catch(() => null),
-        loadSessions(),
+  const doCloseTab = useCallback((tabId: string) => {
+    const tab = tabs.find((t) => t.tabId === tabId);
+    if (tab?.status === "ACTIVE") {
+      api.sessions.terminate(tab.sessionId).catch(() => {});
+    }
+    const remaining = tabs.filter((t) => t.tabId !== tabId);
+    setTabs(remaining);
+    if (activeTabId === tabId) {
+      setActiveTabId(remaining[remaining.length - 1]?.tabId ?? null);
+    }
+    setClosingTabId(null);
+    // Cleanup live command buffers
+    delete ptyBufferRef.current[tabId];
+    setLiveCommandsMap((prev) => {
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
+  }, [tabs, activeTabId]);
+
+  // L4 — process incoming PTY bytes for a tab, extract commands from PS1 markers
+  const handlePtyData = useCallback((tabId: string, data: Uint8Array) => {
+    const chunk = new TextDecoder().decode(data);
+    ptyBufferRef.current[tabId] = (ptyBufferRef.current[tabId] ?? "") + chunk;
+    const buf = ptyBufferRef.current[tabId];
+
+    interface Marker { ms: number; code: number; idx: number; end: number }
+    const markers: Marker[] = [];
+    _PS1_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = _PS1_RE.exec(buf)) !== null) {
+      markers.push({ ms: parseInt(m[1]), code: parseInt(m[2]), idx: m.index, end: m.index + m[0].length });
+    }
+
+    if (markers.length < 2) {
+      if (buf.length > 100000) ptyBufferRef.current[tabId] = buf.slice(-50000);
+      return;
+    }
+
+    const newCmds: ParsedCommand[] = [];
+    for (let i = 0; i < markers.length - 1; i++) {
+      const block = buf.slice(markers[i].end, markers[i + 1].idx);
+      const cmd = _parsePtyBlock(block, markers[i].ms, markers[i + 1].ms, markers[i + 1].code);
+      if (cmd) newCmds.push(cmd);
+    }
+    ptyBufferRef.current[tabId] = buf.slice(markers[markers.length - 1].idx);
+
+    if (newCmds.length > 0) {
+      setLiveCommandsMap((prev) => ({
+        ...prev,
+        [tabId]: [...(prev[tabId] ?? []), ...newCmds],
+      }));
+    }
+  }, []);
+
+  // ── Terminate the active tab's session ────────────────────────────────────
+  const handleTerminateActive = useCallback(async () => {
+    if (!activeTab || activeTab.status !== "ACTIVE") return;
+    setIsTerminatingActive(true);
+    try {
+      await api.sessions.terminate(activeTab.sessionId);
+      setTabs((prev) =>
+        prev.map((t) => t.tabId === activeTabId ? { ...t, status: "TERMINATED" } : t)
+      );
+      const [nextSession, summary] = await Promise.all([
+        api.sessions.get(activeTab.sessionId).catch(() => null),
+        api.sessions.commandsSummary(activeTab.sessionId).catch(() => ({ commands: [] as ParsedCommand[], total: 0 })),
       ]);
       setSession(nextSession);
-
-      if (nextSession) {
-        const summary = await api.sessions.commandsSummary(selectedId);
-        setCommands(summary.commands);
-      } else {
-        setCommands([]);
-      }
+      setCommands(summary.commands);
       toast.success("Session terminated");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      toast.error(`Could not terminate session: ${message}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to terminate");
     } finally {
-      setIsTerminatingSession(false);
+      setIsTerminatingActive(false);
     }
-  }, [loadSessions, selectedId, session?.status]);
+  }, [activeTab, activeTabId]);
 
-  const selectedSessionListItem = sessions.find((item) => item.id === selectedId) ?? null;
+  const refreshCommands = useCallback(async () => {
+    if (!activeSessionId) return;
+    setCmdLoading(true);
+    try {
+      const summary = await api.sessions.commandsSummary(activeSessionId);
+      setCommands(summary.commands);
+    } finally {
+      setCmdLoading(false);
+    }
+  }, [activeSessionId]);
 
-  useEffect(() => {
-    if (!isSessionDrawerOpen) return;
+  const loadHistory = useCallback(() => {
+    setHistoryLoading(true);
+    api.sessions.list(undefined, undefined, 0, 50)
+      .then((r) => setHistorySessions(r.items))
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false));
+  }, []);
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsSessionDrawerOpen(false);
-      }
-    };
+  const closingTab = closingTabId ? tabs.find((t) => t.tabId === closingTabId) ?? null : null;
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isSessionDrawerOpen]);
-
-  const ptySessionId = selectedId && session?.status === "ACTIVE" ? selectedId : null;
+  // L4 — use live commands while session is active, fall back to API data after termination
+  const liveCommands = activeTabId ? (liveCommandsMap[activeTabId] ?? []) : [];
+  const effectiveCommands = activeTab?.status === "ACTIVE" && liveCommands.length > 0
+    ? liveCommands
+    : commands;
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex h-14 items-center justify-between border-b border-border bg-background px-6 shrink-0">
-        <div>
-          <h1 className="text-base font-semibold">Lab</h1>
-          <p className="text-xs text-muted-foreground">Interactive terminal + command history</p>
+      {/* Header / tab strip */}
+      <div className="flex h-14 shrink-0 items-center gap-2 overflow-x-auto border-b border-border bg-background px-4">
+        {/* Tabs */}
+        <div className="flex flex-1 items-center gap-1 min-w-0">
+          {tabs.map((tab) => (
+            <div
+              key={tab.tabId}
+              onClick={() => setActiveTabId(tab.tabId)}
+              className={`flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                tab.tabId === activeTabId
+                  ? "border-primary/60 bg-primary/10 text-foreground"
+                  : "border-border/70 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                tab.status === "ACTIVE" ? "bg-emerald-500" : "bg-muted-foreground/30"
+              }`} />
+              <span className="max-w-[120px] truncate">{tab.label}</span>
+              <button
+                className="ml-0.5 rounded px-0.5 opacity-50 transition-all hover:bg-destructive/20 hover:text-destructive hover:opacity-100"
+                onClick={(e) => { e.stopPropagation(); confirmCloseTab(tab.tabId); }}
+                title="Close tab"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setShowServerPicker(true)}
+          >
+            <Plus className="h-3 w-3" />
+            New Session
+          </Button>
         </div>
-        <div className="flex items-center gap-2">
-          {selectedId && session?.status === "ACTIVE" && (
+
+        {/* Right actions */}
+        <div className="flex shrink-0 items-center gap-2">
+          {activeTab?.status === "ACTIVE" && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
                   variant="destructive-secondary"
                   size="sm"
-                  disabled={isTerminatingSession}
-                  className="gap-1.5"
+                  disabled={isTerminatingActive}
+                  className="h-7 gap-1.5 text-xs"
                 >
-                  <Power className="h-3.5 w-3.5" />
+                  <Power className="h-3 w-3" />
                   Terminate
                 </Button>
               </AlertDialogTrigger>
@@ -234,7 +351,7 @@ export default function LabPage() {
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={handleTerminateSession}
+                    onClick={handleTerminateActive}
                     className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   >
                     Terminate Session
@@ -243,397 +360,205 @@ export default function LabPage() {
               </AlertDialogContent>
             </AlertDialog>
           )}
-          <Button variant="outline" size="sm" onClick={() => loadSessions()} disabled={sessionListLoading}>
-            {sessionListLoading ? "Refreshing..." : "Refresh"}
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => setIsSessionDrawerOpen((prev) => !prev)}>
-            Sessions
-            {selectedSessionListItem && (
-              <span className="ml-1 text-xs text-muted-foreground">
-                ({selectedSessionListItem.label ?? selectedSessionListItem.id.slice(0, 8)})
-              </span>
-            )}
+          {tabs.length > 0 && (
+            <Button
+              variant={logsOpen ? "secondary" : "outline"}
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => setLogsOpen((v) => !v)}
+            >
+              <History className="h-3 w-3" />
+              {logsOpen ? "Hide Logs" : "Logs"}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => { setShowHistory(true); loadHistory(); }}
+          >
+            History
           </Button>
         </div>
       </div>
 
-      {!selectedId ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground text-sm">
-          <p>Select a session to begin terminal work.</p>
-          <Button size="sm" onClick={() => setIsSessionDrawerOpen(true)}>
-            Open Sessions
+      {/* Terminal area */}
+      {tabs.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+          <Terminal className="h-8 w-8 opacity-20" />
+          <p className="text-sm">No active sessions.</p>
+          <Button size="sm" onClick={() => setShowServerPicker(true)}>
+            <Plus className="mr-1.5 h-3 w-3" />
+            New Session
           </Button>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden gap-1 p-3 bg-background">
-          {/* Left Terminal Panel */}
-          <TerminalPanel
-            session={session}
-            ptySessionId={ptySessionId}
-            terminalKey={terminalKey.current}
-          />
+        <div className="relative flex-1 overflow-hidden">
+          {tabs.map((tab) => (
+            <div
+              key={tab.tabId}
+              className="absolute inset-0"
+              style={{ display: tab.tabId === activeTabId ? "block" : "none" }}
+            >
+              {tab.status === "ACTIVE" ? (
+                <PtyTerminal
+                  key={tab.sessionId}
+                  sessionId={tab.sessionId}
+                  onDisconnect={() =>
+                    setTabs((prev) =>
+                      prev.map((t) => t.tabId === tab.tabId ? { ...t, status: "TERMINATED" } : t)
+                    )
+                  }
+                  onData={(data) => handlePtyData(tab.tabId, data)}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center bg-[#09090b] text-sm text-muted-foreground">
+                  Session terminated — terminal unavailable
+                </div>
+              )}
+            </div>
+          ))}
 
-          {/* Right Terminal View Panel */}
-          <TerminalViewPanel
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            commands={commands}
-            cmdLoading={cmdLoading}
-            selectedCmd={selectedCmd}
-            onSelectCmd={(cmd) => {
-              setSelectedCmd(cmd);
-              setActiveTab("output");
-            }}
+          {/* Logs slide-in — no backdrop, terminal stays interactive */}
+          <SessionLogsModal
+            isOpen={logsOpen}
+            onClose={() => setLogsOpen(false)}
+            sessionId={activeSessionId}
             session={session}
+            commands={effectiveCommands}
+            cmdLoading={activeTab?.status === "ACTIVE" ? false : cmdLoading}
             onRefresh={refreshCommands}
           />
         </div>
       )}
 
+      {/* Confirm close active tab */}
+      <AlertDialog open={!!closingTab} onOpenChange={(open) => { if (!open) setClosingTabId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Close this terminal?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will terminate the active SSH session on{" "}
+              <strong>{closingTab?.label}</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => closingTabId && doCloseTab(closingTabId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Close &amp; Terminate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Server picker */}
+      {showServerPicker && (
+        <ServerPickerModal
+          onClose={() => setShowServerPicker(false)}
+          onStart={(sessionId, label) => {
+            addTab(sessionId, label, "ACTIVE");
+            setShowServerPicker(false);
+          }}
+        />
+      )}
+
+      {/* History drawer */}
       <SessionDrawer
-        open={isSessionDrawerOpen}
-        loading={sessionListLoading}
-        sessions={sessions}
-        selectedId={selectedId}
-        onClose={() => setIsSessionDrawerOpen(false)}
-        onRefresh={() => loadSessions()}
-        onSelect={handleSessionSelect}
+        open={showHistory}
+        loading={historyLoading}
+        sessions={historySessions}
+        selectedId={activeSessionId}
+        onClose={() => setShowHistory(false)}
+        onRefresh={loadHistory}
+        onSelect={(id) => {
+          const s = historySessions.find((item) => item.id === id);
+          if (s) addTab(id, s.server_hostname ?? `Session ${id.slice(0, 8)}`, s.status);
+          setShowHistory(false);
+        }}
       />
     </div>
   );
 }
 
-// ============================================================================
-// Terminal Panel Component (Left Side)
-// ============================================================================
+// ── Server Picker Modal ───────────────────────────────────────────────────────
 
-function TerminalPanel({
-  session,
-  ptySessionId,
-  terminalKey,
+function ServerPickerModal({
+  onClose,
+  onStart,
 }: {
-  session: Session | null;
-  ptySessionId: string | null;
-  terminalKey: number;
+  onClose: () => void;
+  onStart: (sessionId: string, label: string) => void;
 }) {
-  return (
-    <div className="flex-1 flex flex-col rounded-lg border border-border bg-muted/30 overflow-hidden shadow-sm">
-      {/* Header */}
-      <div className="flex h-9 items-center gap-3 border-b border-border bg-muted/50 px-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="h-2 w-2 rounded-full bg-primary/80" />
-          <span className="text-xs font-medium text-foreground">Terminal</span>
-        </div>
-        {session?.status === "TERMINATED" && (
-          <span className="ml-auto rounded-full bg-destructive/20 px-2 py-0.5 text-[10px] font-medium text-destructive">
-            terminated
-          </span>
-        )}
-      </div>
+  const { data: serversData, isLoading } = useServers();
+  const createSession = useCreateSession();
+  const [startingId, setStartingId] = useState<string | null>(null);
 
-      {/* Terminal Content */}
-      <div className="flex-1 overflow-hidden">
-        {ptySessionId ? (
-          <PtyTerminal
-            key={`${ptySessionId}-${terminalKey}`}
-            sessionId={ptySessionId}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center bg-muted/10 text-muted-foreground text-sm">
-            Session is terminated — terminal unavailable
-          </div>
-        )}
-      </div>
-    </div>
+  const readyServers = (serversData?.items ?? []).filter(
+    (s: Server) => s.status === "READY" || s.status === "PROVISIONING"
   );
-}
 
-// ============================================================================
-// Terminal View Panel Component (Right Side with Tabs)
-// ============================================================================
-
-function TerminalViewPanel({
-  activeTab,
-  onTabChange,
-  commands,
-  cmdLoading,
-  selectedCmd,
-  onSelectCmd,
-  session,
-  onRefresh,
-}: {
-  activeTab: RightTab;
-  onTabChange: (tab: RightTab) => void;
-  commands: ParsedCommand[];
-  cmdLoading: boolean;
-  selectedCmd: ParsedCommand | null;
-  onSelectCmd: (cmd: ParsedCommand) => void;
-  session: Session | null;
-  onRefresh: () => void;
-}) {
-  const tabs: Array<{ id: RightTab; label: string; icon: LucideIcon }> = [
-    { id: "commands", label: "Commands", icon: Terminal },
-    { id: "output", label: "Output", icon: FileText },
-    { id: "history", label: "History", icon: History },
-  ];
-
-  return (
-    <div className="h-full w-80 flex flex-col rounded-xl border border-border/70 bg-gradient-to-b from-muted/50 via-muted/25 to-background/90 overflow-hidden shadow-sm">
-      {/* Tab Navigation */}
-      <div className="flex shrink-0 items-center border-b border-border/70 bg-background/60 px-2 py-1.5 backdrop-blur">
-        <div className="flex gap-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={`relative rounded-md px-3 py-2 text-xs font-medium transition-all duration-200 ${
-                activeTab === tab.id
-                  ? "text-primary bg-primary/10"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                <tab.icon className="h-3.5 w-3.5" />
-                <span>{tab.label}</span>
-                {tab.id === "commands" && commands.length > 0 && (
-                  <span className="rounded-full bg-primary/20 px-1.5 py-0 text-[10px] font-semibold text-primary">
-                    {commands.length}
-                  </span>
-                )}
-              </span>
-              {activeTab === tab.id && (
-                <div className="absolute bottom-0 left-3 right-3 h-0.5 bg-primary rounded-full" />
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Refresh Button */}
-        {activeTab === "commands" && (
-          <button
-            onClick={onRefresh}
-            disabled={cmdLoading}
-            className="ml-auto p-1.5 rounded-md transition-colors hover:bg-muted/60 disabled:opacity-40 text-muted-foreground hover:text-foreground"
-            title="Refresh commands"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${cmdLoading ? "animate-spin" : ""}`} />
-          </button>
-        )}
-      </div>
-
-      {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto">
-        {activeTab === "commands" && (
-          <CommandsTab
-            commands={commands}
-            loading={cmdLoading}
-            selectedCmd={selectedCmd}
-            onSelect={onSelectCmd}
-          />
-        )}
-        {activeTab === "output" && (
-          <OutputTab cmd={selectedCmd} />
-        )}
-        {activeTab === "history" && (
-          <HistoryTab ptyLog={session?.pty_log ?? null} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// Tab Content Components
-// ============================================================================
-
-function CommandsTab({
-  commands,
-  loading,
-  selectedCmd,
-  onSelect,
-}: {
-  commands: ParsedCommand[];
-  loading: boolean;
-  selectedCmd: ParsedCommand | null;
-  onSelect: (cmd: ParsedCommand) => void;
-}) {
-  if (loading)
-    return <div className="p-4 text-xs text-muted-foreground">Loading commands…</div>;
-
-  if (!commands.length)
-    return (
-      <div className="p-4 text-xs text-muted-foreground/70 leading-relaxed">
-        No commands detected yet. Commands will appear here after you run them in the terminal.
-      </div>
-    );
-
-  return (
-    <div className="divide-y divide-border/50">
-      {commands.map((cmd, i) => (
-        <button
-          key={`${cmd.started_ms}-${cmd.command}-${i}`}
-          onClick={() => onSelect(cmd)}
-          className={`w-full px-3 py-2.5 text-left transition-colors border-l-2 ${
-            selectedCmd === cmd
-              ? "bg-primary/10 border-l-primary"
-              : "border-l-transparent hover:bg-muted/50 hover:border-l-muted-foreground/30"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                cmd.exit_code === 0 ? "bg-emerald-500" : "bg-red-500"
-              }`}
-            />
-            <code className="flex-1 truncate text-xs font-mono text-foreground">
-              {cmd.command}
-            </code>
-            <span className="shrink-0 text-[10px] text-muted-foreground/50">
-              {formatDuration(cmd.duration_ms)}
-            </span>
-          </div>
-          <div className="mt-1 pl-3.5 text-[10px] text-muted-foreground/60">
-            {formatTime(cmd.started_ms)}
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function OutputTab({ cmd }: { cmd: ParsedCommand | null }) {
-  if (!cmd)
-    return (
-      <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-        <div className="text-muted-foreground/60 text-xs">
-          <p className="mb-1">No command selected</p>
-          <p className="text-[11px] text-muted-foreground/40">
-            Select a command from the Commands tab to view its output.
-          </p>
-        </div>
-      </div>
-    );
-
-  return (
-    <div className="flex h-full flex-col gap-3 p-3">
-      <div className="shrink-0 space-y-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium ${
-              cmd.exit_code === 0
-                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                : "bg-red-500/15 text-red-600 dark:text-red-400"
-            }`}
-          >
-            <span>exit {cmd.exit_code}</span>
-          </span>
-          <span className="text-[10px] text-muted-foreground/60">
-            {formatDuration(cmd.duration_ms)}
-          </span>
-          <span className="text-[10px] text-muted-foreground/60">
-            {formatTime(cmd.started_ms)}
-          </span>
-          <CopyTextButton
-            className="ml-auto"
-            text={cmd.output}
-            label="Copy Output"
-          />
-        </div>
-        <code className="block text-xs font-mono text-foreground/80 truncate">
-          $ {cmd.command}
-        </code>
-      </div>
-
-      {cmd.output ? (
-        <pre className="terminal flex-1 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-300 bg-muted/40 p-2.5 rounded border border-border/50">
-          {cmd.output}
-        </pre>
-      ) : (
-        <p className="text-xs text-muted-foreground/50 py-8 text-center">
-          (no output captured)
-        </p>
-      )}
-    </div>
-  );
-}
-
-function HistoryTab({ ptyLog }: { ptyLog: string | null }) {
-  if (!ptyLog)
-    return (
-      <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-        <div className="text-muted-foreground/60 text-xs">
-          <p>No PTY history available</p>
-        </div>
-      </div>
-    );
-
-  return (
-    <div className="flex h-full flex-col p-3">
-      <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border/60 bg-background/60 px-2.5 py-1.5">
-        <span className="text-[11px] font-medium text-foreground/70">PTY Transcript</span>
-        <CopyTextButton text={ptyLog} label="Copy History" />
-      </div>
-      <pre className="terminal flex-1 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-zinc-300 bg-muted/40 rounded border border-border/50 p-3">
-        {ptyLog}
-      </pre>
-    </div>
-  );
-}
-
-function CopyTextButton({
-  text,
-  label,
-  className,
-}: {
-  text: string | null;
-  label: string;
-  className?: string;
-}) {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
-  const supportsClipboard = typeof navigator !== "undefined" && Boolean(navigator.clipboard);
-  const hasText = Boolean(text && text.trim().length > 0);
-
-  useEffect(() => {
-    if (copyState === "idle") return;
-    const timer = window.setTimeout(() => setCopyState("idle"), 1800);
-    return () => window.clearTimeout(timer);
-  }, [copyState]);
-
-  const onCopy = useCallback(async () => {
-    if (!text) return;
-    if (!supportsClipboard) {
-      setCopyState("error");
-      toast.error("Clipboard is not available in this browser context");
-      return;
-    }
+  async function handleStart(server: Server) {
+    setStartingId(server.id);
     try {
-      await navigator.clipboard.writeText(text);
-      setCopyState("copied");
-      toast.success("Copied to clipboard");
+      const session = await createSession.mutateAsync({ server_id: server.id });
+      onStart(session.id, server.hostname);
     } catch {
-      setCopyState("error");
-      toast.error("Copy failed. Try again.");
+      setStartingId(null);
     }
-  }, [supportsClipboard, text]);
-
-  const buttonLabel = copyState === "copied" ? "Copied" : copyState === "error" ? "Retry" : label;
+  }
 
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={!hasText || !supportsClipboard}
-      onClick={onCopy}
-      className={`h-6 gap-1.5 border-border/60 bg-background/70 px-2 text-[11px] ${className ?? ""}`}
-      title={supportsClipboard ? label : "Clipboard unavailable"}
-    >
-      {copyState === "copied" ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-      {buttonLabel}
-    </Button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <Card className="w-full max-w-md p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Start New Session</h2>
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading servers…</p>
+        ) : readyServers.length === 0 ? (
+          <div className="py-4 text-center">
+            <p className="text-sm text-muted-foreground">No servers available.</p>
+            <Link
+              href="/servers"
+              className="mt-1 inline-block text-xs text-primary underline-offset-4 hover:underline"
+            >
+              Go to Servers →
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {readyServers.map((server: Server) => (
+              <button
+                key={server.id}
+                onClick={() => handleStart(server)}
+                disabled={!!startingId}
+                className="w-full rounded-md border border-border px-4 py-3 text-left transition-colors hover:bg-muted/40 disabled:opacity-50"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">{server.hostname}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {server.gpu_model ?? "GPU unknown"} · {server.ssh_username}
+                    </p>
+                  </div>
+                  {startingId === server.id && (
+                    <span className="text-xs text-muted-foreground">Connecting…</span>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 
-// ============================================================================
+// ── Session Drawer (History browser) ─────────────────────────────────────────
 
 function SessionDrawer({
   open,
@@ -655,11 +580,12 @@ function SessionDrawer({
   return (
     <div className={`absolute inset-0 z-30 ${open ? "pointer-events-auto" : "pointer-events-none"}`}>
       <button
-        className={`absolute inset-0 bg-background/70 backdrop-blur-sm transition-opacity ${open ? "opacity-100" : "opacity-0"}`}
+        className={`absolute inset-0 bg-background/70 backdrop-blur-sm transition-opacity ${
+          open ? "opacity-100" : "opacity-0"
+        }`}
         onClick={onClose}
-        aria-label="Close sessions drawer"
+        aria-label="Close history drawer"
       />
-
       <aside
         className={`absolute right-0 top-0 h-full w-full max-w-sm border-l border-border bg-background shadow-2xl transition-transform duration-300 ${
           open ? "translate-x-0" : "translate-x-full"
@@ -668,12 +594,12 @@ function SessionDrawer({
         <div className="flex h-full flex-col">
           <div className="flex h-14 items-center justify-between border-b border-border px-4">
             <div>
-              <h2 className="text-sm font-semibold">Sessions</h2>
-              <p className="text-xs text-muted-foreground">Open a session in Lab</p>
+              <h2 className="text-sm font-semibold">Session History</h2>
+              <p className="text-xs text-muted-foreground">Open a session as a tab</p>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
-                {loading ? "..." : "Refresh"}
+                {loading ? "…" : "Refresh"}
               </Button>
               <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
             </div>
@@ -681,45 +607,38 @@ function SessionDrawer({
 
           <div className="flex-1 overflow-y-auto p-2">
             {loading && sessions.length === 0 ? (
-              <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>
+              <div className="p-4 text-sm text-muted-foreground">Loading…</div>
             ) : sessions.length === 0 ? (
-              <div className="p-4 text-sm text-muted-foreground">No sessions available.</div>
+              <div className="p-4 text-sm text-muted-foreground">No sessions found.</div>
             ) : (
               <div className="space-y-1">
-                {sessions.map((session) => {
-                  const isSelected = session.id === selectedId;
-                  return (
-                    <button
-                      key={session.id}
-                      onClick={() => onSelect(session.id)}
-                      className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
-                        isSelected
-                          ? "border-primary/60 bg-primary/10"
-                          : "border-border/70 hover:bg-muted/40"
-                      }`}
-                    >
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium">
-                          {session.label ?? `Session ${session.id.slice(0, 8)}`}
-                        </span>
-                        <StatusBadge status={session.status} />
-                      </div>
-
-                      <div className="text-xs text-muted-foreground">
-                        {session.server_hostname ?? session.server_id.slice(0, 8)}
-                      </div>
-
-                      <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground/70">
-                        <span>
-                          {session.command_count} cmd{session.command_count !== 1 ? "s" : ""}
-                        </span>
-                        <span>
-                          {new Date(session.started_at).toLocaleString()}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
+                {sessions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => onSelect(s.id)}
+                    className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                      s.id === selectedId
+                        ? "border-primary/60 bg-primary/10"
+                        : "border-border/70 hover:bg-muted/40"
+                    }`}
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">
+                        {s.label ?? `Session ${s.id.slice(0, 8)}`}
+                      </span>
+                      <StatusBadge status={s.status} />
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {s.server_hostname ?? s.server_id.slice(0, 8)}
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground/70">
+                      <span>
+                        {s.command_count} cmd{s.command_count !== 1 ? "s" : ""}
+                      </span>
+                      <span>{new Date(s.started_at).toLocaleString()}</span>
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -728,6 +647,3 @@ function SessionDrawer({
     </div>
   );
 }
-
-// ============================================================================
-

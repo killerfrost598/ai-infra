@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useCloreOffers, useRentals, useServers, useBenchmarks, useRentClore, useTerminateRental, useCreateServer, useCreateSession } from "@/lib/queries";
+import { useCloreBalance, useCloreOffers, useRentals, useServers, useBenchmarks, useRentClore, useTerminateRental, useCreateServer, useCreateSession } from "@/lib/queries";
 import type { CloreOffer, CloreRental, InferenceBenchmark, RentRequest, Server } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -755,13 +755,7 @@ function RegisterRentalForm({ rental, onSuccess, onCancel }: {
 // ── Rent dialog ────────────────────────────────────────────────────────────────
 
 const PRESET_IMAGES = [
-  { label: "Ubuntu 22.04 + CUDA 12 (Clore)", value: "cloreai/ubuntu22.04-cuda12" },
   { label: "Ubuntu Jupyter (Clore)", value: "cloreai/jupyter:ubuntu24.04-v2" },
-  { label: "CUDA 12.8 Base — Ubuntu 22.04", value: "nvidia/cuda:12.8.0-base-ubuntu22.04" },
-  { label: "CUDA 12.8 Runtime — Ubuntu 22.04", value: "nvidia/cuda:12.8.0-runtime-ubuntu22.04" },
-  { label: "CUDA 12.8 Devel — Ubuntu 22.04", value: "nvidia/cuda:12.8.0-devel-ubuntu22.04" },
-  { label: "CUDA 11.8 Base — Ubuntu 22.04", value: "nvidia/cuda:11.8.0-base-ubuntu22.04" },
-  { label: "CUDA 11.8 + cuDNN 8 Devel", value: "nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04" },
   { label: "Custom…", value: "__custom__" },
 ];
 
@@ -769,7 +763,8 @@ const ALL_CURRENCIES = ["CLORE-Blockchain", "USD-Blockchain", "bitcoin"];
 
 function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void }) {
   const rentClore = useRentClore();
-  const [imagePreset, setImagePreset] = useState("cloreai/ubuntu22.04-cuda12");
+  const { data: balance } = useCloreBalance();
+  const [imagePreset, setImagePreset] = useState("cloreai/jupyter:ubuntu24.04-v2");
   const [customImage, setCustomImage] = useState("");
   const [authMode, setAuthMode] = useState<"password" | "key">("password");
   const [sshPassword, setSshPassword] = useState("");
@@ -790,6 +785,20 @@ function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void
   const [error, setError] = useState<string | null>(null);
   const [generatingKey, setGeneratingKey] = useState(false);
   const [keyGenMsg, setKeyGenMsg] = useState<string | null>(null);
+  const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [privateKey, setPrivateKey] = useState<string | null>(null);
+  const [fetchingPrivateKey, setFetchingPrivateKey] = useState(false);
+
+  useEffect(() => {
+    if (!balance?.balances?.length) return;
+    const allowed = offer.allowed_coins?.length
+      ? ALL_CURRENCIES.filter((c) => offer.allowed_coins.includes(c))
+      : ALL_CURRENCIES;
+    const nonZero = balance.balances.filter((w) => w.amount > 0 && allowed.includes(w.currency));
+    if (!nonZero.length) return;
+    const highest = nonZero.reduce((a, b) => (a.amount >= b.amount ? a : b));
+    setCurrency(highest.currency);
+  }, [balance, offer.allowed_coins]);
 
   const image = imagePreset === "__custom__" ? customImage.trim() : imagePreset;
 
@@ -909,7 +918,64 @@ function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void
               <textarea className="input w-full text-sm font-mono resize-none" rows={2}
                 placeholder="ssh-ed25519 AAAA… or ssh-rsa AAAA… (or click Generate)"
                 value={sshKey} onChange={(e) => setSshKey(e.target.value)} />
-              {keyGenMsg && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{keyGenMsg}</p>}
+              {keyGenMsg && (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{keyGenMsg}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={fetchingPrivateKey}
+                    onClick={async () => {
+                      setFetchingPrivateKey(true);
+                      try {
+                        const { api } = await import("@/lib/api");
+                        const { private_key } = await api.settings.getPrivateKey();
+                        setPrivateKey(private_key);
+                        setShowPrivateKey(true);
+                      } catch (e) {
+                        setKeyGenMsg(e instanceof Error ? e.message : "Failed to retrieve private key");
+                      } finally {
+                        setFetchingPrivateKey(false);
+                      }
+                    }}
+                  >
+                    {fetchingPrivateKey ? "Loading…" : "Show Private Key"}
+                  </Button>
+                </div>
+              )}
+              {showPrivateKey && privateKey && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Private key — copy and store safely</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-5 px-2 text-[10px]"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(privateKey).catch(() => {
+                          const ta = document.createElement("textarea");
+                          ta.value = privateKey;
+                          ta.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(ta);
+                        });
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <textarea
+                    readOnly
+                    rows={4}
+                    className="input w-full text-[10px] font-mono resize-none select-all"
+                    value={privateKey}
+                  />
+                </div>
+              )}
               <div className="rounded bg-muted/40 border border-border px-3 py-2 text-xs text-muted-foreground">
                 <span className="text-foreground/70 font-medium">Private key:</span> the platform will use the SSH private key
                 stored in <span className="text-indigo-400">Settings → SSH Key</span> to connect terminal sessions.

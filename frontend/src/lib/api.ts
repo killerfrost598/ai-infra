@@ -67,8 +67,11 @@ export const api = {
       fetch(`${BASE_URL}/api/v1/servers/${id}`, { method: "DELETE" }),
 
     ssh: {
-      test: (id: string) =>
-        apiFetch<SSHTestResult>(`/api/v1/servers/${id}/ssh/test`, { method: "POST" }),
+      test: (id: string, promoteIfReachable = true) =>
+        apiFetch<SSHTestResult>(
+          `/api/v1/servers/${id}/ssh/test${promoteIfReachable ? "" : "?promote_if_reachable=false"}`,
+          { method: "POST" },
+        ),
       exec: (id: string, command: string) =>
         apiFetch<ExecResult>(`/api/v1/servers/${id}/ssh/exec`, {
           method: "POST",
@@ -121,6 +124,8 @@ export const api = {
       fetch(`${BASE_URL}/api/v1/settings/${key}`, { method: "DELETE" }),
     generateKeypair: () =>
       apiFetch<{ public_key: string }>("/api/v1/settings/generate-ssh-keypair", { method: "POST" }),
+    getPrivateKey: () =>
+      apiFetch<{ private_key: string }>("/api/v1/settings/ssh-private-key"),
   },
 
   clore: {

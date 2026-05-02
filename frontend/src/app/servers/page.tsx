@@ -1,21 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useServers, useRentals, useCreateServer, useDeleteServer, useCreateSession } from "@/lib/queries";
-import type { CloreRental, Server, ServerCreate } from "@/lib/types";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { keys, useServers, useRentals, useCreateServer, useDeleteServer, useCreateSession } from "@/lib/queries";
+import type { CloreRental, Server, ServerCreate, SSHTestResult } from "@/lib/types";
 import { serverSchema, type ServerFormValues } from "@/lib/schemas";
 import { StatusBadge } from "@/components/StatusBadge";
+import { PtyTerminal } from "@/components/PtyTerminal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export default function ServersPage() {
-  const router = useRouter();
-
   const { data: serversData, isLoading, error } = useServers();
   const { data: rentalsData } = useRentals();
   const servers: Server[] = serversData?.items ?? [];
@@ -26,9 +32,15 @@ export default function ServersPage() {
   const deleteServer = useDeleteServer();
   const createSession = useCreateSession();
 
+  const qc = useQueryClient();
+
   const [registeringId, setRegisteringId] = useState<string | null>(null);
   const [startingSSH, setStartingSSH] = useState<string | null>(null);
+  const [terminalSession, setTerminalSession] = useState<{ id: string; serverName: string } | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [sshTestResults, setSshTestResults] = useState<Record<string, SSHTestResult>>({});
+  const [expandedTestId, setExpandedTestId] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"password" | "key">("password");
   const [formError, setFormError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -51,6 +63,39 @@ export default function ServersPage() {
     return rentals.filter((r) => !extIds.has(r.id));
   }, [rentals, servers]);
 
+  // Auto-poll every 10 s while any server is in PROVISIONING state (S3)
+  const hasProvisioning = servers.some((s) => s.status === "PROVISIONING");
+  useEffect(() => {
+    if (!hasProvisioning) return;
+    const id = setInterval(() => {
+      qc.invalidateQueries({ queryKey: keys.servers() });
+    }, 10000);
+    return () => clearInterval(id);
+  }, [hasProvisioning, qc]);
+
+  async function handleTestSSH(serverId: string) {
+    setTestingId(serverId);
+    setExpandedTestId(serverId);
+    try {
+      const result = await api.servers.ssh.test(serverId);
+      setSshTestResults((prev) => ({ ...prev, [serverId]: result }));
+      if (result.success) {
+        qc.invalidateQueries({ queryKey: keys.servers() });
+      }
+    } catch (e) {
+      setSshTestResults((prev) => ({
+        ...prev,
+        [serverId]: {
+          success: false,
+          message: e instanceof Error ? e.message : "Test failed",
+          steps: [{ step: "error", success: false, message: e instanceof Error ? e.message : "Unknown error", elapsed_ms: 0 }],
+        },
+      }));
+    } finally {
+      setTestingId(null);
+    }
+  }
+
   function openForm() {
     form.reset();
     setSshPrivateKey("");
@@ -59,14 +104,14 @@ export default function ServersPage() {
     setShowForm(true);
   }
 
-  async function handleStartSSH(serverId: string) {
+  async function handleStartSSH(serverId: string, serverName: string) {
     setStartingSSH(serverId);
     try {
       const session = await createSession.mutateAsync({ server_id: serverId });
-      sessionStorage.setItem("lab_session_id", session.id);
-      router.push("/lab");
+      setTerminalSession({ id: session.id, serverName });
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "Failed to start SSH session");
+    } finally {
       setStartingSSH(null);
     }
   }
@@ -224,51 +269,124 @@ export default function ServersPage() {
 
       <div className="space-y-2">
         {servers.map((s) => (
-          <Card key={s.id} className="group flex items-center gap-4 px-5 py-4 transition-all hover:border-muted-foreground/30">
-            <div className="shrink-0">
-              <StatusBadge status={s.status} />
-            </div>
-
-            <Link href={`/servers/${s.id}`} className="flex flex-1 items-center gap-4 min-w-0">
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{s.hostname}</p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {s.ssh_username}@{s.hostname}:{s.ssh_port}
-                  {s.has_ssh_key ? " · key" : s.has_ssh_password ? " · password" : ""}
-                </p>
+          <div key={s.id} className="overflow-hidden rounded-xl border border-border bg-card transition-all hover:border-muted-foreground/30">
+            <div className="group flex items-center gap-4 px-5 py-4">
+              <div className="shrink-0">
+                <StatusBadge status={s.status} />
               </div>
-              <div className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">
-                <p>{s.gpu_model ?? "GPU unknown"}</p>
-                <p>{s.vram_gb != null ? `${s.vram_gb} GB VRAM` : ""}{s.cuda_version ? ` · CUDA ${s.cuda_version}` : ""}</p>
-              </div>
-            </Link>
 
-            <div className="flex shrink-0 items-center gap-2 transition-opacity">
-              <Button
-                variant="outline"
-                size="sm"
-                loading={startingSSH === s.id}
-                disabled={s.status === "TERMINATED"}
-                onClick={() => handleStartSSH(s.id)}
-              >
-                SSH
-              </Button>
-              <Link href={`/servers/${s.id}`}>
-                <Button variant="ghost" size="sm">Open →</Button>
+              <Link href={`/servers/${s.id}`} className="flex flex-1 items-center gap-4 min-w-0">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium">{s.hostname}</p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {s.ssh_username}@{s.hostname}:{s.ssh_port}
+                    {s.has_ssh_key ? " · key" : s.has_ssh_password ? " · password" : ""}
+                  </p>
+                </div>
+                <div className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">
+                  <p>{s.gpu_model ?? "GPU unknown"}</p>
+                  <p>{s.vram_gb != null ? `${s.vram_gb} GB VRAM` : ""}{s.cuda_version ? ` · CUDA ${s.cuda_version}` : ""}</p>
+                </div>
               </Link>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive hover:text-destructive"
-                loading={deletingId === s.id}
-                onClick={() => handleDelete(s)}
-              >
-                Delete
-              </Button>
+
+              <div className="flex shrink-0 items-center gap-2 transition-opacity">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={testingId === s.id}
+                  disabled={s.status === "TERMINATED"}
+                  onClick={() => handleTestSSH(s.id)}
+                >
+                  {s.status === "PROVISIONING" ? "Re-check" : "Test"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={startingSSH === s.id}
+                  disabled={s.status === "TERMINATED"}
+                  onClick={() => handleStartSSH(s.id, s.hostname)}
+                >
+                  SSH
+                </Button>
+                <Link href={`/servers/${s.id}`}>
+                  <Button variant="ghost" size="sm">Open →</Button>
+                </Link>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  loading={deletingId === s.id}
+                  onClick={() => handleDelete(s)}
+                >
+                  Delete
+                </Button>
+              </div>
             </div>
-          </Card>
+
+            {/* Inline SSH test log */}
+            {expandedTestId === s.id && sshTestResults[s.id] && (
+              <div className="border-t border-border bg-muted/10 px-5 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                    SSH Connectivity
+                  </span>
+                  <button
+                    onClick={() => setExpandedTestId(null)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {sshTestResults[s.id].steps.map((step, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-center gap-2 font-mono text-xs ${
+                        step.success ? "text-dark-green" : "text-destructive"
+                      }`}
+                    >
+                      <span className="shrink-0 w-3">{step.success ? "✓" : "✗"}</span>
+                      <span className="shrink-0 text-muted-foreground w-20">{step.step}</span>
+                      <span className="flex-1 truncate">{step.message}</span>
+                      {step.elapsed_ms > 0 && (
+                        <span className="shrink-0 text-muted-foreground/60">{step.elapsed_ms}ms</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         ))}
       </div>
+
+      {/* Terminal dialog — no logs, plain SSH terminal */}
+      <Dialog
+        open={!!terminalSession}
+        onOpenChange={(open) => {
+          if (!open && terminalSession) {
+            api.sessions.terminate(terminalSession.id).catch(() => {});
+            setTerminalSession(null);
+          }
+        }}
+      >
+        <DialogContent size="xl" closeOnInteractionOutside className="p-0">
+          <DialogHeader className="px-4 py-3">
+            <DialogTitle className="text-sm font-medium">
+              Terminal — {terminalSession?.serverName}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden">
+            {terminalSession && (
+              <PtyTerminal
+                key={terminalSession.id}
+                sessionId={terminalSession.id}
+                onDisconnect={() => setTerminalSession(null)}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {unregisteredRentals.length > 0 && (
         <div className="space-y-2">

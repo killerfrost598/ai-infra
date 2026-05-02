@@ -52,6 +52,7 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     closeOnInteractionOutside?: boolean;
     stopPropagationOnEnterSpace?: boolean;
+    overlayClassName?: string;
   } & VariantProps<typeof dialogContentVariants>
 >(
   (
@@ -60,6 +61,7 @@ const DialogContent = React.forwardRef<
       children,
       closeOnInteractionOutside = false,
       stopPropagationOnEnterSpace = true,
+      overlayClassName,
       size,
       ...props
     },
@@ -73,7 +75,7 @@ const DialogContent = React.forwardRef<
 
     return (
       <DialogPortal>
-        <DialogOverlay />
+        <DialogOverlay className={overlayClassName} />
         <DialogPrimitive.Content
           ref={ref}
           className={cn(dialogContentVariants({ size, className }))}

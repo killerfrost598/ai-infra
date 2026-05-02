@@ -79,9 +79,17 @@ export interface ListResponse<T> {
   total: number;
 }
 
+export interface SSHTestStep {
+  step: string;
+  success: boolean;
+  message: string;
+  elapsed_ms: number;
+}
+
 export interface SSHTestResult {
   success: boolean;
   message: string;
+  steps: SSHTestStep[];
 }
 
 export interface ExecResult {

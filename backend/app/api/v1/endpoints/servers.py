@@ -1,3 +1,5 @@
+import socket
+import time as _time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -5,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.entities import Server, TaskRun, TaskStatus
+from app.models.entities import Server, ServerStatus, TaskRun, TaskStatus
 from app.schemas.servers import ServerCreate, ServerListResponse, ServerResponse, ServerUpdate
 
 router = APIRouter()
@@ -66,9 +68,17 @@ def delete_server(server_id: UUID, db: Session = Depends(get_db)) -> None:
 
 # ── SSH ───────────────────────────────────────────────────────────────────────
 
+class SSHTestStep(BaseModel):
+    step: str
+    success: bool
+    message: str
+    elapsed_ms: int
+
+
 class SSHTestResponse(BaseModel):
     success: bool
     message: str
+    steps: list[SSHTestStep]
 
 
 class ExecRequest(BaseModel):
@@ -80,29 +90,104 @@ class ExecResponse(BaseModel):
 
 
 @router.post("/{server_id}/ssh/test", response_model=SSHTestResponse)
-def test_ssh_connection(server_id: UUID, db: Session = Depends(get_db)) -> SSHTestResponse:
-    """Test SSH connectivity to a server (synchronous, 15 s timeout)."""
+def test_ssh_connection(
+    server_id: UUID,
+    promote_if_reachable: bool = Query(True),
+    db: Session = Depends(get_db),
+) -> SSHTestResponse:
+    """Test SSH connectivity step by step; promotes PROVISIONING→READY on success."""
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
 
-    from app.services.ssh_manager import SSHManager
+    import paramiko
+    from app.services.ssh_manager import _load_pkey_from_content
 
+    steps: list[SSHTestStep] = []
+
+    # Step 1 — TCP connect
+    t0 = _time.monotonic()
     try:
-        with SSHManager(
-            hostname=server.hostname,
-            port=server.ssh_port,
-            username=server.ssh_username,
-            password=server.ssh_password,
-            private_key_content=server.ssh_private_key,
-            timeout=15,
-        ) as ssh:
-            stdout, stderr, rc = ssh.execute("echo ok")
-        if rc == 0:
-            return SSHTestResponse(success=True, message="Connection successful")
-        return SSHTestResponse(success=False, message=stderr.strip() or f"exit code {rc}")
+        with socket.create_connection((server.hostname, server.ssh_port), timeout=10):
+            pass
+        steps.append(SSHTestStep(
+            step="tcp_connect", success=True,
+            message=f"TCP port {server.ssh_port} reachable",
+            elapsed_ms=int((_time.monotonic() - t0) * 1000),
+        ))
     except Exception as exc:
-        return SSHTestResponse(success=False, message=str(exc))
+        steps.append(SSHTestStep(
+            step="tcp_connect", success=False, message=str(exc),
+            elapsed_ms=int((_time.monotonic() - t0) * 1000),
+        ))
+        return SSHTestResponse(success=False, message="TCP connection failed", steps=steps)
+
+    # Step 2 — SSH authentication
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    connect_kwargs: dict = {
+        "hostname": server.hostname,
+        "port": server.ssh_port,
+        "username": server.ssh_username,
+        "timeout": 10,
+    }
+    if server.ssh_private_key:
+        try:
+            connect_kwargs["pkey"] = _load_pkey_from_content(server.ssh_private_key)
+        except Exception as exc:
+            steps.append(SSHTestStep(step="auth", success=False, message=f"Invalid key: {exc}", elapsed_ms=0))
+            return SSHTestResponse(success=False, message="Invalid private key", steps=steps)
+    elif server.ssh_password:
+        connect_kwargs["password"] = server.ssh_password
+
+    t0 = _time.monotonic()
+    try:
+        client.connect(**connect_kwargs)
+        steps.append(SSHTestStep(
+            step="auth", success=True,
+            message=f"Authenticated as {server.ssh_username}",
+            elapsed_ms=int((_time.monotonic() - t0) * 1000),
+        ))
+    except Exception as exc:
+        steps.append(SSHTestStep(
+            step="auth", success=False, message=str(exc),
+            elapsed_ms=int((_time.monotonic() - t0) * 1000),
+        ))
+        return SSHTestResponse(success=False, message="Authentication failed", steps=steps)
+
+    # Step 3 — Execute echo
+    t0 = _time.monotonic()
+    try:
+        _, stdout, stderr = client.exec_command("echo ok", timeout=5)
+        rc = stdout.channel.recv_exit_status()
+        exec_ms = int((_time.monotonic() - t0) * 1000)
+        if rc == 0:
+            steps.append(SSHTestStep(step="exec_echo", success=True, message="echo ok → exit 0", elapsed_ms=exec_ms))
+        else:
+            err = stderr.read().decode(errors="replace").strip()
+            steps.append(SSHTestStep(step="exec_echo", success=False, message=err or f"exit {rc}", elapsed_ms=exec_ms))
+            client.close()
+            return SSHTestResponse(success=False, message="Command execution failed", steps=steps)
+    except Exception as exc:
+        steps.append(SSHTestStep(
+            step="exec_echo", success=False, message=str(exc),
+            elapsed_ms=int((_time.monotonic() - t0) * 1000),
+        ))
+        client.close()
+        return SSHTestResponse(success=False, message="Command execution failed", steps=steps)
+    finally:
+        client.close()
+
+    # Promote status if requested (S3)
+    promoted = False
+    if promote_if_reachable and server.status in (ServerStatus.PROVISIONING, ServerStatus.FAILED):
+        server.status = ServerStatus.READY
+        db.commit()
+        promoted = True
+
+    done_msg = "All checks passed" + (" — promoted to READY" if promoted else "")
+    steps.append(SSHTestStep(step="done", success=True, message=done_msg, elapsed_ms=0))
+    return SSHTestResponse(success=True, message="Connection successful", steps=steps)
 
 
 @router.post("/{server_id}/ssh/exec", response_model=ExecResponse, status_code=202)

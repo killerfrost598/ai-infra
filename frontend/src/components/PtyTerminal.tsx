@@ -11,15 +11,15 @@ function getWsBase(): string {
 interface PtyTerminalProps {
   sessionId: string;
   onDisconnect?: () => void;
+  onData?: (data: Uint8Array) => void;
 }
 
-export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
+export function PtyTerminal({ sessionId, onDisconnect, onData }: PtyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Store onDisconnect in a ref so the main effect only re-runs when sessionId
-  // changes — not every time the parent re-renders with a new function reference.
-  // Without this, the terminal would reconnect on every parent state update.
   const onDisconnectRef = useRef(onDisconnect);
+  const onDataRef = useRef(onData);
   useEffect(() => { onDisconnectRef.current = onDisconnect; });
+  useEffect(() => { onDataRef.current = onData; });
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -71,7 +71,9 @@ export function PtyTerminal({ sessionId, onDisconnect }: PtyTerminalProps) {
 
       socket.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-          terminal.write(new Uint8Array(event.data));
+          const bytes = new Uint8Array(event.data);
+          terminal.write(bytes);
+          onDataRef.current?.(bytes);
         } else {
           terminal.write(event.data as string);
         }

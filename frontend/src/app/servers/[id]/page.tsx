@@ -78,7 +78,7 @@ export default function ServerDetailPage() {
       const result = await api.servers.ssh.test(id);
       setSshTest(result);
     } catch (err: unknown) {
-      setSshTest({ success: false, message: err instanceof Error ? err.message : "Test failed" });
+      setSshTest({ success: false, message: err instanceof Error ? err.message : "Test failed", steps: [] });
     } finally {
       setTesting(false);
     }

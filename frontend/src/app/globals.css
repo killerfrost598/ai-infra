@@ -217,6 +217,14 @@
   border-radius: 3px;
 }
 
+/* Hide xterm.js internal scrollbar — keyboard/mouse scroll still works */
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+}
+.xterm .xterm-viewport {
+  scrollbar-width: none;
+}
+
 /* ── Legacy utility classes (select/textarea fallback) ──────────────────
    .card and .input remain for <select> and <textarea> elements that
    cannot use shadcn Input/Card components directly.                     */

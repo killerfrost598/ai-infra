@@ -86,6 +86,15 @@ def generate_ssh_keypair(db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=500, detail=f"Key generation failed: {exc}") from exc
 
 
+@router.get("/ssh-private-key")
+def get_ssh_private_key(db: Session = Depends(get_db)) -> dict:
+    """Return the stored SSH private key from platform settings."""
+    key = get_setting("ssh_private_key", db)
+    if not key:
+        raise HTTPException(status_code=404, detail="No SSH private key found. Generate one first.")
+    return {"private_key": key}
+
+
 @router.delete("/{key}", status_code=204)
 def delete_setting(key: str, db: Session = Depends(get_db)) -> None:
     """Delete a setting from the DB (env var fallback still applies after deletion)."""
