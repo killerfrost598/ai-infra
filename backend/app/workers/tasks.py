@@ -11,6 +11,7 @@ from uuid import UUID
 from app.db.session import SessionLocal
 from app.models.entities import (
     DeploymentStatus,
+    HostCapabilitySnapshot,
     ModelDeployment,
     Server,
     ServerStatus,
@@ -18,6 +19,7 @@ from app.models.entities import (
     TaskStatus,
 )
 from app.services.clore_client import CloreClient
+from app.services.compat.probe import probe_host
 from app.services.ssh_manager import SSHManager
 from app.workers.celery_app import celery_app
 
@@ -53,9 +55,26 @@ def _finish_task_run(task_run: TaskRun, db) -> None:
 
 # ── provision_server ──────────────────────────────────────────────────────────
 
+def _create_snapshot(server: Server, probe_result, db) -> HostCapabilitySnapshot:
+    snapshot = HostCapabilitySnapshot(
+        server_id=server.id,
+        driver_version=probe_result.driver_version,
+        cuda_runtime_host=probe_result.cuda_runtime_host,
+        gpu_count=len(probe_result.gpus),
+        gpus=probe_result.gpus,
+        nvlink_topology=probe_result.nvlink_topology,
+        homogeneous=probe_result.homogeneous,
+        docker_present=probe_result.docker_present,
+        nvidia_container_toolkit=probe_result.nvidia_container_toolkit,
+        raw_outputs=probe_result.raw_outputs,
+    )
+    db.add(snapshot)
+    return snapshot
+
+
 @celery_app.task(bind=True, name="servers.provision")
 def provision_server(self, server_id: str) -> dict:
-    """SSH into a server, run nvidia-smi, and extract GPU capabilities."""
+    """SSH into a server, probe GPU capabilities, and create a HostCapabilitySnapshot."""
     db = SessionLocal()
     try:
         server = db.query(Server).filter(Server.id == UUID(server_id)).first()
@@ -72,7 +91,6 @@ def provision_server(self, server_id: str) -> dict:
         server.status = ServerStatus.PROVISIONING
         db.commit()
 
-        # Set logs_path before starting so SSE can find the file immediately
         log_file = _log_path(str(task_run.id))
         task_run.logs_path = log_file
         db.commit()
@@ -87,27 +105,26 @@ def provision_server(self, server_id: str) -> dict:
                     password=server.ssh_password,
                     private_key_content=server.ssh_private_key,
                 ) as ssh:
-                    cmd = "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader"
-                    _log(f"$ {cmd}\n")
-                    stdout, stderr, rc = ssh.execute(cmd)
-                    _log(stdout)
-                    if rc == 0 and stdout.strip():
-                        try:
-                            line = stdout.strip().splitlines()[0]
-                            gpu_name, vram_str = line.split(",", 1)
-                            server.gpu_model = gpu_name.strip()
-                            server.vram_gb = int(vram_str.strip().split()[0]) // 1024
-                        except (ValueError, IndexError):
-                            pass
-                    else:
-                        _log(f"(nvidia-smi not available: {stderr.strip() or 'command not found'} — skipping GPU detection)\n")
+                    _log("$ Running capability probe...\n")
+                    result = probe_host(ssh)
+                    _log(f"  Driver:  {result.driver_version or '(not detected)'}\n")
+                    _log(f"  GPUs:    {len(result.gpus)}\n")
+                    for g in result.gpus:
+                        _log(f"    - {g['name']}  CC={g['cc']}  VRAM={g['vram_mb']} MB\n")
+                    _log(f"  CUDA:    {result.cuda_runtime_host or '(not detected)'}\n")
+                    _log(f"  Docker:  {result.docker_present}  (nvidia-ct: {result.nvidia_container_toolkit})\n")
 
-                    cmd2 = "nvcc --version 2>/dev/null | grep release | awk '{print $6}' | cut -c2-"
-                    _log(f"\n$ {cmd2}\n")
-                    stdout2, _, rc2 = ssh.execute(cmd2)
-                    _log(stdout2)
-                    if rc2 == 0 and stdout2.strip():
-                        server.cuda_version = stdout2.strip()
+                    _create_snapshot(server, result, db)
+
+                    # B3 fix — only overwrite Server fields when probe returned real data
+                    if result.gpus:
+                        first = result.gpus[0]
+                        if first.get("name"):
+                            server.gpu_model = first["name"]
+                        if first.get("vram_mb"):
+                            server.vram_gb = first["vram_mb"] // 1024
+                    if result.cuda_runtime_host:
+                        server.cuda_version = result.cuda_runtime_host
 
                 server.status = ServerStatus.READY
                 task_run.status = TaskStatus.SUCCESS
@@ -122,6 +139,75 @@ def provision_server(self, server_id: str) -> dict:
 
         _finish_task_run(task_run, db)
         return {"status": task_run.status.value, "server_id": server_id}
+
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, name="servers.reprobe")
+def reprobe_server(self, server_id: str) -> dict:
+    """Re-run capability probe on an already-provisioned server and create a fresh snapshot."""
+    db = SessionLocal()
+    try:
+        server = db.query(Server).filter(Server.id == UUID(server_id)).first()
+        if not server:
+            return {"status": "failed", "error": "Server not found"}
+
+        task_run = TaskRun(
+            task_type="servers.reprobe",
+            status=TaskStatus.RUNNING,
+            server_id=server.id,
+            started_at=_utcnow(),
+        )
+        db.add(task_run)
+        db.commit()
+
+        log_file = _log_path(str(task_run.id))
+        task_run.logs_path = log_file
+        db.commit()
+
+        with open(log_file, "w") as log_f:
+            _log = _make_logger(log_f)
+            try:
+                with SSHManager(
+                    hostname=server.hostname,
+                    port=server.ssh_port,
+                    username=server.ssh_username,
+                    password=server.ssh_password,
+                    private_key_content=server.ssh_private_key,
+                ) as ssh:
+                    _log("$ Running capability probe (reprobe)...\n")
+                    result = probe_host(ssh)
+                    _log(f"  Driver:  {result.driver_version or '(not detected)'}\n")
+                    _log(f"  GPUs:    {len(result.gpus)}\n")
+                    for g in result.gpus:
+                        _log(f"    - {g['name']}  CC={g['cc']}  VRAM={g['vram_mb']} MB\n")
+                    _log(f"  CUDA:    {result.cuda_runtime_host or '(not detected)'}\n")
+                    _log(f"  Docker:  {result.docker_present}  (nvidia-ct: {result.nvidia_container_toolkit})\n")
+
+                    _create_snapshot(server, result, db)
+
+                    # Only update Server fields if probe returned real data (B3 fix applies here too)
+                    if result.gpus:
+                        first = result.gpus[0]
+                        if first.get("name"):
+                            server.gpu_model = first["name"]
+                        if first.get("vram_mb"):
+                            server.vram_gb = first["vram_mb"] // 1024
+                    if result.cuda_runtime_host:
+                        server.cuda_version = result.cuda_runtime_host
+
+                task_run.status = TaskStatus.SUCCESS
+                _log("\n[reprobe complete]\n")
+
+            except Exception as exc:
+                logger.exception("Reprobe failed for server %s", server_id)
+                task_run.status = TaskStatus.FAILED
+                task_run.error_summary = str(exc)
+                _log(f"\nERROR: {exc}\n")
+
+        _finish_task_run(task_run, db)
+        return {"status": task_run.status.value, "server_id": server_id, "task_run_id": str(task_run.id)}
 
     finally:
         db.close()

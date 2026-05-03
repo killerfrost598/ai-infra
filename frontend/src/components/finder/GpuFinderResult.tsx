@@ -78,11 +78,13 @@ function CompatChips({ offerId, modelKey, quant, engine }: {
     ? stackCheck.reason.match(/vllm\/vllm-openai:([^\s']+)/)?.[1] ?? "Stack ✓"
     : null;
 
+  const isVerified = data.mode === "verified";
+
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {allPass && stackLabel && (
         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
-          Stack: {stackLabel} ✓
+          Stack: {stackLabel} ✓{isVerified ? " (verified)" : " (predicted)"}
         </span>
       )}
       {fails.map((c: FeasibilityCheck) => (

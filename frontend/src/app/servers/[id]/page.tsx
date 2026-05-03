@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check, CheckCircle2, Clock3, Copy, FileText, ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
-import type { InferenceBenchmark, Server, SessionListItem, SSHTestResult, TaskRun } from "@/lib/types";
+import type { HostCapabilitySnapshot, InferenceBenchmark, Server, SessionListItem, SSHTestResult, TaskRun } from "@/lib/types";
+import { CapabilitySnapshotCard } from "@/components/servers/CapabilitySnapshotCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,6 +30,7 @@ export default function ServerDetailPage() {
   const [gpuBenchmarks, setGpuBenchmarks] = useState<InferenceBenchmark[]>([]);
   const [benchmarksLoading, setBenchmarksLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "performance">("overview");
+  const [snapshot, setSnapshot] = useState<HostCapabilitySnapshot | null>(null);
 
   // Task run detail modal
   const [taskRunModal, setTaskRunModal] = useState<TaskRun | null>(null);
@@ -53,6 +55,7 @@ export default function ServerDetailPage() {
             .then((res) => setGpuBenchmarks(res.items))
             .finally(() => setBenchmarksLoading(false));
         }
+        api.servers.snapshot(id).then(setSnapshot).catch(() => setSnapshot(null));
       })
       .catch((e: Error) => setServerError(e.message))
       .finally(() => {
@@ -222,6 +225,13 @@ export default function ServerDetailPage() {
           )}
         </div>
       </Card>
+
+      {/* Hardware snapshot */}
+      <CapabilitySnapshotCard
+        serverId={id}
+        snapshot={snapshot}
+        onReprobed={() => api.servers.snapshot(id).then(setSnapshot).catch(() => {})}
+      />
 
       {/* SSH Sessions */}
       <div className="space-y-3">

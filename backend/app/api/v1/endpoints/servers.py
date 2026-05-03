@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.entities import Server, ServerStatus, TaskRun, TaskStatus
+from app.models.entities import HostCapabilitySnapshot, Server, ServerStatus, TaskRun, TaskStatus
 from app.schemas.servers import ServerCreate, ServerListResponse, ServerResponse, ServerUpdate
 
 router = APIRouter()
@@ -188,6 +188,90 @@ def test_ssh_connection(
     done_msg = "All checks passed" + (" — promoted to READY" if promoted else "")
     steps.append(SSHTestStep(step="done", success=True, message=done_msg, elapsed_ms=0))
     return SSHTestResponse(success=True, message="Connection successful", steps=steps)
+
+
+class ReprobeResponse(BaseModel):
+    task_run_id: str
+
+
+class GpuDetailOut(BaseModel):
+    name: str
+    cc: str
+    vram_mb: int
+    vram_gb: int
+    driver_version: str | None = None
+    uuid: str | None = None
+    pcie_gen: int | None = None
+    pcie_width: int | None = None
+
+
+class SnapshotResponse(BaseModel):
+    id: str
+    server_id: str
+    captured_at: str
+    driver_version: str | None
+    cuda_runtime_host: str | None
+    gpu_count: int
+    gpus: list[GpuDetailOut] | None
+    nvlink_topology: str | None
+    homogeneous: bool
+    docker_present: bool
+    nvidia_container_toolkit: bool
+
+
+@router.post("/{server_id}/reprobe", response_model=ReprobeResponse, status_code=202)
+def reprobe_server(server_id: UUID, db: Session = Depends(get_db)) -> ReprobeResponse:
+    """Dispatch a re-probe Celery task to refresh the server's capability snapshot."""
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+    from app.workers.tasks import reprobe_server as _reprobe_task
+    async_result = _reprobe_task.delay(str(server_id))
+    return ReprobeResponse(task_run_id=str(async_result.id))
+
+
+@router.get("/{server_id}/snapshot", response_model=SnapshotResponse)
+def get_snapshot(server_id: UUID, db: Session = Depends(get_db)) -> SnapshotResponse:
+    """Return the most recent HostCapabilitySnapshot for a server."""
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+    snap = (
+        db.query(HostCapabilitySnapshot)
+        .filter(HostCapabilitySnapshot.server_id == server_id)
+        .order_by(HostCapabilitySnapshot.captured_at.desc())
+        .first()
+    )
+    if not snap:
+        raise HTTPException(status_code=404, detail="No snapshot available; provision or reprobe this server first")
+    gpus_out = None
+    if snap.gpus:
+        gpus_out = [
+            GpuDetailOut(
+                name=g.get("name", ""),
+                cc=g.get("cc", ""),
+                vram_mb=g.get("vram_mb", 0),
+                vram_gb=g.get("vram_gb", g.get("vram_mb", 0) // 1024),
+                driver_version=g.get("driver_version"),
+                uuid=g.get("uuid"),
+                pcie_gen=g.get("pcie_gen"),
+                pcie_width=g.get("pcie_width"),
+            )
+            for g in snap.gpus
+        ]
+    return SnapshotResponse(
+        id=str(snap.id),
+        server_id=str(snap.server_id),
+        captured_at=str(snap.captured_at),
+        driver_version=snap.driver_version,
+        cuda_runtime_host=snap.cuda_runtime_host,
+        gpu_count=snap.gpu_count,
+        gpus=gpus_out,
+        nvlink_topology=snap.nvlink_topology,
+        homogeneous=snap.homogeneous,
+        docker_present=snap.docker_present,
+        nvidia_container_toolkit=snap.nvidia_container_toolkit,
+    )
 
 
 @router.post("/{server_id}/ssh/exec", response_model=ExecResponse, status_code=202)

@@ -6,6 +6,7 @@ import type {
   CommandsSummary,
   ExecResult,
   FeasibilityReport,
+  HostCapabilitySnapshot,
   FeasibilityRequest,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
@@ -69,6 +70,11 @@ export const api = {
       apiFetch<Server>(`/api/v1/servers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
       fetch(`${BASE_URL}/api/v1/servers/${id}`, { method: "DELETE" }),
+
+    reprobe: (id: string) =>
+      apiFetch<{ task_run_id: string }>(`/api/v1/servers/${id}/reprobe`, { method: "POST" }),
+    snapshot: (id: string) =>
+      apiFetch<HostCapabilitySnapshot>(`/api/v1/servers/${id}/snapshot`),
 
     ssh: {
       test: (id: string, promoteIfReachable = true) =>

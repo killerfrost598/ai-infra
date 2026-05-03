@@ -96,6 +96,31 @@ export interface ExecResult {
   task_run_id: string;
 }
 
+export interface GpuDetail {
+  name: string;
+  cc: string;
+  vram_mb: number;
+  vram_gb: number;
+  driver_version: string | null;
+  uuid: string | null;
+  pcie_gen: number | null;
+  pcie_width: number | null;
+}
+
+export interface HostCapabilitySnapshot {
+  id: string;
+  server_id: string;
+  captured_at: string;
+  driver_version: string | null;
+  cuda_runtime_host: string | null;
+  gpu_count: number;
+  gpus: GpuDetail[] | null;
+  nvlink_topology: string | null;
+  homogeneous: boolean;
+  docker_present: boolean;
+  nvidia_container_toolkit: boolean;
+}
+
 export type SessionStatus = "ACTIVE" | "TERMINATED";
 
 export interface SessionCommand {
