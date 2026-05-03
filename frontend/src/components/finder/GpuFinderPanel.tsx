@@ -251,6 +251,8 @@ export function GpuFinderPanel() {
               <GpuFinderResult
                 key={r.offer.id}
                 rankedOffer={r}
+                modelKey={selectedModel?.id ?? ""}
+                quant={selectedQuant?.name ?? ""}
                 onRent={() => openRent(r.offer)}
                 onAdvise={() => openAdvisor(r.offer)}
               />
@@ -280,6 +282,8 @@ export function GpuFinderPanel() {
                   <GpuFinderResult
                     key={r.offer.id}
                     rankedOffer={r}
+                    modelKey={selectedModel?.id ?? ""}
+                    quant={selectedQuant?.name ?? ""}
                     onRent={() => openRent(r.offer)}
                     onAdvise={() => openAdvisor(r.offer)}
                   />

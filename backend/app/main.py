@@ -1,10 +1,27 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 
-app = FastAPI(title=settings.app_name, version=settings.app_version)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.db.session import SessionLocal
+    from app.services.compat.seeder import load_seeds
+    db = SessionLocal()
+    try:
+        load_seeds(db)
+    except Exception:
+        pass  # don't crash startup if seeds fail
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

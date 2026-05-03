@@ -9,29 +9,106 @@
       "param_count_b": 4.0,
       "huggingface_url": "https://huggingface.co/Qwen/Qwen3-4B",
       "max_context_k": 128,
-      "tags": ["chat", "reasoning", "tool-calling"],
+      "tags": [
+        "chat",
+        "reasoning",
+        "tool-calling"
+      ],
       "is_reasoning": true,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 8.4,  "vram_weights_gb": 8.0,  "quality_score": 1.00, "notes": null },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 4.4,  "vram_weights_gb": 4.3,  "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 2.6,  "vram_weights_gb": 2.5,  "quality_score": 0.93, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 1.5,  "vram_weights_gb": 1.4,  "quality_score": 0.78, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 8.4,
+          "vram_weights_gb": 8.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 4.4,
+          "vram_weights_gb": 4.3,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 2.6,
+          "vram_weights_gb": 2.5,
+          "quality_score": 0.93,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 1.5,
+          "vram_weights_gb": 1.4,
+          "quality_score": 0.78,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 36, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 36,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.90, "min_vram_gb": 4 },
-        { "engine": "sglang", "score": 0.90, "min_vram_gb": 4 },
-        { "engine": "ollama", "score": 0.80, "min_vram_gb": 3 }
+        {
+          "engine": "vllm",
+          "score": 0.9,
+          "min_vram_gb": 4
+        },
+        {
+          "engine": "sglang",
+          "score": 0.9,
+          "min_vram_gb": 4
+        },
+        {
+          "engine": "ollama",
+          "score": 0.8,
+          "min_vram_gb": 3
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90", "--reasoning-parser qwen3"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.85", "--reasoning-parser qwen3"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90",
+          "--reasoning-parser qwen3"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.85",
+          "--reasoning-parser qwen3"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 16,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16
+      ]
     },
     {
       "id": "qwen3-8b",
@@ -40,30 +117,118 @@
       "param_count_b": 8.0,
       "huggingface_url": "https://huggingface.co/Qwen/Qwen3-8B",
       "max_context_k": 128,
-      "tags": ["chat", "reasoning", "tool-calling"],
+      "tags": [
+        "chat",
+        "reasoning",
+        "tool-calling"
+      ],
       "is_reasoning": true,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 16.5, "vram_weights_gb": 16.0, "quality_score": 1.00, "notes": null },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 8.5,  "vram_weights_gb": 8.2,  "quality_score": 0.98, "notes": "Hopper/Ada (H100, RTX 4090) only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 8.7,  "vram_weights_gb": 8.4,  "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 5.0,  "vram_weights_gb": 4.8,  "quality_score": 0.93, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 2.9,  "vram_weights_gb": 2.7,  "quality_score": 0.78, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 16.5,
+          "vram_weights_gb": 16.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 8.5,
+          "vram_weights_gb": 8.2,
+          "quality_score": 0.98,
+          "notes": "Hopper/Ada (H100, RTX 4090) only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 8.7,
+          "vram_weights_gb": 8.4,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 5.0,
+          "vram_weights_gb": 4.8,
+          "quality_score": 0.93,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 2.9,
+          "vram_weights_gb": 2.7,
+          "quality_score": 0.78,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 36, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 36,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.93, "min_vram_gb": 8 },
-        { "engine": "sglang", "score": 0.93, "min_vram_gb": 8 },
-        { "engine": "ollama", "score": 0.75, "min_vram_gb": 6 }
+        {
+          "engine": "vllm",
+          "score": 0.93,
+          "min_vram_gb": 8
+        },
+        {
+          "engine": "sglang",
+          "score": 0.93,
+          "min_vram_gb": 8
+        },
+        {
+          "engine": "ollama",
+          "score": 0.75,
+          "min_vram_gb": 6
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90", "--reasoning-parser qwen3"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.88", "--reasoning-parser qwen3"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90",
+          "--reasoning-parser qwen3"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.88",
+          "--reasoning-parser qwen3"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 32,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32
+      ]
     },
     {
       "id": "qwen3-14b",
@@ -72,30 +237,121 @@
       "param_count_b": 14.0,
       "huggingface_url": "https://huggingface.co/Qwen/Qwen3-14B",
       "max_context_k": 128,
-      "tags": ["chat", "reasoning", "tool-calling"],
+      "tags": [
+        "chat",
+        "reasoning",
+        "tool-calling"
+      ],
       "is_reasoning": true,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "agents",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 29.0, "vram_weights_gb": 28.0, "quality_score": 1.00, "notes": null },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 14.5, "vram_weights_gb": 14.2, "quality_score": 0.98, "notes": "Hopper/Ada (H100, RTX 4090) only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 15.0, "vram_weights_gb": 14.5, "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 9.0,  "vram_weights_gb": 8.7,  "quality_score": 0.93, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 5.1,  "vram_weights_gb": 4.9,  "quality_score": 0.78, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 29.0,
+          "vram_weights_gb": 28.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 14.5,
+          "vram_weights_gb": 14.2,
+          "quality_score": 0.98,
+          "notes": "Hopper/Ada (H100, RTX 4090) only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 15.0,
+          "vram_weights_gb": 14.5,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 9.0,
+          "vram_weights_gb": 8.7,
+          "quality_score": 0.93,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 5.1,
+          "vram_weights_gb": 4.9,
+          "quality_score": 0.78,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 40, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 40,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.94, "min_vram_gb": 12 },
-        { "engine": "sglang", "score": 0.95, "min_vram_gb": 12 },
-        { "engine": "ollama", "score": 0.65, "min_vram_gb": 10 }
+        {
+          "engine": "vllm",
+          "score": 0.94,
+          "min_vram_gb": 12
+        },
+        {
+          "engine": "sglang",
+          "score": 0.95,
+          "min_vram_gb": 12
+        },
+        {
+          "engine": "ollama",
+          "score": 0.65,
+          "min_vram_gb": 10
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90", "--reasoning-parser qwen3", "--enable-prefix-caching"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.88", "--reasoning-parser qwen3"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90",
+          "--reasoning-parser qwen3",
+          "--enable-prefix-caching"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.88",
+          "--reasoning-parser qwen3"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 40,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        5,
+        8,
+        10,
+        20,
+        40
+      ]
     },
     {
       "id": "qwen3-32b",
@@ -104,30 +360,123 @@
       "param_count_b": 32.0,
       "huggingface_url": "https://huggingface.co/Qwen/Qwen3-32B",
       "max_context_k": 128,
-      "tags": ["chat", "reasoning", "tool-calling", "long-context"],
+      "tags": [
+        "chat",
+        "reasoning",
+        "tool-calling",
+        "long-context"
+      ],
       "is_reasoning": true,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "agents",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 65.0, "vram_weights_gb": 64.0, "quality_score": 1.00, "notes": "Needs 2× 40GB+ GPUs" },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 33.0, "vram_weights_gb": 32.0, "quality_score": 0.98, "notes": "Fits single 40GB GPU. Hopper/Ada only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 34.0, "vram_weights_gb": 33.0, "quality_score": 0.97, "notes": "Needs 40GB GPU" },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 20.0, "vram_weights_gb": 19.5, "quality_score": 0.93, "notes": "Fits 24GB with care" },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 11.5, "vram_weights_gb": 11.0, "quality_score": 0.75, "notes": "Significant quality loss" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 65.0,
+          "vram_weights_gb": 64.0,
+          "quality_score": 1.0,
+          "notes": "Needs 2\u00c3\u2014 40GB+ GPUs",
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 33.0,
+          "vram_weights_gb": 32.0,
+          "quality_score": 0.98,
+          "notes": "Fits single 40GB GPU. Hopper/Ada only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 34.0,
+          "vram_weights_gb": 33.0,
+          "quality_score": 0.97,
+          "notes": "Needs 40GB GPU",
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 20.0,
+          "vram_weights_gb": 19.5,
+          "quality_score": 0.93,
+          "notes": "Fits 24GB with care",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 11.5,
+          "vram_weights_gb": 11.0,
+          "quality_score": 0.75,
+          "notes": "Significant quality loss",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 64, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 64,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.94, "min_vram_gb": 22 },
-        { "engine": "sglang", "score": 0.95, "min_vram_gb": 22 },
-        { "engine": "ollama", "score": 0.50, "min_vram_gb": 22 }
+        {
+          "engine": "vllm",
+          "score": 0.94,
+          "min_vram_gb": 22
+        },
+        {
+          "engine": "sglang",
+          "score": 0.95,
+          "min_vram_gb": 22
+        },
+        {
+          "engine": "ollama",
+          "score": 0.5,
+          "min_vram_gb": 22
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 16384", "--gpu-memory-utilization 0.90", "--reasoning-parser qwen3", "--enforce-eager", "--enable-prefix-caching"],
-        "sglang": ["--context-length 16384", "--mem-fraction-static 0.85", "--reasoning-parser qwen3", "--chunked-prefill-size 4096"],
+        "vllm": [
+          "--max-model-len 16384",
+          "--gpu-memory-utilization 0.90",
+          "--reasoning-parser qwen3",
+          "--enforce-eager",
+          "--enable-prefix-caching"
+        ],
+        "sglang": [
+          "--context-length 16384",
+          "--mem-fraction-static 0.85",
+          "--reasoning-parser qwen3",
+          "--chunked-prefill-size 4096"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 64,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64
+      ]
     },
     {
       "id": "qwen3-235b-moe",
@@ -136,7 +485,13 @@
       "param_count_b": 235.0,
       "huggingface_url": "https://huggingface.co/Qwen/Qwen3-235B-A22B",
       "max_context_k": 128,
-      "tags": ["chat", "reasoning", "tool-calling", "long-context", "moe"],
+      "tags": [
+        "chat",
+        "reasoning",
+        "tool-calling",
+        "long-context",
+        "moe"
+      ],
       "is_reasoning": true,
       "supports_tools": true,
       "is_code_model": false,
@@ -144,21 +499,104 @@
       "moe_active_params_b": 22.0,
       "use_case": "agents",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 470.0, "vram_weights_gb": 470.0, "quality_score": 1.00, "notes": "All 235B params in VRAM. Needs 6× H100 80GB" },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 235.0, "vram_weights_gb": 235.0, "quality_score": 0.98, "notes": "Needs 3× H100 80GB. Hopper only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 240.0, "vram_weights_gb": 235.0, "quality_score": 0.97, "notes": "Needs 3× H100 80GB" },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 145.0, "vram_weights_gb": 140.0, "quality_score": 0.93, "notes": "Needs 2× H100 80GB or better" },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 82.0,  "vram_weights_gb": 78.0,  "quality_score": 0.74, "notes": "Fits 1× H100 80GB barely. Significant quality loss" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 470.0,
+          "vram_weights_gb": 470.0,
+          "quality_score": 1.0,
+          "notes": "All 235B params in VRAM. Needs 6\u00c3\u2014 H100 80GB",
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 235.0,
+          "vram_weights_gb": 235.0,
+          "quality_score": 0.98,
+          "notes": "Needs 3\u00c3\u2014 H100 80GB. Hopper only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 240.0,
+          "vram_weights_gb": 235.0,
+          "quality_score": 0.97,
+          "notes": "Needs 3\u00c3\u2014 H100 80GB",
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 145.0,
+          "vram_weights_gb": 140.0,
+          "quality_score": 0.93,
+          "notes": "Needs 2\u00c3\u2014 H100 80GB or better",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 82.0,
+          "vram_weights_gb": 78.0,
+          "quality_score": 0.74,
+          "notes": "Fits 1\u00c3\u2014 H100 80GB barely. Significant quality loss",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 94, "num_kv_heads": 4, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 94,
+        "num_kv_heads": 4,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.92, "min_vram_gb": 78 },
-        { "engine": "sglang", "score": 0.95, "min_vram_gb": 78 }
+        {
+          "engine": "vllm",
+          "score": 0.92,
+          "min_vram_gb": 78
+        },
+        {
+          "engine": "sglang",
+          "score": 0.95,
+          "min_vram_gb": 78
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--tensor-parallel-size 2", "--max-model-len 8192", "--gpu-memory-utilization 0.92", "--reasoning-parser qwen3"],
-        "sglang": ["--tp-size 2", "--context-length 8192", "--mem-fraction-static 0.88", "--reasoning-parser qwen3"]
-      }
+        "vllm": [
+          "--tensor-parallel-size 2",
+          "--max-model-len 8192",
+          "--gpu-memory-utilization 0.92",
+          "--reasoning-parser qwen3"
+        ],
+        "sglang": [
+          "--tp-size 2",
+          "--context-length 8192",
+          "--mem-fraction-static 0.88",
+          "--reasoning-parser qwen3"
+        ]
+      },
+      "num_attention_heads": 64,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64
+      ]
     },
     {
       "id": "llama-3.1-8b",
@@ -167,30 +605,116 @@
       "param_count_b": 8.0,
       "huggingface_url": "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct",
       "max_context_k": 128,
-      "tags": ["chat", "tool-calling"],
+      "tags": [
+        "chat",
+        "tool-calling"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 16.5, "vram_weights_gb": 16.0, "quality_score": 1.00, "notes": null },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 8.5,  "vram_weights_gb": 8.2,  "quality_score": 0.98, "notes": "Hopper/Ada only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 8.7,  "vram_weights_gb": 8.4,  "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 5.0,  "vram_weights_gb": 4.7,  "quality_score": 0.94, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 2.9,  "vram_weights_gb": 2.7,  "quality_score": 0.79, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 16.5,
+          "vram_weights_gb": 16.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 8.5,
+          "vram_weights_gb": 8.2,
+          "quality_score": 0.98,
+          "notes": "Hopper/Ada only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 8.7,
+          "vram_weights_gb": 8.4,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 5.0,
+          "vram_weights_gb": 4.7,
+          "quality_score": 0.94,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 2.9,
+          "vram_weights_gb": 2.7,
+          "quality_score": 0.79,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 32, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 32,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.92, "min_vram_gb": 8 },
-        { "engine": "sglang", "score": 0.92, "min_vram_gb": 8 },
-        { "engine": "ollama", "score": 0.78, "min_vram_gb": 6 }
+        {
+          "engine": "vllm",
+          "score": 0.92,
+          "min_vram_gb": 8
+        },
+        {
+          "engine": "sglang",
+          "score": 0.92,
+          "min_vram_gb": 8
+        },
+        {
+          "engine": "ollama",
+          "score": 0.78,
+          "min_vram_gb": 6
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90", "--enable-prefix-caching"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.88"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90",
+          "--enable-prefix-caching"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.88"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 32,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32
+      ]
     },
     {
       "id": "llama-3.1-70b",
@@ -199,28 +723,114 @@
       "param_count_b": 70.0,
       "huggingface_url": "https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct",
       "max_context_k": 128,
-      "tags": ["chat", "tool-calling", "long-context"],
+      "tags": [
+        "chat",
+        "tool-calling",
+        "long-context"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 141.0, "vram_weights_gb": 140.0, "quality_score": 1.00, "notes": "Needs 2× 80GB GPUs" },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 71.0,  "vram_weights_gb": 70.0,  "quality_score": 0.98, "notes": "Fits 1× H100 80GB. Hopper only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 73.0,  "vram_weights_gb": 72.0,  "quality_score": 0.97, "notes": "Needs 80GB GPU" },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 43.0,  "vram_weights_gb": 42.0,  "quality_score": 0.94, "notes": "Fits 2× 24GB GPUs" },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 24.0,  "vram_weights_gb": 23.0,  "quality_score": 0.78, "notes": "Barely fits 24GB. Significant quality loss" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 141.0,
+          "vram_weights_gb": 140.0,
+          "quality_score": 1.0,
+          "notes": "Needs 2\u00c3\u2014 80GB GPUs",
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 71.0,
+          "vram_weights_gb": 70.0,
+          "quality_score": 0.98,
+          "notes": "Fits 1\u00c3\u2014 H100 80GB. Hopper only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 73.0,
+          "vram_weights_gb": 72.0,
+          "quality_score": 0.97,
+          "notes": "Needs 80GB GPU",
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 43.0,
+          "vram_weights_gb": 42.0,
+          "quality_score": 0.94,
+          "notes": "Fits 2\u00c3\u2014 24GB GPUs",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 24.0,
+          "vram_weights_gb": 23.0,
+          "quality_score": 0.78,
+          "notes": "Barely fits 24GB. Significant quality loss",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 80, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 80,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.94, "min_vram_gb": 45 },
-        { "engine": "sglang", "score": 0.94, "min_vram_gb": 45 }
+        {
+          "engine": "vllm",
+          "score": 0.94,
+          "min_vram_gb": 45
+        },
+        {
+          "engine": "sglang",
+          "score": 0.94,
+          "min_vram_gb": 45
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--tensor-parallel-size 2", "--max-model-len 16384", "--gpu-memory-utilization 0.90", "--enable-prefix-caching"],
-        "sglang": ["--tp-size 2", "--context-length 16384", "--mem-fraction-static 0.88"]
-      }
+        "vllm": [
+          "--tensor-parallel-size 2",
+          "--max-model-len 16384",
+          "--gpu-memory-utilization 0.90",
+          "--enable-prefix-caching"
+        ],
+        "sglang": [
+          "--tp-size 2",
+          "--context-length 16384",
+          "--mem-fraction-static 0.88"
+        ]
+      },
+      "num_attention_heads": 64,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64
+      ]
     },
     {
       "id": "mistral-7b",
@@ -229,29 +839,104 @@
       "param_count_b": 7.0,
       "huggingface_url": "https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3",
       "max_context_k": 32,
-      "tags": ["chat", "tool-calling"],
+      "tags": [
+        "chat",
+        "tool-calling"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 14.5, "vram_weights_gb": 14.0, "quality_score": 1.00, "notes": null },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 7.5,  "vram_weights_gb": 7.3,  "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 4.4,  "vram_weights_gb": 4.2,  "quality_score": 0.94, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 2.6,  "vram_weights_gb": 2.4,  "quality_score": 0.79, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 14.5,
+          "vram_weights_gb": 14.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 7.5,
+          "vram_weights_gb": 7.3,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 4.4,
+          "vram_weights_gb": 4.2,
+          "quality_score": 0.94,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 2.6,
+          "vram_weights_gb": 2.4,
+          "quality_score": 0.79,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 32, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 32,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.90, "min_vram_gb": 6 },
-        { "engine": "sglang", "score": 0.90, "min_vram_gb": 6 },
-        { "engine": "ollama", "score": 0.80, "min_vram_gb": 5 }
+        {
+          "engine": "vllm",
+          "score": 0.9,
+          "min_vram_gb": 6
+        },
+        {
+          "engine": "sglang",
+          "score": 0.9,
+          "min_vram_gb": 6
+        },
+        {
+          "engine": "ollama",
+          "score": 0.8,
+          "min_vram_gb": 5
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 16384", "--gpu-memory-utilization 0.90"],
-        "sglang": ["--context-length 16384", "--mem-fraction-static 0.88"],
+        "vllm": [
+          "--max-model-len 16384",
+          "--gpu-memory-utilization 0.90"
+        ],
+        "sglang": [
+          "--context-length 16384",
+          "--mem-fraction-static 0.88"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 32,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32
+      ]
     },
     {
       "id": "mistral-nemo-12b",
@@ -260,29 +945,107 @@
       "param_count_b": 12.0,
       "huggingface_url": "https://huggingface.co/mistralai/Mistral-Nemo-Instruct-2407",
       "max_context_k": 128,
-      "tags": ["chat", "long-context", "tool-calling"],
+      "tags": [
+        "chat",
+        "long-context",
+        "tool-calling"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "long-context",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 24.5, "vram_weights_gb": 24.0, "quality_score": 1.00, "notes": null },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 12.5, "vram_weights_gb": 12.2, "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 7.4,  "vram_weights_gb": 7.1,  "quality_score": 0.94, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 4.2,  "vram_weights_gb": 4.0,  "quality_score": 0.79, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 24.5,
+          "vram_weights_gb": 24.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 12.5,
+          "vram_weights_gb": 12.2,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 7.4,
+          "vram_weights_gb": 7.1,
+          "quality_score": 0.94,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 4.2,
+          "vram_weights_gb": 4.0,
+          "quality_score": 0.79,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 40, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 40,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.92, "min_vram_gb": 10 },
-        { "engine": "sglang", "score": 0.93, "min_vram_gb": 10 },
-        { "engine": "ollama", "score": 0.70, "min_vram_gb": 8 }
+        {
+          "engine": "vllm",
+          "score": 0.92,
+          "min_vram_gb": 10
+        },
+        {
+          "engine": "sglang",
+          "score": 0.93,
+          "min_vram_gb": 10
+        },
+        {
+          "engine": "ollama",
+          "score": 0.7,
+          "min_vram_gb": 8
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 65536", "--gpu-memory-utilization 0.90", "--enable-chunked-prefill"],
-        "sglang": ["--context-length 65536", "--mem-fraction-static 0.85", "--chunked-prefill-size 4096"],
+        "vllm": [
+          "--max-model-len 65536",
+          "--gpu-memory-utilization 0.90",
+          "--enable-chunked-prefill"
+        ],
+        "sglang": [
+          "--context-length 65536",
+          "--mem-fraction-static 0.85",
+          "--chunked-prefill-size 4096"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 32,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32
+      ]
     },
     {
       "id": "deepseek-r1-7b",
@@ -291,29 +1054,106 @@
       "param_count_b": 7.0,
       "huggingface_url": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
       "max_context_k": 128,
-      "tags": ["reasoning", "chat"],
+      "tags": [
+        "reasoning",
+        "chat"
+      ],
       "is_reasoning": true,
       "supports_tools": false,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 15.0, "vram_weights_gb": 14.5, "quality_score": 1.00, "notes": null },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 7.8,  "vram_weights_gb": 7.5,  "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 4.7,  "vram_weights_gb": 4.5,  "quality_score": 0.93, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 2.7,  "vram_weights_gb": 2.6,  "quality_score": 0.77, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 15.0,
+          "vram_weights_gb": 14.5,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 7.8,
+          "vram_weights_gb": 7.5,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 4.7,
+          "vram_weights_gb": 4.5,
+          "quality_score": 0.93,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 2.7,
+          "vram_weights_gb": 2.6,
+          "quality_score": 0.77,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 28, "num_kv_heads": 4, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 28,
+        "num_kv_heads": 4,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.92, "min_vram_gb": 6 },
-        { "engine": "sglang", "score": 0.93, "min_vram_gb": 6 },
-        { "engine": "ollama", "score": 0.75, "min_vram_gb": 5 }
+        {
+          "engine": "vllm",
+          "score": 0.92,
+          "min_vram_gb": 6
+        },
+        {
+          "engine": "sglang",
+          "score": 0.93,
+          "min_vram_gb": 6
+        },
+        {
+          "engine": "ollama",
+          "score": 0.75,
+          "min_vram_gb": 5
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90", "--reasoning-parser deepseek-r1"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.88", "--reasoning-parser deepseek-r1"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90",
+          "--reasoning-parser deepseek-r1"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.88",
+          "--reasoning-parser deepseek-r1"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 32,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32
+      ]
     },
     {
       "id": "deepseek-r1-14b",
@@ -322,30 +1162,119 @@
       "param_count_b": 14.0,
       "huggingface_url": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
       "max_context_k": 128,
-      "tags": ["reasoning", "chat"],
+      "tags": [
+        "reasoning",
+        "chat"
+      ],
       "is_reasoning": true,
       "supports_tools": false,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 29.0, "vram_weights_gb": 28.0, "quality_score": 1.00, "notes": null },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 14.5, "vram_weights_gb": 14.2, "quality_score": 0.98, "notes": "Hopper/Ada only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 15.0, "vram_weights_gb": 14.5, "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 9.0,  "vram_weights_gb": 8.7,  "quality_score": 0.93, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 5.1,  "vram_weights_gb": 4.9,  "quality_score": 0.76, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 29.0,
+          "vram_weights_gb": 28.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 14.5,
+          "vram_weights_gb": 14.2,
+          "quality_score": 0.98,
+          "notes": "Hopper/Ada only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 15.0,
+          "vram_weights_gb": 14.5,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 9.0,
+          "vram_weights_gb": 8.7,
+          "quality_score": 0.93,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 5.1,
+          "vram_weights_gb": 4.9,
+          "quality_score": 0.76,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 48, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 48,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.93, "min_vram_gb": 12 },
-        { "engine": "sglang", "score": 0.94, "min_vram_gb": 12 },
-        { "engine": "ollama", "score": 0.60, "min_vram_gb": 10 }
+        {
+          "engine": "vllm",
+          "score": 0.93,
+          "min_vram_gb": 12
+        },
+        {
+          "engine": "sglang",
+          "score": 0.94,
+          "min_vram_gb": 12
+        },
+        {
+          "engine": "ollama",
+          "score": 0.6,
+          "min_vram_gb": 10
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90", "--reasoning-parser deepseek-r1"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.88", "--reasoning-parser deepseek-r1"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90",
+          "--reasoning-parser deepseek-r1"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.88",
+          "--reasoning-parser deepseek-r1"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 40,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        5,
+        8,
+        10,
+        20,
+        40
+      ]
     },
     {
       "id": "deepseek-r1-32b",
@@ -354,28 +1283,115 @@
       "param_count_b": 32.0,
       "huggingface_url": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
       "max_context_k": 128,
-      "tags": ["reasoning", "chat", "long-context"],
+      "tags": [
+        "reasoning",
+        "chat",
+        "long-context"
+      ],
       "is_reasoning": true,
       "supports_tools": false,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 65.0, "vram_weights_gb": 64.0, "quality_score": 1.00, "notes": "Needs 2× 40GB+ GPUs" },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 33.0, "vram_weights_gb": 32.0, "quality_score": 0.98, "notes": "Fits 40GB GPU. Hopper/Ada only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 34.0, "vram_weights_gb": 33.0, "quality_score": 0.97, "notes": "Needs 40GB GPU" },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 20.0, "vram_weights_gb": 19.5, "quality_score": 0.93, "notes": "Tight on 24GB" },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 11.5, "vram_weights_gb": 11.0, "quality_score": 0.74, "notes": "Significant quality loss" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 65.0,
+          "vram_weights_gb": 64.0,
+          "quality_score": 1.0,
+          "notes": "Needs 2\u00c3\u2014 40GB+ GPUs",
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 33.0,
+          "vram_weights_gb": 32.0,
+          "quality_score": 0.98,
+          "notes": "Fits 40GB GPU. Hopper/Ada only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 34.0,
+          "vram_weights_gb": 33.0,
+          "quality_score": 0.97,
+          "notes": "Needs 40GB GPU",
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 20.0,
+          "vram_weights_gb": 19.5,
+          "quality_score": 0.93,
+          "notes": "Tight on 24GB",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 11.5,
+          "vram_weights_gb": 11.0,
+          "quality_score": 0.74,
+          "notes": "Significant quality loss",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 64, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 64,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.93, "min_vram_gb": 22 },
-        { "engine": "sglang", "score": 0.94, "min_vram_gb": 22 }
+        {
+          "engine": "vllm",
+          "score": 0.93,
+          "min_vram_gb": 22
+        },
+        {
+          "engine": "sglang",
+          "score": 0.94,
+          "min_vram_gb": 22
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 16384", "--gpu-memory-utilization 0.90", "--reasoning-parser deepseek-r1", "--enforce-eager"],
-        "sglang": ["--context-length 16384", "--mem-fraction-static 0.85", "--reasoning-parser deepseek-r1", "--chunked-prefill-size 4096"]
-      }
+        "vllm": [
+          "--max-model-len 16384",
+          "--gpu-memory-utilization 0.90",
+          "--reasoning-parser deepseek-r1",
+          "--enforce-eager"
+        ],
+        "sglang": [
+          "--context-length 16384",
+          "--mem-fraction-static 0.85",
+          "--reasoning-parser deepseek-r1",
+          "--chunked-prefill-size 4096"
+        ]
+      },
+      "num_attention_heads": 64,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64
+      ]
     },
     {
       "id": "deepseek-r1-70b",
@@ -384,28 +1400,115 @@
       "param_count_b": 70.0,
       "huggingface_url": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
       "max_context_k": 128,
-      "tags": ["reasoning", "chat", "long-context"],
+      "tags": [
+        "reasoning",
+        "chat",
+        "long-context"
+      ],
       "is_reasoning": true,
       "supports_tools": false,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 141.0, "vram_weights_gb": 140.0, "quality_score": 1.00, "notes": "Needs 2× 80GB GPUs" },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 71.0,  "vram_weights_gb": 70.0,  "quality_score": 0.98, "notes": "1× H100 80GB. Hopper only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 73.0,  "vram_weights_gb": 72.0,  "quality_score": 0.97, "notes": "Needs 80GB GPU" },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 43.0,  "vram_weights_gb": 42.0,  "quality_score": 0.94, "notes": "Needs 2× 24GB GPUs" },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 24.0,  "vram_weights_gb": 23.0,  "quality_score": 0.77, "notes": "Barely fits 24GB. Significant quality loss" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 141.0,
+          "vram_weights_gb": 140.0,
+          "quality_score": 1.0,
+          "notes": "Needs 2\u00c3\u2014 80GB GPUs",
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 71.0,
+          "vram_weights_gb": 70.0,
+          "quality_score": 0.98,
+          "notes": "1\u00c3\u2014 H100 80GB. Hopper only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 73.0,
+          "vram_weights_gb": 72.0,
+          "quality_score": 0.97,
+          "notes": "Needs 80GB GPU",
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 43.0,
+          "vram_weights_gb": 42.0,
+          "quality_score": 0.94,
+          "notes": "Needs 2\u00c3\u2014 24GB GPUs",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 24.0,
+          "vram_weights_gb": 23.0,
+          "quality_score": 0.77,
+          "notes": "Barely fits 24GB. Significant quality loss",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 80, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 80,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.94, "min_vram_gb": 45 },
-        { "engine": "sglang", "score": 0.95, "min_vram_gb": 45 }
+        {
+          "engine": "vllm",
+          "score": 0.94,
+          "min_vram_gb": 45
+        },
+        {
+          "engine": "sglang",
+          "score": 0.95,
+          "min_vram_gb": 45
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--tensor-parallel-size 2", "--max-model-len 16384", "--gpu-memory-utilization 0.90", "--reasoning-parser deepseek-r1"],
-        "sglang": ["--tp-size 2", "--context-length 16384", "--mem-fraction-static 0.88", "--reasoning-parser deepseek-r1"]
-      }
+        "vllm": [
+          "--tensor-parallel-size 2",
+          "--max-model-len 16384",
+          "--gpu-memory-utilization 0.90",
+          "--reasoning-parser deepseek-r1"
+        ],
+        "sglang": [
+          "--tp-size 2",
+          "--context-length 16384",
+          "--mem-fraction-static 0.88",
+          "--reasoning-parser deepseek-r1"
+        ]
+      },
+      "num_attention_heads": 64,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64
+      ]
     },
     {
       "id": "gemma4-4b",
@@ -414,29 +1517,102 @@
       "param_count_b": 4.0,
       "huggingface_url": "https://huggingface.co/google/gemma-4-4b-it",
       "max_context_k": 128,
-      "tags": ["chat", "multimodal"],
+      "tags": [
+        "chat",
+        "multimodal"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 8.4,  "vram_weights_gb": 8.0,  "quality_score": 1.00, "notes": null },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 4.4,  "vram_weights_gb": 4.3,  "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 2.6,  "vram_weights_gb": 2.5,  "quality_score": 0.93, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 1.5,  "vram_weights_gb": 1.4,  "quality_score": 0.77, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 8.4,
+          "vram_weights_gb": 8.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 4.4,
+          "vram_weights_gb": 4.3,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 2.6,
+          "vram_weights_gb": 2.5,
+          "quality_score": 0.93,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 1.5,
+          "vram_weights_gb": 1.4,
+          "quality_score": 0.77,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 34, "num_kv_heads": 4, "head_dim": 256, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 34,
+        "num_kv_heads": 4,
+        "head_dim": 256,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.90, "min_vram_gb": 4 },
-        { "engine": "sglang", "score": 0.88, "min_vram_gb": 4 },
-        { "engine": "ollama", "score": 0.80, "min_vram_gb": 3 }
+        {
+          "engine": "vllm",
+          "score": 0.9,
+          "min_vram_gb": 4
+        },
+        {
+          "engine": "sglang",
+          "score": 0.88,
+          "min_vram_gb": 4
+        },
+        {
+          "engine": "ollama",
+          "score": 0.8,
+          "min_vram_gb": 3
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.85"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.85"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 8,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8
+      ]
     },
     {
       "id": "gemma4-12b",
@@ -445,29 +1621,103 @@
       "param_count_b": 12.0,
       "huggingface_url": "https://huggingface.co/google/gemma-4-12b-it",
       "max_context_k": 128,
-      "tags": ["chat", "multimodal"],
+      "tags": [
+        "chat",
+        "multimodal"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 24.5, "vram_weights_gb": 24.0, "quality_score": 1.00, "notes": null },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 12.5, "vram_weights_gb": 12.0, "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 7.5,  "vram_weights_gb": 7.2,  "quality_score": 0.93, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 4.2,  "vram_weights_gb": 4.0,  "quality_score": 0.77, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 24.5,
+          "vram_weights_gb": 24.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 12.5,
+          "vram_weights_gb": 12.0,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 7.5,
+          "vram_weights_gb": 7.2,
+          "quality_score": 0.93,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 4.2,
+          "vram_weights_gb": 4.0,
+          "quality_score": 0.77,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 40, "num_kv_heads": 4, "head_dim": 256, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 40,
+        "num_kv_heads": 4,
+        "head_dim": 256,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.91, "min_vram_gb": 10 },
-        { "engine": "sglang", "score": 0.90, "min_vram_gb": 10 },
-        { "engine": "ollama", "score": 0.72, "min_vram_gb": 8 }
+        {
+          "engine": "vllm",
+          "score": 0.91,
+          "min_vram_gb": 10
+        },
+        {
+          "engine": "sglang",
+          "score": 0.9,
+          "min_vram_gb": 10
+        },
+        {
+          "engine": "ollama",
+          "score": 0.72,
+          "min_vram_gb": 8
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.87"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.87"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 16,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16
+      ]
     },
     {
       "id": "gemma4-27b",
@@ -476,30 +1726,118 @@
       "param_count_b": 27.0,
       "huggingface_url": "https://huggingface.co/google/gemma-4-27b-it",
       "max_context_k": 128,
-      "tags": ["chat", "multimodal", "long-context"],
+      "tags": [
+        "chat",
+        "multimodal",
+        "long-context"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": false,
       "is_moe": false,
       "use_case": "chat",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 55.0, "vram_weights_gb": 54.0, "quality_score": 1.00, "notes": "Needs 2× 40GB GPUs" },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 28.0, "vram_weights_gb": 27.0, "quality_score": 0.98, "notes": "Fits 40GB GPU. Hopper/Ada only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 28.5, "vram_weights_gb": 27.8, "quality_score": 0.97, "notes": "Needs 40GB GPU" },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 17.0, "vram_weights_gb": 16.5, "quality_score": 0.93, "notes": "Fits 24GB with minimal headroom" },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 9.5,  "vram_weights_gb": 9.0,  "quality_score": 0.76, "notes": "Significant quality loss" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 55.0,
+          "vram_weights_gb": 54.0,
+          "quality_score": 1.0,
+          "notes": "Needs 2\u00c3\u2014 40GB GPUs",
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 28.0,
+          "vram_weights_gb": 27.0,
+          "quality_score": 0.98,
+          "notes": "Fits 40GB GPU. Hopper/Ada only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 28.5,
+          "vram_weights_gb": 27.8,
+          "quality_score": 0.97,
+          "notes": "Needs 40GB GPU",
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 17.0,
+          "vram_weights_gb": 16.5,
+          "quality_score": 0.93,
+          "notes": "Fits 24GB with minimal headroom",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 9.5,
+          "vram_weights_gb": 9.0,
+          "quality_score": 0.76,
+          "notes": "Significant quality loss",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 46, "num_kv_heads": 16, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 46,
+        "num_kv_heads": 16,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.93, "min_vram_gb": 20 },
-        { "engine": "sglang", "score": 0.92, "min_vram_gb": 20 },
-        { "engine": "ollama", "score": 0.55, "min_vram_gb": 20 }
+        {
+          "engine": "vllm",
+          "score": 0.93,
+          "min_vram_gb": 20
+        },
+        {
+          "engine": "sglang",
+          "score": 0.92,
+          "min_vram_gb": 20
+        },
+        {
+          "engine": "ollama",
+          "score": 0.55,
+          "min_vram_gb": 20
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 16384", "--gpu-memory-utilization 0.88", "--enforce-eager"],
-        "sglang": ["--context-length 16384", "--mem-fraction-static 0.85", "--chunked-prefill-size 4096"],
+        "vllm": [
+          "--max-model-len 16384",
+          "--gpu-memory-utilization 0.88",
+          "--enforce-eager"
+        ],
+        "sglang": [
+          "--context-length 16384",
+          "--mem-fraction-static 0.85",
+          "--chunked-prefill-size 4096"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 32,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32
+      ]
     },
     {
       "id": "phi-4-14b",
@@ -508,30 +1846,118 @@
       "param_count_b": 14.0,
       "huggingface_url": "https://huggingface.co/microsoft/phi-4",
       "max_context_k": 16,
-      "tags": ["chat", "code", "reasoning"],
+      "tags": [
+        "chat",
+        "code",
+        "reasoning"
+      ],
       "is_reasoning": true,
       "supports_tools": true,
       "is_code_model": true,
       "is_moe": false,
       "use_case": "code",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 29.0, "vram_weights_gb": 28.0, "quality_score": 1.00, "notes": null },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 14.5, "vram_weights_gb": 14.2, "quality_score": 0.98, "notes": "Hopper/Ada only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 15.0, "vram_weights_gb": 14.5, "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 8.9,  "vram_weights_gb": 8.6,  "quality_score": 0.93, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 5.1,  "vram_weights_gb": 4.9,  "quality_score": 0.75, "notes": "Significant quality loss" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 29.0,
+          "vram_weights_gb": 28.0,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 14.5,
+          "vram_weights_gb": 14.2,
+          "quality_score": 0.98,
+          "notes": "Hopper/Ada only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 15.0,
+          "vram_weights_gb": 14.5,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 8.9,
+          "vram_weights_gb": 8.6,
+          "quality_score": 0.93,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 5.1,
+          "vram_weights_gb": 4.9,
+          "quality_score": 0.75,
+          "notes": "Significant quality loss",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 40, "num_kv_heads": 10, "head_dim": 96, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 40,
+        "num_kv_heads": 10,
+        "head_dim": 96,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.92, "min_vram_gb": 12 },
-        { "engine": "sglang", "score": 0.91, "min_vram_gb": 12 },
-        { "engine": "ollama", "score": 0.68, "min_vram_gb": 10 }
+        {
+          "engine": "vllm",
+          "score": 0.92,
+          "min_vram_gb": 12
+        },
+        {
+          "engine": "sglang",
+          "score": 0.91,
+          "min_vram_gb": 12
+        },
+        {
+          "engine": "ollama",
+          "score": 0.68,
+          "min_vram_gb": 10
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 16384", "--gpu-memory-utilization 0.90"],
-        "sglang": ["--context-length 16384", "--mem-fraction-static 0.88"],
+        "vllm": [
+          "--max-model-len 16384",
+          "--gpu-memory-utilization 0.90"
+        ],
+        "sglang": [
+          "--context-length 16384",
+          "--mem-fraction-static 0.88"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 40,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        5,
+        8,
+        10,
+        20,
+        40
+      ]
     },
     {
       "id": "qwen2.5-coder-7b",
@@ -540,29 +1966,108 @@
       "param_count_b": 7.0,
       "huggingface_url": "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct",
       "max_context_k": 128,
-      "tags": ["code", "chat", "tool-calling"],
+      "tags": [
+        "code",
+        "chat",
+        "tool-calling"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": true,
       "is_moe": false,
       "use_case": "code",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 15.0, "vram_weights_gb": 14.5, "quality_score": 1.00, "notes": null },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 7.7,  "vram_weights_gb": 7.5,  "quality_score": 0.97, "notes": null },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 4.5,  "vram_weights_gb": 4.3,  "quality_score": 0.94, "notes": null },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 2.6,  "vram_weights_gb": 2.5,  "quality_score": 0.79, "notes": "Notable quality degradation" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 15.0,
+          "vram_weights_gb": 14.5,
+          "quality_score": 1.0,
+          "notes": null,
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 7.7,
+          "vram_weights_gb": 7.5,
+          "quality_score": 0.97,
+          "notes": null,
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 4.5,
+          "vram_weights_gb": 4.3,
+          "quality_score": 0.94,
+          "notes": null,
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 2.6,
+          "vram_weights_gb": 2.5,
+          "quality_score": 0.79,
+          "notes": "Notable quality degradation",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 28, "num_kv_heads": 4, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 28,
+        "num_kv_heads": 4,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.91, "min_vram_gb": 6 },
-        { "engine": "sglang", "score": 0.93, "min_vram_gb": 6 },
-        { "engine": "ollama", "score": 0.78, "min_vram_gb": 5 }
+        {
+          "engine": "vllm",
+          "score": 0.91,
+          "min_vram_gb": 6
+        },
+        {
+          "engine": "sglang",
+          "score": 0.93,
+          "min_vram_gb": 6
+        },
+        {
+          "engine": "ollama",
+          "score": 0.78,
+          "min_vram_gb": 5
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 32768", "--gpu-memory-utilization 0.90", "--tool-call-parser qwen2_5"],
-        "sglang": ["--context-length 32768", "--mem-fraction-static 0.88", "--tool-call-parser qwen2_5", "--enable-mixed-chunk"],
+        "vllm": [
+          "--max-model-len 32768",
+          "--gpu-memory-utilization 0.90",
+          "--tool-call-parser qwen2_5"
+        ],
+        "sglang": [
+          "--context-length 32768",
+          "--mem-fraction-static 0.88",
+          "--tool-call-parser qwen2_5",
+          "--enable-mixed-chunk"
+        ],
         "ollama": []
-      }
+      },
+      "num_attention_heads": 28,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        7,
+        14,
+        28
+      ]
     },
     {
       "id": "qwen2.5-coder-32b",
@@ -571,28 +2076,118 @@
       "param_count_b": 32.0,
       "huggingface_url": "https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct",
       "max_context_k": 128,
-      "tags": ["code", "agents", "tool-calling", "long-context"],
+      "tags": [
+        "code",
+        "agents",
+        "tool-calling",
+        "long-context"
+      ],
       "is_reasoning": false,
       "supports_tools": true,
       "is_code_model": true,
       "is_moe": false,
       "use_case": "agents",
       "quants": [
-        { "name": "BF16",   "bits_per_weight": 16,  "disk_size_gb": 65.0, "vram_weights_gb": 64.0, "quality_score": 1.00, "notes": "Needs 2× 40GB+ GPUs" },
-        { "name": "FP8",    "bits_per_weight": 8,   "disk_size_gb": 33.0, "vram_weights_gb": 32.0, "quality_score": 0.98, "notes": "Fits 40GB GPU. Hopper/Ada only" },
-        { "name": "Q8",     "bits_per_weight": 8,   "disk_size_gb": 34.0, "vram_weights_gb": 33.0, "quality_score": 0.97, "notes": "Needs 40GB GPU" },
-        { "name": "Q4_K_M", "bits_per_weight": 4.5, "disk_size_gb": 20.0, "vram_weights_gb": 19.5, "quality_score": 0.94, "notes": "Tight on 24GB" },
-        { "name": "Q2",     "bits_per_weight": 2.5, "disk_size_gb": 11.5, "vram_weights_gb": 11.0, "quality_score": 0.77, "notes": "Significant quality loss" }
+        {
+          "name": "BF16",
+          "bits_per_weight": 16,
+          "disk_size_gb": 65.0,
+          "vram_weights_gb": 64.0,
+          "quality_score": 1.0,
+          "notes": "Needs 2\u00c3\u2014 40GB+ GPUs",
+          "cc_min": "8.0",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "FP8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 33.0,
+          "vram_weights_gb": 32.0,
+          "quality_score": 0.98,
+          "notes": "Fits 40GB GPU. Hopper/Ada only",
+          "cc_min": "8.9",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q8",
+          "bits_per_weight": 8,
+          "disk_size_gb": 34.0,
+          "vram_weights_gb": 33.0,
+          "quality_score": 0.97,
+          "notes": "Needs 40GB GPU",
+          "cc_min": "7.5",
+          "arch_vllm": true,
+          "arch_sglang": true
+        },
+        {
+          "name": "Q4_K_M",
+          "bits_per_weight": 4.5,
+          "disk_size_gb": 20.0,
+          "vram_weights_gb": 19.5,
+          "quality_score": 0.94,
+          "notes": "Tight on 24GB",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        },
+        {
+          "name": "Q2",
+          "bits_per_weight": 2.5,
+          "disk_size_gb": 11.5,
+          "vram_weights_gb": 11.0,
+          "quality_score": 0.77,
+          "notes": "Significant quality loss",
+          "cc_min": "7.0",
+          "arch_vllm": false,
+          "arch_sglang": false
+        }
       ],
-      "kv_cache": { "num_layers": 64, "num_kv_heads": 8, "head_dim": 128, "kv_dtype_default": "fp16" },
+      "kv_cache": {
+        "num_layers": 64,
+        "num_kv_heads": 8,
+        "head_dim": 128,
+        "kv_dtype_default": "fp16"
+      },
       "recommended_engines": [
-        { "engine": "vllm",   "score": 0.92, "min_vram_gb": 22 },
-        { "engine": "sglang", "score": 0.95, "min_vram_gb": 22 }
+        {
+          "engine": "vllm",
+          "score": 0.92,
+          "min_vram_gb": 22
+        },
+        {
+          "engine": "sglang",
+          "score": 0.95,
+          "min_vram_gb": 22
+        }
       ],
       "recommended_flags": {
-        "vllm":   ["--max-model-len 16384", "--gpu-memory-utilization 0.90", "--tool-call-parser qwen2_5", "--enable-prefix-caching", "--enforce-eager"],
-        "sglang": ["--context-length 16384", "--mem-fraction-static 0.85", "--tool-call-parser qwen2_5", "--chunked-prefill-size 4096"]
-      }
+        "vllm": [
+          "--max-model-len 16384",
+          "--gpu-memory-utilization 0.90",
+          "--tool-call-parser qwen2_5",
+          "--enable-prefix-caching",
+          "--enforce-eager"
+        ],
+        "sglang": [
+          "--context-length 16384",
+          "--mem-fraction-static 0.85",
+          "--tool-call-parser qwen2_5",
+          "--chunked-prefill-size 4096"
+        ]
+      },
+      "num_attention_heads": 40,
+      "tp_allowed_sizes": [
+        1,
+        2,
+        4,
+        5,
+        8,
+        10,
+        20,
+        40
+      ]
     }
   ]
 }

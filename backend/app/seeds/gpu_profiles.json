@@ -1,0 +1,98 @@
+[
+  {
+    "model_key": "v100_16",
+    "display_name": "NVIDIA Tesla V100 16GB",
+    "aliases": ["V100", "Tesla V100", "V100-16GB", "NVIDIA Tesla V100", "V100 16GB"],
+    "arch": "volta", "cc": "7.0", "vram_gb": 16,
+    "fp8_native": false, "bf16": false, "marlin": false, "fa2": false, "fa3": false,
+    "notes": "No BF16, no FP8, no FlashAttention efficient paths."
+  },
+  {
+    "model_key": "v100_32",
+    "display_name": "NVIDIA Tesla V100 32GB",
+    "aliases": ["V100 32GB", "Tesla V100 32GB", "V100-32GB", "NVIDIA Tesla V100 32GB"],
+    "arch": "volta", "cc": "7.0", "vram_gb": 32,
+    "fp8_native": false, "bf16": false, "marlin": false, "fa2": false, "fa3": false,
+    "notes": "No BF16, no FP8. vLLM pin <= 0.6.3 recommended."
+  },
+  {
+    "model_key": "t4",
+    "display_name": "NVIDIA Tesla T4",
+    "aliases": ["T4", "Tesla T4", "NVIDIA T4", "NVIDIA Tesla T4"],
+    "arch": "turing", "cc": "7.5", "vram_gb": 16,
+    "fp8_native": false, "bf16": false, "marlin": false, "fa2": false, "fa3": false,
+    "notes": "No BF16. Good for INT4/INT8 inference."
+  },
+  {
+    "model_key": "rtx_3090",
+    "display_name": "NVIDIA GeForce RTX 3090",
+    "aliases": ["RTX 3090", "GeForce RTX 3090", "3090", "NVIDIA RTX 3090", "NVIDIA GeForce RTX 3090"],
+    "arch": "ampere", "cc": "8.6", "vram_gb": 24,
+    "fp8_native": false, "bf16": true, "marlin": true, "fa2": true, "fa3": false,
+    "notes": "BF16 yes, FP8 no. Marlin AWQ supported."
+  },
+  {
+    "model_key": "a100_40",
+    "display_name": "NVIDIA A100 40GB",
+    "aliases": ["A100", "A100 40GB", "A100-40GB", "NVIDIA A100", "NVIDIA A100 40GB", "A100-SXM4-40GB"],
+    "arch": "ampere", "cc": "8.0", "vram_gb": 40,
+    "fp8_native": false, "bf16": true, "marlin": true, "fa2": true, "fa3": false,
+    "notes": "BF16 yes, FP8 no (Ampere)."
+  },
+  {
+    "model_key": "a100_80",
+    "display_name": "NVIDIA A100 80GB",
+    "aliases": ["A100 80GB", "A100-80GB", "NVIDIA A100 80GB", "A100-SXM4-80GB", "A100-PCIE-80GB"],
+    "arch": "ampere", "cc": "8.0", "vram_gb": 80,
+    "fp8_native": false, "bf16": true, "marlin": true, "fa2": true, "fa3": false,
+    "notes": "BF16 yes, FP8 no (Ampere). Best for 70B+ at BF16."
+  },
+  {
+    "model_key": "rtx_4090",
+    "display_name": "NVIDIA GeForce RTX 4090",
+    "aliases": ["RTX 4090", "GeForce RTX 4090", "4090", "NVIDIA RTX 4090", "NVIDIA GeForce RTX 4090"],
+    "arch": "ada", "cc": "8.9", "vram_gb": 24,
+    "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": false,
+    "notes": "Ada FP8 limited coverage vs Hopper. Good value inference GPU."
+  },
+  {
+    "model_key": "l4",
+    "display_name": "NVIDIA L4",
+    "aliases": ["L4", "NVIDIA L4", "Tesla L4"],
+    "arch": "ada", "cc": "8.9", "vram_gb": 24,
+    "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": false,
+    "notes": "Low power Ada. Good for FP8 inference."
+  },
+  {
+    "model_key": "l40s",
+    "display_name": "NVIDIA L40S",
+    "aliases": ["L40S", "NVIDIA L40S", "L40-S"],
+    "arch": "ada", "cc": "8.9", "vram_gb": 48,
+    "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": false,
+    "notes": "Ada 48GB FP8 datacenter card."
+  },
+  {
+    "model_key": "h100_80",
+    "display_name": "NVIDIA H100 80GB",
+    "aliases": ["H100", "H100 80GB", "NVIDIA H100", "NVIDIA H100 80GB", "H100-SXM5-80GB", "H100-PCIE-80GB"],
+    "arch": "hopper", "cc": "9.0", "vram_gb": 80,
+    "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": true,
+    "notes": "Native FP8, FA3. Best throughput for production inference."
+  },
+  {
+    "model_key": "h200_141",
+    "display_name": "NVIDIA H200 141GB",
+    "aliases": ["H200", "H200 141GB", "NVIDIA H200", "NVIDIA H200 141GB"],
+    "arch": "hopper", "cc": "9.0", "vram_gb": 141,
+    "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": true,
+    "notes": "H100 die + HBM3e. Best for 405B+ models."
+  },
+  {
+    "model_key": "b200",
+    "display_name": "NVIDIA B200",
+    "aliases": ["B200", "NVIDIA B200", "B100", "NVIDIA B100"],
+    "arch": "blackwell", "cc": "10.0", "vram_gb": 192,
+    "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": true,
+    "notes": "Blackwell. Requires CUDA 12.8+."
+  }
+]

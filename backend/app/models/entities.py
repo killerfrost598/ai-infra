@@ -32,6 +32,12 @@ class TaskStatus(str, enum.Enum):
     PARTIAL = "PARTIAL"
 
 
+class EngineKind(str, enum.Enum):
+    VLLM = "VLLM"
+    SGLANG = "SGLANG"
+    OLLAMA = "OLLAMA"
+
+
 class ProviderAccount(Base):
     __tablename__ = "provider_accounts"
 
@@ -98,7 +104,15 @@ class ModelDeployment(Base):
     started_at: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
+    engine: Mapped[EngineKind | None] = mapped_column(Enum(EngineKind), nullable=True)
+    model_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_variants.id", ondelete="SET NULL"), nullable=True
+    )
+    stack_matrix_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("stack_matrix.id", ondelete="SET NULL"), nullable=True
+    )
+    install_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    inference_base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
 class TaskRun(Base):
@@ -191,3 +205,69 @@ class InferenceBenchmark(Base):
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class GpuProfile(Base):
+    __tablename__ = "gpu_profiles"
+    model_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    aliases: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    arch: Mapped[str] = mapped_column(String(32), nullable=False)
+    cc: Mapped[str] = mapped_column(String(8), nullable=False)
+    vram_gb: Mapped[int] = mapped_column(Integer, nullable=False)
+    fp8_native: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    bf16: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    marlin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    fa2: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    fa3: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class StackMatrix(Base):
+    __tablename__ = "stack_matrix"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cc_min: Mapped[str] = mapped_column(String(8), nullable=False)
+    cc_max: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    driver_min: Mapped[str] = mapped_column(String(16), nullable=False)
+    cuda_runtime: Mapped[str] = mapped_column(String(16), nullable=False)
+    torch: Mapped[str] = mapped_column(String(32), nullable=False)
+    vllm: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sglang: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    container_image: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pip_index_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ModelVariant(Base):
+    __tablename__ = "model_variants"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    model_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    quant: Mapped[str] = mapped_column(String(32), nullable=False)
+    vram_min_gb: Mapped[int] = mapped_column(Integer, nullable=False)
+    cc_min: Mapped[str] = mapped_column(String(8), nullable=False)
+    arch_supported_vllm: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    arch_supported_sglang: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    num_attention_heads: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tp_allowed_sizes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    context_default: Mapped[int] = mapped_column(Integer, default=8192, nullable=False)
+    hf_repo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class HostCapabilitySnapshot(Base):
+    __tablename__ = "host_capability_snapshots"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    captured_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    driver_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    cuda_runtime_host: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    gpu_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    gpus: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    nvlink_topology: Mapped[str | None] = mapped_column(Text, nullable=True)
+    homogeneous: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    docker_present: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    nvidia_container_toolkit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    raw_outputs: Mapped[dict | None] = mapped_column(JSON, nullable=True)

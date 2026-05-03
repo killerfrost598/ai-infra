@@ -22,6 +22,9 @@ const quantSchema = z.object({
   vram_weights_gb: z.number().positive(),
   quality_score: z.number().min(0).max(1),
   notes: z.string().nullable(),
+  cc_min: z.string().optional(),
+  arch_vllm: z.boolean().optional(),
+  arch_sglang: z.boolean().optional(),
 });
 export type Quant = z.infer<typeof quantSchema>;
 
@@ -54,6 +57,8 @@ export const modelSchema = z.object({
   is_moe: z.boolean().optional().default(false),
   moe_active_params_b: z.number().positive().optional(),
   use_case: z.string(),
+  num_attention_heads: z.number().int().positive().optional(),
+  tp_allowed_sizes: z.array(z.number().int().positive()).optional(),
   quants: z.array(quantSchema).min(1),
   kv_cache: kvCacheSchema,
   recommended_engines: z.array(engineSpecSchema).min(1),

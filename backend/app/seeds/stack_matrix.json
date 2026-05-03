@@ -1,0 +1,58 @@
+[
+  {
+    "cc_min": "7.0",
+    "cc_max": "7.5",
+    "driver_min": "525",
+    "cuda_runtime": "12.1",
+    "torch": "2.4.0",
+    "vllm": "0.6.3",
+    "sglang": "0.3.6",
+    "container_image": "vllm/vllm-openai:v0.6.3",
+    "pip_index_url": "https://download.pytorch.org/whl/cu121",
+    "priority": 50,
+    "is_active": true,
+    "notes": "Legacy fleet (V100/T4). No FP8, no FA3."
+  },
+  {
+    "cc_min": "8.0",
+    "cc_max": "8.6",
+    "driver_min": "535",
+    "cuda_runtime": "12.4",
+    "torch": "2.5.1",
+    "vllm": "0.7.3",
+    "sglang": "0.4.1",
+    "container_image": "vllm/vllm-openai:v0.7.3",
+    "pip_index_url": "https://download.pytorch.org/whl/cu124",
+    "priority": 90,
+    "is_active": true,
+    "notes": "Ampere (A100, RTX 3090). BF16, no FP8."
+  },
+  {
+    "cc_min": "8.9",
+    "cc_max": "8.9",
+    "driver_min": "535",
+    "cuda_runtime": "12.4",
+    "torch": "2.5.1",
+    "vllm": "0.7.3",
+    "sglang": "0.4.1",
+    "container_image": "vllm/vllm-openai:v0.7.3",
+    "pip_index_url": "https://download.pytorch.org/whl/cu124",
+    "priority": 100,
+    "is_active": true,
+    "notes": "Ada (RTX 4090, L4, L40S). FP8 limited path."
+  },
+  {
+    "cc_min": "9.0",
+    "cc_max": null,
+    "driver_min": "550",
+    "cuda_runtime": "12.4",
+    "torch": "2.5.1",
+    "vllm": "0.7.3",
+    "sglang": "0.4.1",
+    "container_image": "vllm/vllm-openai:v0.7.3",
+    "pip_index_url": "https://download.pytorch.org/whl/cu124",
+    "priority": 100,
+    "is_active": true,
+    "notes": "Hopper+ (H100, H200). Native FP8, FA3 enabled."
+  }
+]

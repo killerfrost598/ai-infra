@@ -4,6 +4,8 @@ import type {
   CloreRental,
   CommandsSummary,
   ExecResult,
+  FeasibilityReport,
+  FeasibilityRequest,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
   ListResponse,
@@ -199,5 +201,13 @@ export const api = {
     downloadTranscriptUrl: (id: string) => `${BASE_URL}/api/v1/sessions/${id}/download`,
     downloadCommandUrl: (sessionId: string, cmdId: string) =>
       `${BASE_URL}/api/v1/sessions/${sessionId}/commands/${cmdId}/download`,
+  },
+
+  feasibility: {
+    check: (req: FeasibilityRequest) =>
+      apiFetch<FeasibilityReport>("/api/v1/feasibility", {
+        method: "POST",
+        body: JSON.stringify(req),
+      }),
   },
 };

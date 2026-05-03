@@ -252,3 +252,32 @@ export interface InferenceBenchmarkCreate {
   measured_at?: string | null;
   notes?: string | null;
 }
+
+export type CheckStatus = "PASS" | "FAIL" | "UNKNOWN";
+export type FeasibilitySource = "predicted" | "snapshot";
+export type FeasibilityVerdict = "READY" | "BLOCKED" | "UNKNOWN";
+export type FeasibilityMode = "predicted" | "verified";
+
+export interface FeasibilityCheck {
+  id: string;
+  status: CheckStatus;
+  reason: string;
+  source: FeasibilitySource;
+}
+
+export interface FeasibilityReport {
+  verdict: FeasibilityVerdict;
+  mode: FeasibilityMode;
+  gpu_profile_key: string | null;
+  stack_matrix_id: number | null;
+  checks: FeasibilityCheck[];
+}
+
+export interface FeasibilityRequest {
+  server_id?: string;
+  offer_id?: number;
+  model_key: string;
+  quant: string;
+  engine: string;
+  tp_size?: number;
+}
