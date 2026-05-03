@@ -15,6 +15,16 @@ class InferenceBenchmarkCreate(BaseModel):
     vram_used_gb: float | None = None
     measured_at: str | None = None
     notes: str | None = None
+    ttft_ms_p50: float | None = None
+    ttft_ms_p95: float | None = None
+    prefill_tokens_per_second: float | None = None
+    cold_start_seconds: int | None = None
+    concurrency_curve: list | None = None
+    knee_concurrency: int | None = None
+    profile: str | None = None
+    deployment_id: str | None = None
+    task_run_id: str | None = None
+    model_variant_id: str | None = None
 
 
 class InferenceBenchmarkResponse(BaseModel):
@@ -33,6 +43,16 @@ class InferenceBenchmarkResponse(BaseModel):
     measured_at: str | None
     notes: str | None
     created_at: str
+    ttft_ms_p50: float | None = None
+    ttft_ms_p95: float | None = None
+    prefill_tokens_per_second: float | None = None
+    cold_start_seconds: int | None = None
+    concurrency_curve: list | None = None
+    knee_concurrency: int | None = None
+    profile: str | None = None
+    deployment_id: str | None = None
+    task_run_id: str | None = None
+    model_variant_id: str | None = None
 
 
 class InferenceBenchmarkListResponse(BaseModel):

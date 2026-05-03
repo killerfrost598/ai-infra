@@ -203,6 +203,22 @@ class InferenceBenchmark(Base):
     measured_at: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    ttft_ms_p50: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ttft_ms_p95: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prefill_tokens_per_second: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cold_start_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    concurrency_curve: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    knee_concurrency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    profile: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    deployment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_deployments.id", ondelete="SET NULL"), nullable=True
+    )
+    task_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    model_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_variants.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class GpuProfile(Base):

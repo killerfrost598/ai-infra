@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PerformanceTab } from "@/components/benchmarks/PerformanceTab";
 
 export default function ServerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -27,6 +28,7 @@ export default function ServerDetailPage() {
   const [startingSession, setStartingSession] = useState(false);
   const [gpuBenchmarks, setGpuBenchmarks] = useState<InferenceBenchmark[]>([]);
   const [benchmarksLoading, setBenchmarksLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"overview" | "performance">("overview");
 
   // Task run detail modal
   const [taskRunModal, setTaskRunModal] = useState<TaskRun | null>(null);
@@ -183,6 +185,25 @@ export default function ServerDetailPage() {
         </div>
       </Card>
 
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-border">
+        {(["overview", "performance"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-xs font-medium capitalize transition-colors ${
+              activeTab === tab
+                ? "border-b-2 border-indigo-500 text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "overview" && (
+        <>
       {/* SSH connectivity */}
       <Card className="px-6 py-4">
         <div className="flex items-center gap-4">
@@ -248,50 +269,6 @@ export default function ServerDetailPage() {
         </div>
       </div>
 
-      {/* GPU Benchmarks */}
-      {server.gpu_model && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">GPU Benchmarks</h2>
-            <Link href={`/benchmarks?gpu=${encodeURIComponent(server.gpu_model)}`} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-              View all →
-            </Link>
-          </div>
-          {benchmarksLoading && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-              Loading…
-            </div>
-          )}
-          {!benchmarksLoading && gpuBenchmarks.length === 0 && (
-            <p className="text-xs text-muted-foreground/60">
-              No benchmarks for {server.gpu_model} yet.{" "}
-              <Link href="/benchmarks" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300">Record one →</Link>
-            </p>
-          )}
-          {gpuBenchmarks.length > 0 && (
-            <div className="space-y-2">
-              {gpuBenchmarks.slice(0, 5).map((b) => (
-                <Card key={b.id} className="px-4 py-3 flex items-center gap-4 text-sm">
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate text-foreground/80">{b.model_name}</p>
-                    {b.quantization && <p className="text-xs text-muted-foreground/60">{b.quantization}</p>}
-                  </div>
-                  {b.tokens_per_second_avg != null && (
-                    <div className="shrink-0 text-right">
-                      <p className="font-mono text-emerald-600 dark:text-emerald-400">{b.tokens_per_second_avg.toFixed(1)} t/s</p>
-                      {b.max_parallel_connections != null && (
-                        <p className="text-xs text-muted-foreground/60">{b.max_parallel_connections} concurrent</p>
-                      )}
-                    </div>
-                  )}
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Task history */}
       <div className="space-y-3">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Task History</h2>
@@ -328,6 +305,12 @@ export default function ServerDetailPage() {
           ))}
         </div>
       </div>
+        </>
+      )}
+
+      {activeTab === "performance" && (
+        <PerformanceTab serverId={id} gpuModel={server.gpu_model} />
+      )}
 
       {/* ── Task run detail modal ────────────────────────────────────────────── */}
       <Dialog open={!!taskRunModal} onOpenChange={(open) => { if (!open) { setTaskRunModal(null); setTaskRunLogsCopied(false); } }}>

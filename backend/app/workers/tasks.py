@@ -188,6 +188,16 @@ def deploy_model(self, deployment_id: str) -> dict:
                 deployment.status = DeploymentStatus.RUNNING
                 deployment.started_at = _utcnow()
                 task_run.status = TaskStatus.SUCCESS
+
+                # Auto-benchmark if enabled and inference_base_url is set
+                from app.services.settings_service import get_setting
+                if (
+                    get_setting("auto_benchmark", db) == "true"
+                    and deployment.inference_base_url
+                ):
+                    from app.workers.benchmark_tasks import run_benchmark as _bench_task
+                    _bench_task.delay(str(deployment.id), profile="default")
+
                 _log("\n[vLLM container started]\n")
 
             except Exception as exc:

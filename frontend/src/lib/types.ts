@@ -232,8 +232,18 @@ export interface InferenceBenchmark {
   quantization: string | null;
   tokens_per_second_avg: number | null;
   tokens_per_second_p95: number | null;
+  ttft_ms_p50: number | null;
+  ttft_ms_p95: number | null;
+  prefill_tokens_per_second: number | null;
+  cold_start_seconds: number | null;
+  concurrency_curve: Array<{ n: number; agg_tps: number; per_req_tps: number; p95_ttft_ms: number }> | null;
+  knee_concurrency: number | null;
   max_parallel_connections: number | null;
   vram_used_gb: number | null;
+  profile: string | null;
+  deployment_id: string | null;
+  task_run_id: string | null;
+  model_variant_id: string | null;
   measured_at: string | null;
   notes: string | null;
   created_at: string;
@@ -251,6 +261,20 @@ export interface InferenceBenchmarkCreate {
   vram_used_gb?: number | null;
   measured_at?: string | null;
   notes?: string | null;
+}
+
+export interface LeaderboardRow {
+  gpu_model: string;
+  samples: number;
+  tps_median: number;
+  ttft_p95_median: number | null;
+  knee_median: number | null;
+  cost_per_million_tokens: number | null;
+}
+
+export interface BenchmarkRunResponse {
+  task_run_id: string;
+  profile: string;
 }
 
 export type CheckStatus = "PASS" | "FAIL" | "UNKNOWN";

@@ -23,3 +23,4 @@ def ping() -> str:
 
 
 import app.workers.tasks  # noqa: E402, F401  — registers all tasks
+import app.workers.benchmark_tasks  # noqa: E402, F401  — registers benchmark tasks

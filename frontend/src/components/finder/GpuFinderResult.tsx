@@ -107,6 +107,25 @@ function CompatChips({ offerId, modelKey, quant, engine }: {
   );
 }
 
+function ThroughputChip({ gpuName, modelKey }: { gpuName: string; modelKey: string }) {
+  const { data } = useQuery({
+    queryKey: ["benchmarks", "gpu", gpuName, modelKey],
+    queryFn: () => api.benchmarks.forGpu(gpuName, modelKey),
+    staleTime: 300_000,
+    enabled: !!gpuName && !!modelKey,
+  });
+  const items = data?.items ?? [];
+  const tpsValues = items.map((b) => b.tokens_per_second_avg).filter((v): v is number => v != null);
+  if (!tpsValues.length) return null;
+  const sorted = [...tpsValues].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  return (
+    <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800 dark:bg-teal-900/30 dark:text-teal-300">
+      Verified · {median.toFixed(1)} t/s ({tpsValues.length})
+    </span>
+  );
+}
+
 export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise }: Props) {
   const { offer, fit, pickedEngine, topEngine, diskOk, diskHeadroomGb, downloadEtaMin, scores, bucket } = rankedOffer;
   const totalVram = offer.vram_gb * offer.gpu_count;
@@ -191,6 +210,13 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
             quant={quant}
             engine={engine}
           />
+        )}
+
+        {/* Verified throughput */}
+        {modelKey && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <ThroughputChip gpuName={offer.gpu_name} modelKey={modelKey} />
+          </div>
         )}
 
         {/* Disk */}

@@ -1,4 +1,5 @@
 import type {
+  BenchmarkRunResponse,
   CloreBalance,
   CloreOffer,
   CloreRental,
@@ -8,6 +9,7 @@ import type {
   FeasibilityRequest,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
+  LeaderboardRow,
   ListResponse,
   ModelDeployment,
   Playbook,
@@ -170,6 +172,17 @@ export const api = {
       }),
     delete: (id: string) =>
       fetch(`${BASE_URL}/api/v1/benchmarks/${id}`, { method: "DELETE" }),
+    run: (deploymentId: string, profile = "default") =>
+      apiFetch<BenchmarkRunResponse>(
+        `/api/v1/benchmarks/run/${deploymentId}?profile=${profile}`,
+        { method: "POST" },
+      ),
+    leaderboard: (modelName?: string) => {
+      const params = new URLSearchParams();
+      if (modelName) params.set("model_name", modelName);
+      const q = params.toString();
+      return apiFetch<LeaderboardRow[]>(`/api/v1/benchmarks/leaderboard${q ? `?${q}` : ""}`);
+    },
   },
 
   sessions: {
