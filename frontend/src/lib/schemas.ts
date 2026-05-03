@@ -6,6 +6,8 @@ export const deploymentSchema = z.object({
   model_alias: z.string().optional(),
   quantization: z.string().optional(),
   remote_port: z.number().int().min(1).max(65535),
+  engine: z.enum(["VLLM", "SGLANG", "OLLAMA"]),
+  tp_size: z.number().int().min(1).max(8),
 })
 
 export type DeploymentFormValues = z.infer<typeof deploymentSchema>

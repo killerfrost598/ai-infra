@@ -3,6 +3,7 @@ import type {
   CloreBalance,
   CloreOffer,
   CloreRental,
+  ModelDeploymentCreate,
   CommandsSummary,
   ExecResult,
   FeasibilityReport,
@@ -94,7 +95,7 @@ export const api = {
     list: (skip = 0, limit = 20) =>
       apiFetch<ListResponse<ModelDeployment>>(`/api/v1/model-deployments?skip=${skip}&limit=${limit}`),
     get: (id: string) => apiFetch<ModelDeployment>(`/api/v1/model-deployments/${id}`),
-    create: (data: Partial<ModelDeployment>) =>
+    create: (data: ModelDeploymentCreate) =>
       apiFetch<ModelDeployment>("/api/v1/model-deployments", {
         method: "POST",
         body: JSON.stringify(data),

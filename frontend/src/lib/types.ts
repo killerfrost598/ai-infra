@@ -33,6 +33,20 @@ export interface ServerCreate {
   os_image?: string;
 }
 
+export type EngineKind = "VLLM" | "SGLANG" | "OLLAMA";
+
+export interface ModelDeploymentCreate {
+  server_id: string;
+  model_name: string;
+  model_alias?: string;
+  quantization?: string;
+  remote_port?: number;
+  engine?: EngineKind;
+  model_variant_id?: string;
+  tp_size?: number;
+  playbook_id?: string;
+}
+
 export interface ModelDeployment {
   id: string;
   server_id: string;
@@ -46,6 +60,10 @@ export interface ModelDeployment {
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
+  engine: EngineKind | null;
+  model_variant_id: string | null;
+  stack_matrix_id: number | null;
+  inference_base_url: string | null;
 }
 
 export interface Playbook {

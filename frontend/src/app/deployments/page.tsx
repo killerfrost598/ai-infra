@@ -27,7 +27,7 @@ export default function DeploymentsPage() {
     resolver: zodResolver(deploymentSchema),
     defaultValues: {
       server_id: "", model_name: "", model_alias: "",
-      quantization: "", remote_port: 8000,
+      quantization: "", remote_port: 8000, engine: "VLLM", tp_size: 1,
     },
   });
 
@@ -39,6 +39,8 @@ export default function DeploymentsPage() {
         model_alias: values.model_alias || undefined,
         quantization: values.quantization || undefined,
         remote_port: values.remote_port,
+        engine: values.engine,
+        tp_size: values.tp_size,
       },
       { onSuccess: () => { form.reset(); setShowForm(false); } }
     );
@@ -91,7 +93,7 @@ export default function DeploymentsPage() {
                   name="model_name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs font-medium text-muted-foreground">Model name</FormLabel>
+                      <FormLabel className="text-xs font-medium text-muted-foreground">Model name / HF repo</FormLabel>
                       <FormControl>
                         <Input placeholder="meta-llama/Llama-3-8b-instruct" {...field} />
                       </FormControl>
@@ -110,6 +112,24 @@ export default function DeploymentsPage() {
                       </FormLabel>
                       <FormControl>
                         <Input placeholder="llama3-8b" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="engine"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium text-muted-foreground">Engine</FormLabel>
+                      <FormControl>
+                        <select className="input w-full text-sm" {...field}>
+                          <option value="VLLM">vLLM</option>
+                          <option value="SGLANG">SGLang</option>
+                          <option value="OLLAMA">Ollama</option>
+                        </select>
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -138,6 +158,24 @@ export default function DeploymentsPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel className="text-xs font-medium text-muted-foreground">Remote port</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          {...field}
+                          onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="tp_size"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium text-muted-foreground">Tensor parallel size</FormLabel>
                       <FormControl>
                         <Input
                           type="number"
@@ -186,9 +224,16 @@ export default function DeploymentsPage() {
               <p className="font-medium">{d.model_name}</p>
               {d.model_alias && <p className="text-xs text-muted-foreground">alias: {d.model_alias}</p>}
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground/70">
+                <span>{d.engine ?? "VLLM"}</span>
                 <span>port {d.remote_port}</span>
                 {d.quantization && <span>{d.quantization}</span>}
+                {d.stack_matrix_id && <span>stack #{d.stack_matrix_id}</span>}
               </div>
+              {d.inference_base_url && (
+                <p className="mt-1 text-xs font-mono text-emerald-600 dark:text-emerald-400 truncate">
+                  {d.inference_base_url}
+                </p>
+              )}
             </div>
             <div className="shrink-0 text-right text-xs text-muted-foreground">
               {d.started_at

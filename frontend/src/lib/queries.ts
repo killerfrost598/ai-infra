@@ -147,7 +147,7 @@ export function useTerminateRental() {
 export function useCreateDeployment() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: Partial<import("./types").ModelDeployment>) => api.deployments.create(data),
+    mutationFn: (data: import("./types").ModelDeploymentCreate) => api.deployments.create(data),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.deployments() }),
     onError: (e: Error) => toast.error(e.message),
   })

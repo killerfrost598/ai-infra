@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import IO
 from uuid import UUID
@@ -11,8 +12,10 @@ from uuid import UUID
 from app.db.session import SessionLocal
 from app.models.entities import (
     DeploymentStatus,
+    EngineKind,
     HostCapabilitySnapshot,
     ModelDeployment,
+    ModelVariant,
     Server,
     ServerStatus,
     TaskRun,
@@ -217,7 +220,7 @@ def reprobe_server(self, server_id: str) -> dict:
 
 @celery_app.task(bind=True, name="deployments.deploy")
 def deploy_model(self, deployment_id: str) -> dict:
-    """Launch vLLM via Docker on the target server."""
+    """Deploy a model using select_stack(): container-first, venv fallback, health-gated."""
     db = SessionLocal()
     try:
         deployment = db.query(ModelDeployment).filter(ModelDeployment.id == UUID(deployment_id)).first()
@@ -246,45 +249,183 @@ def deploy_model(self, deployment_id: str) -> dict:
         with open(log_file, "w") as log_f:
             _log = _make_logger(log_f)
             try:
-                cmd = (
-                    f"docker run -d --gpus all --rm "
-                    f"-p {deployment.remote_port}:{deployment.remote_port} "
-                    f"vllm/vllm-openai:latest "
-                    f"--model {deployment.model_name} "
-                    f"--port {deployment.remote_port}"
+                # ── 1. Load snapshot (required) ──────────────────────────────
+                snapshot = (
+                    db.query(HostCapabilitySnapshot)
+                    .filter(HostCapabilitySnapshot.server_id == server.id)
+                    .order_by(HostCapabilitySnapshot.captured_at.desc())
+                    .first()
                 )
-                if deployment.quantization:
-                    cmd += f" --quantization {deployment.quantization}"
+                if not snapshot:
+                    raise RuntimeError("No capability snapshot — run reprobe before deploying")
 
-                _log(f"$ {cmd}\n")
+                # ── 2. Load variant (optional) ───────────────────────────────
+                variant: ModelVariant | None = None
+                if deployment.model_variant_id:
+                    variant = db.query(ModelVariant).filter(
+                        ModelVariant.id == deployment.model_variant_id
+                    ).first()
+
+                engine = deployment.engine or EngineKind.VLLM
+                tp_size = (deployment.install_plan_json or {}).get("tp_size", 1)
+
+                # ── 3. Re-run feasibility (abort on BLOCKED) ─────────────────
+                from app.services.compat.feasibility import run_feasibility
+                model_key = variant.model_key if variant else deployment.model_name
+                quant = variant.quant if variant else (deployment.quantization or "auto")
+                gpu_name = snapshot.gpus[0].get("name") if snapshot.gpus else None
+                vram_gb_total = (
+                    sum(g.get("vram_gb", 0) for g in snapshot.gpus) if snapshot.gpus else None
+                )
+
+                _log("$ Feasibility check...\n")
+                report = run_feasibility(
+                    db=db,
+                    gpu_name=gpu_name,
+                    vram_gb_total=vram_gb_total,
+                    gpu_count=snapshot.gpu_count,
+                    driver_version=snapshot.driver_version,
+                    snapshot=snapshot,
+                    model_key=model_key,
+                    quant=quant,
+                    engine=engine.value,
+                    tp_size=tp_size,
+                )
+                for check in report.checks:
+                    _log(f"  [{check.status:7s}] {check.id}: {check.reason}\n")
+                _log(f"  verdict={report.verdict}  mode={report.mode}\n\n")
+
+                if report.verdict == "BLOCKED":
+                    blocked = [c.reason for c in report.checks if c.status == "FAIL"]
+                    raise RuntimeError(f"Feasibility BLOCKED — {'; '.join(blocked)}")
+
+                # ── 4. Select stack ──────────────────────────────────────────
+                if variant is None:
+                    raise RuntimeError(
+                        "model_variant_id is required for automatic stack selection — "
+                        "set model_variant_id on the deployment or use the legacy flow"
+                    )
+
+                from app.services.compat.selector import select_stack
+                from app.services.settings_service import get_setting
+                hf_token = get_setting("hf_token", db)
+
+                _log("$ Selecting stack...\n")
+                plan = select_stack(
+                    snapshot=snapshot,
+                    variant=variant,
+                    engine=engine,
+                    db=db,
+                    tp_size=tp_size,
+                    remote_port=deployment.remote_port,
+                    hf_token=hf_token,
+                )
+                _log(f"  mode={plan.mode}  stack_matrix_id={plan.stack_matrix_id}\n")
+                if plan.container_image:
+                    _log(f"  image={plan.container_image}\n")
+                _log(f"  cmd={plan.launch_cmd[:120]}\n\n")
+
+                deployment.stack_matrix_id = plan.stack_matrix_id
+                deployment.install_plan_json = plan.to_dict()
+                db.commit()
+
+                # ── 5. SSH: install + launch ─────────────────────────────────
                 with SSHManager(
                     hostname=server.hostname,
                     port=server.ssh_port,
                     username=server.ssh_username,
                     password=server.ssh_password,
                     private_key_content=server.ssh_private_key,
+                    timeout=600,
                 ) as ssh:
-                    stdout, stderr, rc = ssh.execute(cmd)
+                    if plan.mode == "venv":
+                        _log("$ Setting up venv...\n")
+                        venv_cmd = (
+                            "uv venv ~/aip_venv --python python3 2>&1 "
+                            "|| python3 -m venv ~/aip_venv"
+                        )
+                        stdout, stderr, rc = ssh.execute(venv_cmd)
+                        _log(stdout)
+                        if rc != 0:
+                            raise RuntimeError(f"venv creation failed (exit {rc}): {stderr.strip()}")
+
+                        if plan.packages:
+                            packages_str = " ".join(plan.packages)
+                            pip_extra = (
+                                f"--extra-index-url {plan.pip_index_url} "
+                                if plan.pip_index_url else ""
+                            )
+                            pip_cmd = (
+                                f"~/aip_venv/bin/pip install {pip_extra}{packages_str} 2>&1"
+                            )
+                            _log(f"$ pip install {packages_str}\n")
+                            stdout, stderr, rc = ssh.execute(pip_cmd)
+                            # Tail large output to avoid huge logs
+                            _log(stdout[-3000:] if len(stdout) > 3000 else stdout)
+                            if rc != 0:
+                                raise RuntimeError(
+                                    f"pip install failed (exit {rc}): {stderr.strip()[-500:]}"
+                                )
+
+                    elif plan.mode == "container" and plan.container_image:
+                        pull_cmd = f"docker pull {plan.container_image}"
+                        _log(f"$ {pull_cmd}\n")
+                        stdout, stderr, rc = ssh.execute(pull_cmd)
+                        _log(stdout[-3000:] if len(stdout) > 3000 else stdout)
+                        if rc != 0:
+                            raise RuntimeError(
+                                f"docker pull failed (exit {rc}): {stderr.strip()[-500:]}"
+                            )
+
+                    # Launch (container -d or nohup &)
+                    _log(f"\n$ {plan.launch_cmd}\n")
+                    stdout, stderr, rc = ssh.execute(plan.launch_cmd)
                     _log(stdout)
                     if stderr:
-                        _log(f"\n--- stderr ---\n{stderr}\n")
+                        _log(f"  stderr: {stderr[:500]}\n")
                     if rc != 0:
-                        raise RuntimeError(f"vLLM launch failed (exit {rc}): {stderr.strip()}")
+                        raise RuntimeError(f"Launch failed (exit {rc}): {stderr.strip()}")
 
+                    # ── 6. Health poll: 60×2s = 120s ────────────────────────
+                    _log("\n$ Waiting for /v1/models health check...\n")
+                    poll_cmd = (
+                        f"timeout 3 curl -s -o /dev/null "
+                        f"-w '%{{http_code}}' "
+                        f"http://localhost:{plan.remote_port}/v1/models"
+                    )
+                    healthy = False
+                    for attempt in range(60):
+                        time.sleep(2)
+                        try:
+                            stdout, _, poll_rc = ssh.execute(poll_cmd)
+                            code = stdout.strip()
+                            if code == "200":
+                                healthy = True
+                                _log(f"  [attempt {attempt + 1}] HTTP 200 — healthy!\n")
+                                break
+                            if attempt % 5 == 0:
+                                _log(f"  [attempt {attempt + 1}] HTTP {code or '?'} — waiting...\n")
+                        except Exception as poll_err:
+                            if attempt % 5 == 0:
+                                _log(f"  [attempt {attempt + 1}] poll error: {poll_err}\n")
+
+                    if not healthy:
+                        raise RuntimeError(
+                            "vLLM did not become healthy within 120 seconds"
+                        )
+
+                # ── 7. Mark success ──────────────────────────────────────────
+                deployment.inference_base_url = (
+                    f"http://{server.hostname}:{plan.remote_port}/v1"
+                )
                 deployment.status = DeploymentStatus.RUNNING
                 deployment.started_at = _utcnow()
                 task_run.status = TaskStatus.SUCCESS
+                _log(f"\n[deployment ready] {deployment.inference_base_url}\n")
 
-                # Auto-benchmark if enabled and inference_base_url is set
-                from app.services.settings_service import get_setting
-                if (
-                    get_setting("auto_benchmark", db) == "true"
-                    and deployment.inference_base_url
-                ):
+                if get_setting("auto_benchmark", db) == "true":
                     from app.workers.benchmark_tasks import run_benchmark as _bench_task
                     _bench_task.delay(str(deployment.id), profile="default")
-
-                _log("\n[vLLM container started]\n")
 
             except Exception as exc:
                 logger.exception("Deployment failed for deployment %s", deployment_id)
