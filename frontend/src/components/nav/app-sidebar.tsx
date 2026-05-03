@@ -5,11 +5,13 @@ import { usePathname } from "next/navigation"
 import {
   BarChart2,
   BookOpen,
+  BookOpenText,
   FlaskConical,
   LayoutDashboard,
   Layers,
   Monitor,
   Moon,
+  ScanSearch,
   Server,
   Settings,
   Sun,
@@ -39,8 +41,10 @@ const NAV_ITEMS = [
   { href: "/deployments", label: "Deployments", icon: Layers },
   { href: "/playbooks",   label: "Playbooks",   icon: BookOpen },
   { href: "/clore",       label: "Clore",       icon: Monitor },
+  { href: "/find",        label: "GPU Finder",  icon: ScanSearch },
   { href: "/benchmarks",  label: "Benchmarks",  icon: BarChart2 },
   { href: "/lab",         label: "Lab",         icon: FlaskConical },
+  { href: "/docs",        label: "Docs",        icon: BookOpenText },
   { href: "/settings",    label: "Settings",    icon: Settings },
 ]
 

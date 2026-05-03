@@ -6,6 +6,7 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/nav/app-sidebar";
 import { Providers } from "@/components/providers";
 import { MainContent } from "@/components/layouts/main-content";
+import { PrefetchOffers } from "@/components/PrefetchOffers";
 
 export const metadata: Metadata = {
   title: "AI Inference Platform",
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="dark" disableTransitionOnChange>
           <Providers>
+            <PrefetchOffers />
             <SidebarProvider>
               <AppSidebar />
               <SidebarInset>

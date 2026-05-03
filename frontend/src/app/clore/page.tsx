@@ -1,20 +1,34 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useCloreBalance, useCloreOffers, useRentals, useServers, useBenchmarks, useRentClore, useTerminateRental, useCreateServer, useCreateSession } from "@/lib/queries";
-import type { CloreOffer, CloreRental, InferenceBenchmark, RentRequest, Server } from "@/lib/types";
+import dynamic from "next/dynamic";
+import {
+  useCloreOffers, useRentals, useServers, useBenchmarks,
+  useTerminateRental, useCreateSession,
+} from "@/lib/queries";
+import type { CloreOffer, CloreRental, InferenceBenchmark, Server } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { OfferCard, fmtSpeed } from "@/components/clore/OfferCard";
+import { RentDialog } from "@/components/clore/RentDialog";
+import { RegisterRentalForm } from "@/components/clore/RegisterRentalForm";
+
+const ModelAdvisorSheet = dynamic(
+  () => import("@/components/advisor/ModelAdvisorSheet").then((m) => m.ModelAdvisorSheet),
+  { ssr: false },
+);
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 type Tab = "marketplace" | "gpu-groups" | "rentals";
 
 const TAB_LABELS: Record<Tab, string> = {
-  "marketplace": "Marketplace",
+  marketplace: "Marketplace",
   "gpu-groups": "By GPU",
-  "rentals": "Rentals",
+  rentals: "Rentals",
 };
 
 export default function ClorePage() {
@@ -40,13 +54,13 @@ export default function ClorePage() {
       </div>
 
       {tab === "marketplace" && <MarketplaceTab />}
-      {tab === "gpu-groups" && <GpuGroupsTab />}
-      {tab === "rentals" && <RentalsTab />}
+      {tab === "gpu-groups"  && <GpuGroupsTab />}
+      {tab === "rentals"     && <RentalsTab />}
     </div>
   );
 }
 
-// ── Filter state ───────────────────────────────────────────────────────────────
+// ── Filters ───────────────────────────────────────────────────────────────────
 
 interface Filters {
   gpu: string;
@@ -59,13 +73,7 @@ interface Filters {
 }
 
 const DEFAULT_FILTERS: Filters = {
-  gpu: "",
-  minVram: 0,
-  minDisk: 0,
-  minPcieVersion: 3,
-  minPcieWidth: 8,
-  minUpload: 0,
-  minDownload: 0,
+  gpu: "", minVram: 0, minDisk: 0, minPcieVersion: 3, minPcieWidth: 8, minUpload: 0, minDownload: 0,
 };
 
 function applyFilters(offers: CloreOffer[], f: Filters): CloreOffer[] {
@@ -76,15 +84,14 @@ function applyFilters(offers: CloreOffer[], f: Filters): CloreOffer[] {
     if (f.minUpload > 0 && (o.upload_mbps ?? 0) < f.minUpload) return false;
     if (f.minDownload > 0 && (o.download_mbps ?? 0) < f.minDownload) return false;
     if (f.minPcieVersion > 0 && o.pcie_version) {
-      const ver = parseFloat(o.pcie_version);
-      if (ver < f.minPcieVersion) return false;
+      if (parseFloat(o.pcie_version) < f.minPcieVersion) return false;
     }
     if (f.minPcieWidth > 0 && (o.pcie_width ?? 0) < f.minPcieWidth) return false;
     return true;
   });
 }
 
-// ── Marketplace tab ────────────────────────────────────────────────────────────
+// ── Marketplace tab ───────────────────────────────────────────────────────────
 
 type BenchmarkMap = Record<string, InferenceBenchmark[]>;
 
@@ -92,6 +99,7 @@ function MarketplaceTab() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [gpuSearch, setGpuSearch] = useState("");
   const [dialogOffer, setDialogOffer] = useState<CloreOffer | null>(null);
+  const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
 
   const { data: offersData, isLoading, error, refetch } = useCloreOffers(gpuSearch || undefined);
   const { data: benchData } = useBenchmarks(undefined, undefined, 200);
@@ -128,12 +136,8 @@ function MarketplaceTab() {
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
           <FilterField label="GPU name">
-            <Input
-              className="text-sm"
-              placeholder="e.g. RTX 4090"
-              value={filters.gpu}
-              onChange={(e) => setFilter("gpu", e.target.value)}
-            />
+            <Input className="text-sm" placeholder="e.g. RTX 4090" value={filters.gpu}
+              onChange={(e) => setFilter("gpu", e.target.value)} />
           </FilterField>
           <FilterField label="Min VRAM (GB)">
             <NumInput value={filters.minVram} onChange={(v) => setFilter("minVram", v)} min={0} step={8} />
@@ -142,18 +146,16 @@ function MarketplaceTab() {
             <NumInput value={filters.minDisk} onChange={(v) => setFilter("minDisk", v)} min={0} step={100} placeholder="100" />
           </FilterField>
           <FilterField label="Min PCIe version">
-            <select className="input w-full text-sm" value={filters.minPcieVersion} onChange={(e) => setFilter("minPcieVersion", Number(e.target.value))}>
-              <option value={0}>Any</option>
-              <option value={3}>3.0+</option>
-              <option value={4}>4.0+</option>
-              <option value={5}>5.0+</option>
+            <select className="input w-full text-sm" value={filters.minPcieVersion}
+              onChange={(e) => setFilter("minPcieVersion", Number(e.target.value))}>
+              <option value={0}>Any</option><option value={3}>3.0+</option>
+              <option value={4}>4.0+</option><option value={5}>5.0+</option>
             </select>
           </FilterField>
           <FilterField label="Min PCIe width">
-            <select className="input w-full text-sm" value={filters.minPcieWidth} onChange={(e) => setFilter("minPcieWidth", Number(e.target.value))}>
-              <option value={0}>Any</option>
-              <option value={8}>x8+</option>
-              <option value={16}>x16</option>
+            <select className="input w-full text-sm" value={filters.minPcieWidth}
+              onChange={(e) => setFilter("minPcieWidth", Number(e.target.value))}>
+              <option value={0}>Any</option><option value={8}>x8+</option><option value={16}>x16</option>
             </select>
           </FilterField>
           <FilterField label="Min upload (Mbps)">
@@ -175,12 +177,7 @@ function MarketplaceTab() {
           {error.message}
         </div>
       )}
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading offers…
-        </div>
-      )}
+      {isLoading && <Spinner text="Loading offers…" />}
       {!isLoading && !error && offers.length === 0 && (
         <Card className="px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">No offers found.</p>
@@ -196,8 +193,7 @@ function MarketplaceTab() {
 
       {!isLoading && filtered.length > 0 && (
         <p className="text-xs text-muted-foreground/60">
-          {filtered.length} offer{filtered.length !== 1 ? "s" : ""}
-          {hasActiveFilters ? ` (${offers.length} total)` : ""}
+          {filtered.length} offer{filtered.length !== 1 ? "s" : ""}{hasActiveFilters ? ` (${offers.length} total)` : ""}
         </p>
       )}
 
@@ -208,150 +204,24 @@ function MarketplaceTab() {
             offer={offer}
             benchmarks={benchmarkMap[offer.gpu_name] ?? []}
             onRent={() => setDialogOffer(offer)}
+            onAdvise={() => setAdvisorOffer(offer)}
           />
         ))}
       </div>
 
       {dialogOffer && <RentDialog offer={dialogOffer} onClose={() => setDialogOffer(null)} />}
+
+      <ModelAdvisorSheet
+        offer={advisorOffer}
+        open={!!advisorOffer}
+        onOpenChange={(o) => { if (!o) setAdvisorOffer(null); }}
+        onDeployRequested={() => { setDialogOffer(advisorOffer); setAdvisorOffer(null); }}
+      />
     </>
   );
 }
 
-// ── Offer card ─────────────────────────────────────────────────────────────────
-
-function OfferCard({ offer, benchmarks, onRent }: { offer: CloreOffer; benchmarks: InferenceBenchmark[]; onRent: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-
-  const pcieBadgeColor =
-    !offer.pcie_version ? "text-muted-foreground/40" :
-    parseFloat(offer.pcie_version) >= 4 ? "text-emerald-600 dark:text-emerald-500" :
-    parseFloat(offer.pcie_version) >= 3 ? "text-yellow-600 dark:text-yellow-500" :
-    "text-rose-600 dark:text-rose-400";
-
-  const pcieWidthColor =
-    !offer.pcie_width ? "text-muted-foreground/40" :
-    offer.pcie_width >= 16 ? "text-emerald-600 dark:text-emerald-500" :
-    offer.pcie_width >= 8 ? "text-yellow-600 dark:text-yellow-500" :
-    "text-rose-600 dark:text-rose-400";
-
-  return (
-    <Card className="px-6 py-5 space-y-3">
-      <div className="flex items-center gap-4">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-medium">{offer.gpu_name}</p>
-            {offer.gpu_count > 1 && (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">×{offer.gpu_count}</span>
-            )}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-            <Chip label={`${offer.vram_gb} GB VRAM`} color="text-indigo-400" />
-            {offer.cuda_version && <Chip label={`CUDA ${offer.cuda_version}`} />}
-            <span className={`font-mono ${pcieBadgeColor}`}>
-              PCIe {offer.pcie_version ?? "?"} {offer.pcie_width ? `x${offer.pcie_width}` : ""}
-            </span>
-            {offer.disk_gb != null && (
-              <Chip label={`${offer.disk_gb} GB disk`} color={offer.disk_gb >= 100 ? "text-muted-foreground" : "text-rose-400"} />
-            )}
-          </div>
-        </div>
-
-        <div className="shrink-0 text-right space-y-1">
-          <p className="text-sm font-semibold">
-            ${offer.price_per_day.toFixed(2)}<span className="text-xs text-muted-foreground">/day</span>
-          </p>
-          {offer.upload_mbps != null && (
-            <p className="text-xs text-muted-foreground">↑ {fmtSpeed(offer.upload_mbps)} · ↓ {fmtSpeed(offer.download_mbps)}</p>
-          )}
-        </div>
-
-        <div className="flex gap-2 shrink-0">
-          <Button variant="ghost" size="sm" onClick={() => setExpanded((x) => !x)} title="Show full specs">
-            {expanded ? "Less" : "More"}
-          </Button>
-          <Button size="sm" onClick={onRent}>Rent</Button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="border-t border-border pt-3 space-y-3">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-3">
-            <SpecRow label="CPU" value={offer.cpu_model} />
-            <SpecRow label="System RAM" value={offer.ram_gb != null ? `${offer.ram_gb} GB` : null} />
-            <SpecRow label="Disk" value={offer.disk_gb != null ? `${offer.disk_gb} GB` : null} />
-            <SpecRow label="PCIe version" value={offer.pcie_version} colorClass={pcieBadgeColor} />
-            <SpecRow label="PCIe width" value={offer.pcie_width != null ? `x${offer.pcie_width}` : null} colorClass={pcieWidthColor} />
-            <SpecRow label="Upload" value={offer.upload_mbps != null ? fmtSpeed(offer.upload_mbps) : null} />
-            <SpecRow label="Download" value={offer.download_mbps != null ? fmtSpeed(offer.download_mbps) : null} />
-            <SpecRow label="CUDA" value={offer.cuda_version} />
-            <SpecRow label="GPU count" value={String(offer.gpu_count)} />
-          </div>
-
-          {benchmarks.length > 0 && (
-            <div className="border-t border-border/60 pt-3">
-              <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Performance data</p>
-              <div className="space-y-1.5">
-                {benchmarks.slice(0, 4).map((b) => (
-                  <div key={b.id} className="flex items-center gap-3 text-xs">
-                    <span className="text-muted-foreground truncate flex-1">{b.model_name}{b.quantization ? ` (${b.quantization})` : ""}</span>
-                    {b.tokens_per_second_avg != null && (
-                      <span className="font-mono text-emerald-600 dark:text-emerald-400 shrink-0">{b.tokens_per_second_avg.toFixed(1)} t/s</span>
-                    )}
-                    {b.max_parallel_connections != null && (
-                      <span className="text-muted-foreground/60 shrink-0">{b.max_parallel_connections} concurrent</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {benchmarks.length === 0 && (
-            <div className="border-t border-border/60 pt-2 text-xs text-muted-foreground/40">No benchmarks recorded for this GPU.</div>
-          )}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function Chip({ label, color = "text-muted-foreground" }: { label: string; color?: string }) {
-  return <span className={color}>{label}</span>;
-}
-
-function SpecRow({ label, value, colorClass = "text-foreground/80" }: { label: string; value: string | null | undefined; colorClass?: string }) {
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="text-muted-foreground/60 shrink-0">{label}</span>
-      <span className={value ? colorClass : "text-muted-foreground/30 italic"}>{value ?? "unknown"}</span>
-    </div>
-  );
-}
-
-function fmtSpeed(mbps: number | null | undefined): string {
-  if (mbps == null) return "—";
-  if (mbps >= 1000) return `${(mbps / 1000).toFixed(1)} Gbps`;
-  return `${Math.round(mbps)} Mbps`;
-}
-
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <label className="block text-xs text-muted-foreground">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function NumInput({ value, onChange, min = 0, step = 1, placeholder }: {
-  value: number; onChange: (v: number) => void; min?: number; step?: number; placeholder?: string;
-}) {
-  return (
-    <Input type="number" className="text-sm" value={value || ""} min={min} step={step}
-      placeholder={placeholder ?? "0 = any"} onChange={(e) => onChange(Number(e.target.value) || 0)} />
-  );
-}
-
-// ── GPU Groups tab ─────────────────────────────────────────────────────────────
+// ── GPU Groups tab ────────────────────────────────────────────────────────────
 
 interface GpuGroup {
   key: string; gpu_name: string; vram_gb: number;
@@ -383,6 +253,7 @@ function GpuGroupsTab() {
 
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [rentDialogOffer, setRentDialogOffer] = useState<CloreOffer | null>(null);
+  const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
 
   return (
     <>
@@ -391,12 +262,7 @@ function GpuGroupsTab() {
           {error.message}
         </div>
       )}
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading offers…
-        </div>
-      )}
+      {isLoading && <Spinner text="Loading offers…" />}
       {!isLoading && !error && (
         <p className="text-xs text-muted-foreground/60">{groups.length} GPU models across {offers.length} offers</p>
       )}
@@ -409,17 +275,26 @@ function GpuGroupsTab() {
             expanded={expandedKey === g.key}
             onToggle={() => setExpandedKey(expandedKey === g.key ? null : g.key)}
             onRent={(o) => setRentDialogOffer(o)}
+            onAdvise={(o) => setAdvisorOffer(o)}
           />
         ))}
       </div>
 
       {rentDialogOffer && <RentDialog offer={rentDialogOffer} onClose={() => setRentDialogOffer(null)} />}
+
+      <ModelAdvisorSheet
+        offer={advisorOffer}
+        open={!!advisorOffer}
+        onOpenChange={(o) => { if (!o) setAdvisorOffer(null); }}
+        onDeployRequested={() => { setRentDialogOffer(advisorOffer); setAdvisorOffer(null); }}
+      />
     </>
   );
 }
 
-function GpuGroupCard({ group, expanded, onToggle, onRent }: {
-  group: GpuGroup; expanded: boolean; onToggle: () => void; onRent: (o: CloreOffer) => void;
+function GpuGroupCard({ group, expanded, onToggle, onRent, onAdvise }: {
+  group: GpuGroup; expanded: boolean; onToggle: () => void;
+  onRent: (o: CloreOffer) => void; onAdvise: (o: CloreOffer) => void;
 }) {
   const [sortKey, setSortKey] = useState<GroupSortKey>("price");
   const [sortAsc, setSortAsc] = useState(true);
@@ -437,7 +312,10 @@ function GpuGroupCard({ group, expanded, onToggle, onRent }: {
     let list = group.offers.filter((o) => {
       if (filterCuda && o.cuda_version !== filterCuda) return false;
       if (filterMinGpuCount > 0 && o.gpu_count < filterMinGpuCount) return false;
-      if (filterMinPcie > 0) { const ver = o.pcie_version ? parseFloat(o.pcie_version) : 0; if (ver < filterMinPcie) return false; }
+      if (filterMinPcie > 0) {
+        const ver = o.pcie_version ? parseFloat(o.pcie_version) : 0;
+        if (ver < filterMinPcie) return false;
+      }
       if (filterMinPcieWidth > 0 && (o.pcie_width ?? 0) < filterMinPcieWidth) return false;
       return true;
     });
@@ -461,23 +339,28 @@ function GpuGroupCard({ group, expanded, onToggle, onRent }: {
 
   return (
     <Card className="overflow-hidden">
-      <button onClick={onToggle} className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-muted/20 transition-colors">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-medium">{group.gpu_name}</p>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-indigo-400">{group.vram_gb} GB VRAM</span>
+      <div className="flex items-center gap-2 px-4 py-3 hover:bg-muted/10 transition-colors">
+        <button onClick={() => onAdvise(group.offers[0])} className="flex flex-1 min-w-0 items-center gap-3 text-left">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-medium">{group.gpu_name}</p>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-indigo-400">{group.vram_gb} GB VRAM</span>
+              <span className="text-[10px] text-indigo-400/60">Model Advisor →</span>
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {group.count} offer{group.count !== 1 ? "s" : ""} · ${group.min_price.toFixed(2)}
+              {group.max_price !== group.min_price && `–$${group.max_price.toFixed(2)}`}/day
+            </p>
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {group.count} offer{group.count !== 1 ? "s" : ""} · ${group.min_price.toFixed(2)}
-            {group.max_price !== group.min_price && `–$${group.max_price.toFixed(2)}`}/day
-          </p>
-        </div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-          strokeLinecap="round" strokeLinejoin="round"
-          className={`shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}>
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
+        </button>
+        <button onClick={onToggle} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Show offers">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round"
+            className={`transition-transform ${expanded ? "rotate-180" : ""}`}>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-border px-5 pb-4 pt-3 space-y-3">
@@ -522,7 +405,10 @@ function GpuGroupCard({ group, expanded, onToggle, onRent }: {
           {sorted.length === 0 && <p className="text-xs text-muted-foreground/60">No offers match the current filters.</p>}
           <div className="space-y-1.5">
             {sorted.map((o) => (
-              <div key={o.id} className="flex items-center gap-3 rounded-lg bg-muted/30 px-4 py-2.5">
+              <div key={o.id}
+                className="flex items-center gap-3 rounded-lg bg-muted/30 px-4 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer"
+                onClick={() => onAdvise(o)}
+              >
                 <div className="flex-1 min-w-0 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
                   {o.gpu_count > 1 && <span className="text-muted-foreground">×{o.gpu_count}</span>}
                   {o.cuda_version && <span className="text-muted-foreground/60">CUDA {o.cuda_version}</span>}
@@ -539,7 +425,7 @@ function GpuGroupCard({ group, expanded, onToggle, onRent }: {
                 <p className="text-sm font-semibold shrink-0">
                   ${o.price_per_day.toFixed(2)}<span className="text-xs text-muted-foreground">/day</span>
                 </p>
-                <Button size="sm" className="shrink-0" onClick={() => onRent(o)}>Rent</Button>
+                <Button size="sm" className="shrink-0" onClick={(e) => { e.stopPropagation(); onRent(o); }}>Rent</Button>
               </div>
             ))}
           </div>
@@ -549,7 +435,7 @@ function GpuGroupCard({ group, expanded, onToggle, onRent }: {
   );
 }
 
-// ── Rentals tab ────────────────────────────────────────────────────────────────
+// ── Rentals tab ───────────────────────────────────────────────────────────────
 
 function RentalsTab() {
   const router = useRouter();
@@ -566,14 +452,12 @@ function RentalsTab() {
 
   const serverByExtId = useMemo(
     () => new Map(servers.map((s) => [s.external_server_id, s])),
-    [servers]
+    [servers],
   );
 
   function handleTerminate(id: string) {
     if (!confirm("Terminate this rental? The server will be stopped and all data lost.")) return;
-    terminateRental.mutate(id, {
-      onError: (e) => alert(e.message),
-    });
+    terminateRental.mutate(id, { onError: (e) => alert(e.message) });
   }
 
   async function handleStartSSH(serverId: string) {
@@ -595,12 +479,7 @@ function RentalsTab() {
           {error.message}
         </div>
       )}
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading rentals…
-        </div>
-      )}
+      {isLoading && <Spinner text="Loading rentals…" />}
       {!isLoading && !error && rentals.length === 0 && (
         <Card className="px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">No active rentals.</p>
@@ -612,7 +491,6 @@ function RentalsTab() {
         {rentals.map((r) => {
           const server = serverByExtId.get(r.id);
           const isRegistering = registeringId === r.id;
-
           return (
             <Card key={r.id} className="overflow-hidden">
               <div className="flex items-center gap-4 px-4 py-3">
@@ -631,29 +509,18 @@ function RentalsTab() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {server ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      loading={startingSSH === server.id}
-                      onClick={() => handleStartSSH(server.id)}
-                    >
+                    <Button variant="outline" size="sm" loading={startingSSH === server.id}
+                      onClick={() => handleStartSSH(server.id)}>
                       Start SSH
                     </Button>
                   ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setRegisteringId(isRegistering ? null : r.id)}
-                    >
+                    <Button variant="outline" size="sm"
+                      onClick={() => setRegisteringId(isRegistering ? null : r.id)}>
                       {isRegistering ? "Cancel" : "Register"}
                     </Button>
                   )}
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    loading={terminateRental.isPending}
-                    onClick={() => handleTerminate(r.id)}
-                  >
+                  <Button variant="destructive" size="sm" loading={terminateRental.isPending}
+                    onClick={() => handleTerminate(r.id)}>
                     Terminate
                   </Button>
                 </div>
@@ -673,372 +540,32 @@ function RentalsTab() {
   );
 }
 
-function RegisterRentalForm({ rental, onSuccess, onCancel }: {
-  rental: CloreRental; onSuccess: () => void; onCancel: () => void;
-}) {
-  const createServer = useCreateServer();
-  const [authMode, setAuthMode] = useState<"password" | "key">("password");
-  const [password, setPassword] = useState("");
-  const [privateKey, setPrivateKey] = useState("");
-  const [generatingKey, setGeneratingKey] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// ── Local helpers ─────────────────────────────────────────────────────────────
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (authMode === "password" && !password) { setError("Password required"); return; }
-    if (authMode === "key" && !privateKey.trim()) { setError("Private key required"); return; }
-    setError(null);
-    createServer.mutate(
-      {
-        external_server_id: rental.id,
-        hostname: rental.hostname,
-        ssh_port: rental.ssh_port,
-        ssh_username: rental.ssh_username,
-        gpu_model: rental.gpu_name || undefined,
-        vram_gb: rental.vram_gb || undefined,
-        ...(authMode === "password" ? { ssh_password: password } : { ssh_private_key: privateKey.trim() }),
-      },
-      { onSuccess, onError: (err) => setError(err.message) }
-    );
-  }
-
+function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <form onSubmit={handleSubmit} className="border-t border-border bg-muted/10 px-4 py-3 space-y-3">
-      <p className="text-xs text-muted-foreground">Register this rental so you can start SSH sessions from this platform.</p>
-      <div className="flex gap-1 rounded border border-border bg-muted/20 p-0.5 w-fit">
-        {(["password", "key"] as const).map((m) => (
-          <button key={m} type="button" onClick={() => setAuthMode(m)}
-            className={`rounded px-3 py-1 text-xs transition-colors ${authMode === m ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-            {m === "password" ? "Password" : "Private Key"}
-          </button>
-        ))}
-      </div>
-      {authMode === "password" ? (
-        <Input type="password" placeholder="SSH password"
-          value={password} onChange={(e) => setPassword(e.target.value)} />
-      ) : (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <p className="flex-1 text-xs text-muted-foreground">Private key (PEM) — stored securely in the platform</p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={generatingKey}
-              onClick={async () => {
-                setGeneratingKey(true);
-                try {
-                  await import("@/lib/api").then(({ api }) => api.settings.generateKeypair());
-                  setError("Key pair generated — private key saved to platform settings. Note: the public key was NOT sent to this existing rental.");
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "Generation failed");
-                } finally { setGeneratingKey(false); }
-              }}
-            >
-              {generatingKey ? "Generating…" : "Generate"}
-            </Button>
-          </div>
-          <textarea className="input w-full text-sm font-mono resize-none" rows={4}
-            placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"}
-            value={privateKey} onChange={(e) => setPrivateKey(e.target.value)} />
-        </div>
-      )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      <div className="flex gap-2">
-        <Button type="submit" size="sm" loading={createServer.isPending}>Register Server</Button>
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-      </div>
-    </form>
+    <div className="space-y-1">
+      <label className="block text-xs text-muted-foreground">{label}</label>
+      {children}
+    </div>
   );
 }
 
-// ── Rent dialog ────────────────────────────────────────────────────────────────
-
-const PRESET_IMAGES = [
-  { label: "Ubuntu Jupyter (Clore)", value: "cloreai/jupyter:ubuntu24.04-v2" },
-  { label: "Custom…", value: "__custom__" },
-];
-
-const ALL_CURRENCIES = ["CLORE-Blockchain", "USD-Blockchain", "bitcoin"];
-
-function RentDialog({ offer, onClose }: { offer: CloreOffer; onClose: () => void }) {
-  const rentClore = useRentClore();
-  const { data: balance } = useCloreBalance();
-  const [imagePreset, setImagePreset] = useState("cloreai/jupyter:ubuntu24.04-v2");
-  const [customImage, setCustomImage] = useState("");
-  const [authMode, setAuthMode] = useState<"password" | "key">("password");
-  const [sshPassword, setSshPassword] = useState("");
-  const [sshKey, setSshKey] = useState("");
-  const [orderType, setOrderType] = useState<"on-demand" | "spot">("on-demand");
-  const availableCurrencies = offer.allowed_coins?.length
-    ? ALL_CURRENCIES.filter((c) => offer.allowed_coins.includes(c))
-    : ALL_CURRENCIES;
-  const [currency, setCurrency] = useState(
-    availableCurrencies.includes("CLORE-Blockchain") ? "CLORE-Blockchain" : availableCurrencies[0] ?? "CLORE-Blockchain"
-  );
-  const [spotPrice, setSpotPrice] = useState("");
-  const [portsRaw, setPortsRaw] = useState('{"22": "tcp"}');
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [envRaw, setEnvRaw] = useState("");
-  const [command, setCommand] = useState("");
-  const [jupyterToken, setJupyterToken] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [generatingKey, setGeneratingKey] = useState(false);
-  const [keyGenMsg, setKeyGenMsg] = useState<string | null>(null);
-  const [showPrivateKey, setShowPrivateKey] = useState(false);
-  const [privateKey, setPrivateKey] = useState<string | null>(null);
-  const [fetchingPrivateKey, setFetchingPrivateKey] = useState(false);
-
-  useEffect(() => {
-    if (!balance?.balances?.length) return;
-    const allowed = offer.allowed_coins?.length
-      ? ALL_CURRENCIES.filter((c) => offer.allowed_coins.includes(c))
-      : ALL_CURRENCIES;
-    const nonZero = balance.balances.filter((w) => w.amount > 0 && allowed.includes(w.currency));
-    if (!nonZero.length) return;
-    const highest = nonZero.reduce((a, b) => (a.amount >= b.amount ? a : b));
-    setCurrency(highest.currency);
-  }, [balance, offer.allowed_coins]);
-
-  const image = imagePreset === "__custom__" ? customImage.trim() : imagePreset;
-
-  function validatePorts(): Record<string, string> | null {
-    if (!portsRaw.trim()) return {};
-    try {
-      const parsed = JSON.parse(portsRaw);
-      if (typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-      return parsed as Record<string, string>;
-    } catch { return null; }
-  }
-
-  function validateEnv(): Record<string, string> | null {
-    if (!envRaw.trim()) return {};
-    try {
-      const parsed = JSON.parse(envRaw);
-      if (typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-      return parsed as Record<string, string>;
-    } catch { return null; }
-  }
-
-  function handleSubmit() {
-    setError(null);
-    if (!image) { setError("Docker image is required."); return; }
-    if (authMode === "password" && !sshPassword) { setError("SSH password is required."); return; }
-    if (authMode === "key" && !sshKey.trim()) { setError("SSH public key is required."); return; }
-
-    const ports = validatePorts();
-    if (ports === null) { setError('Ports must be valid JSON, e.g. {"22": "tcp"}'); return; }
-    const env = validateEnv();
-    if (env === null) { setError('Env must be valid JSON, e.g. {"MY_VAR": "value"}'); return; }
-
-    const req: RentRequest = {
-      offer_id: offer.id, image, order_type: orderType, currency,
-      ...(authMode === "password" ? { ssh_password: sshPassword } : { ssh_key: sshKey.trim() }),
-      ...(Object.keys(ports).length ? { ports } : {}),
-      ...(Object.keys(env).length ? { env } : {}),
-      ...(command.trim() ? { command: command.trim() } : {}),
-      ...(jupyterToken.trim() ? { jupyter_token: jupyterToken.trim() } : {}),
-      ...(orderType === "spot" && spotPrice ? { spot_price: parseFloat(spotPrice) } : {}),
-    };
-
-    rentClore.mutate(req, {
-      onSuccess: onClose,
-      onError: (e) => setError(e.message),
-    });
-  }
-
+function NumInput({ value, onChange, min = 0, step = 1, placeholder }: {
+  value: number; onChange: (v: number) => void; min?: number; step?: number; placeholder?: string;
+}) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-      <Card className="w-full max-w-lg overflow-y-auto max-h-[90vh] px-6 py-5 space-y-4">
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="text-base font-semibold">Rent {offer.gpu_name}</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              ${offer.price_per_day.toFixed(2)}/day · {offer.vram_gb} GB VRAM
-              {offer.gpu_count > 1 && ` · ${offer.gpu_count}× GPU`}
-            </p>
-          </div>
-          <button onClick={onClose} className="ml-4 text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
-        </div>
+    <Input type="number" className="text-sm" value={value || ""} min={min} step={step}
+      placeholder={placeholder ?? "0 = any"}
+      onChange={(e) => onChange(Number(e.target.value) || 0)} />
+  );
+}
 
-        {error && (
-          <div className="rounded border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {error}
-          </div>
-        )}
-
-        <div>
-          <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">Docker image</label>
-          <select className="input w-full text-sm" value={imagePreset} onChange={(e) => setImagePreset(e.target.value)}>
-            {PRESET_IMAGES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </select>
-          {imagePreset === "__custom__" && (
-            <Input className="mt-2 text-sm" placeholder="docker.io/user/image:tag"
-              value={customImage} onChange={(e) => setCustomImage(e.target.value)} />
-          )}
-        </div>
-
-        <div>
-          <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">SSH authentication</label>
-          <div className="flex gap-2 mb-2">
-            {(["password", "key"] as const).map((m) => (
-              <button key={m} onClick={() => setAuthMode(m)}
-                className={`rounded px-3 py-1 text-xs transition-colors ${authMode === m ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}>
-                {m === "password" ? "Password" : "SSH Key Pair"}
-              </button>
-            ))}
-          </div>
-          {authMode === "password" ? (
-            <Input type="password" placeholder="Alphanumeric, max 32 chars"
-              maxLength={32} value={sshPassword} onChange={(e) => setSshPassword(e.target.value)} />
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <p className="flex-1 text-xs text-muted-foreground">Public key <span className="text-muted-foreground/60">(sent to Clore → injected into authorized_keys)</span></p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={generatingKey}
-                  onClick={async () => {
-                    setGeneratingKey(true); setKeyGenMsg(null);
-                    try {
-                      const { api } = await import("@/lib/api");
-                      const { public_key } = await api.settings.generateKeypair();
-                      setSshKey(public_key);
-                      setKeyGenMsg("Key pair generated — private key saved to platform settings.");
-                    } catch (e) {
-                      setKeyGenMsg(e instanceof Error ? e.message : "Generation failed");
-                    } finally { setGeneratingKey(false); }
-                  }}
-                >
-                  {generatingKey ? "Generating…" : "Generate"}
-                </Button>
-              </div>
-              <textarea className="input w-full text-sm font-mono resize-none" rows={2}
-                placeholder="ssh-ed25519 AAAA… or ssh-rsa AAAA… (or click Generate)"
-                value={sshKey} onChange={(e) => setSshKey(e.target.value)} />
-              {keyGenMsg && (
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{keyGenMsg}</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={fetchingPrivateKey}
-                    onClick={async () => {
-                      setFetchingPrivateKey(true);
-                      try {
-                        const { api } = await import("@/lib/api");
-                        const { private_key } = await api.settings.getPrivateKey();
-                        setPrivateKey(private_key);
-                        setShowPrivateKey(true);
-                      } catch (e) {
-                        setKeyGenMsg(e instanceof Error ? e.message : "Failed to retrieve private key");
-                      } finally {
-                        setFetchingPrivateKey(false);
-                      }
-                    }}
-                  >
-                    {fetchingPrivateKey ? "Loading…" : "Show Private Key"}
-                  </Button>
-                </div>
-              )}
-              {showPrivateKey && privateKey && (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Private key — copy and store safely</p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-5 px-2 text-[10px]"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(privateKey).catch(() => {
-                          const ta = document.createElement("textarea");
-                          ta.value = privateKey;
-                          ta.style.cssText = "position:fixed;opacity:0;pointer-events:none";
-                          document.body.appendChild(ta);
-                          ta.select();
-                          document.execCommand("copy");
-                          document.body.removeChild(ta);
-                        });
-                      }}
-                    >
-                      Copy
-                    </Button>
-                  </div>
-                  <textarea
-                    readOnly
-                    rows={4}
-                    className="input w-full text-[10px] font-mono resize-none select-all"
-                    value={privateKey}
-                  />
-                </div>
-              )}
-              <div className="rounded bg-muted/40 border border-border px-3 py-2 text-xs text-muted-foreground">
-                <span className="text-foreground/70 font-medium">Private key:</span> the platform will use the SSH private key
-                stored in <span className="text-indigo-400">Settings → SSH Key</span> to connect terminal sessions.
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">Order type</label>
-            <select className="input w-full text-sm" value={orderType} onChange={(e) => setOrderType(e.target.value as "on-demand" | "spot")}>
-              <option value="on-demand">On-demand</option>
-              <option value="spot">Spot</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">Currency</label>
-            <select className="input w-full text-sm" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              {availableCurrencies.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-        </div>
-        {orderType === "spot" && (
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">Max spot price ($/day)</label>
-            <Input type="number" step="0.01" className="text-sm"
-              placeholder={offer.price_per_day.toFixed(2)} value={spotPrice} onChange={(e) => setSpotPrice(e.target.value)} />
-          </div>
-        )}
-
-        <div>
-          <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">Port mappings (JSON)</label>
-          <Input className="text-sm font-mono" value={portsRaw} onChange={(e) => setPortsRaw(e.target.value)}
-            placeholder='{"22": "tcp", "8888": "http"}' />
-          <p className="mt-0.5 text-[10px] text-muted-foreground/60">Port 22/tcp is required for SSH access.</p>
-        </div>
-
-        <button onClick={() => setShowAdvanced((v) => !v)} className="text-xs text-muted-foreground hover:text-foreground">
-          {showAdvanced ? "▲ Hide advanced" : "▼ Advanced (env, command, Jupyter token)"}
-        </button>
-        {showAdvanced && (
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">Environment variables (JSON)</label>
-              <Input className="text-sm font-mono" value={envRaw} onChange={(e) => setEnvRaw(e.target.value)} placeholder='{"HF_TOKEN": "hf_..."}' />
-            </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">Startup command</label>
-              <Input className="text-sm" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="bash -c 'pip install vllm && ...'" />
-            </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1 block">Jupyter token</label>
-              <Input className="text-sm" value={jupyterToken} onChange={(e) => setJupyterToken(e.target.value)} placeholder="max 32 chars" maxLength={32} />
-            </div>
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-2 border-t border-border">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button loading={rentClore.isPending} onClick={handleSubmit}>Confirm rent</Button>
-        </div>
-      </Card>
+function Spinner({ text }: { text: string }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
+      {text}
     </div>
   );
 }
