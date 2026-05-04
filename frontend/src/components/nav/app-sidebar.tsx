@@ -14,6 +14,7 @@ import {
   ScanSearch,
   Server,
   Settings,
+  ShieldCheck,
   Sun,
   Zap,
 } from "lucide-react"
@@ -36,16 +37,17 @@ import {
 } from "@/components/ui/sidebar"
 
 const NAV_ITEMS = [
-  { href: "/",            label: "Overview",    icon: LayoutDashboard },
-  { href: "/servers",     label: "Servers",     icon: Server },
-  { href: "/deployments", label: "Deployments", icon: Layers },
-  { href: "/playbooks",   label: "Playbooks",   icon: BookOpen },
-  { href: "/clore",       label: "Clore",       icon: Monitor },
-  { href: "/find",        label: "GPU Finder",  icon: ScanSearch },
-  { href: "/benchmarks",  label: "Benchmarks",  icon: BarChart2 },
-  { href: "/lab",         label: "Lab",         icon: FlaskConical },
-  { href: "/docs",        label: "Docs",        icon: BookOpenText },
-  { href: "/settings",    label: "Settings",    icon: Settings },
+  { href: "/",                       label: "Overview",    icon: LayoutDashboard },
+  { href: "/servers",                label: "Servers",     icon: Server },
+  { href: "/deployments",            label: "Deployments", icon: Layers },
+  { href: "/playbooks",              label: "Playbooks",   icon: BookOpen },
+  { href: "/clore",                  label: "Clore",       icon: Monitor },
+  { href: "/find",                   label: "GPU Finder",  icon: ScanSearch },
+  { href: "/benchmarks",             label: "Benchmarks",  icon: BarChart2 },
+  { href: "/lab",                    label: "Lab",         icon: FlaskConical },
+  { href: "/compat/candidates",      label: "Compat",      icon: ShieldCheck },
+  { href: "/docs",                   label: "Docs",        icon: BookOpenText },
+  { href: "/settings",               label: "Settings",    icon: Settings },
 ]
 
 function NavItems() {

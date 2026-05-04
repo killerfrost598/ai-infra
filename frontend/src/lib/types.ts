@@ -361,3 +361,32 @@ export interface FeasibilityRequest {
   engine: string;
   tp_size?: number;
 }
+
+export interface CompatCandidate {
+  engine: string;
+  latest_version: string;
+  current_version: string | null;
+  is_newer: boolean;
+  error?: string;
+}
+
+export interface ScrapeRun {
+  task_run_id: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  candidates: CompatCandidate[] | null;
+}
+
+export interface ApproveCandidate {
+  engine: string;
+  version: string;
+  cc_min: string;
+  cc_max?: string;
+  driver_min?: string;
+  cuda_runtime?: string;
+  torch?: string;
+  container_image?: string;
+  pip_index_url?: string;
+  priority?: number;
+}

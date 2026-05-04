@@ -618,3 +618,68 @@ def run_playbook_task(self, server_id: str, playbook_id: str) -> dict:
 
     finally:
         db.close()
+
+
+# ── compat.scrape_versions ────────────────────────────────────────────────────
+
+def _version_newer(latest: str, current: str) -> bool:
+    try:
+        def _parse(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in v.split(".")[:3])
+        return _parse(latest) > _parse(current)
+    except Exception:
+        return latest != current
+
+
+@celery_app.task(bind=True, name="compat.scrape_versions")
+def scrape_versions(self) -> dict:
+    """Check PyPI for newer vLLM / SGLang versions and record candidates."""
+    import httpx
+
+    from app.models.entities import StackMatrix
+
+    db = SessionLocal()
+    task_run = TaskRun(task_type="compat.scrape_versions", status=TaskStatus.RUNNING, started_at=_utcnow())
+    try:
+        db.add(task_run)
+        db.commit()
+        db.refresh(task_run)
+
+        candidates: list[dict] = []
+        for engine in ("vllm", "sglang"):
+            try:
+                resp = httpx.get(f"https://pypi.org/pypi/{engine}/json", timeout=15)
+                resp.raise_for_status()
+                latest_version: str = resp.json()["info"]["version"]
+                all_active = db.query(StackMatrix).filter(StackMatrix.is_active == True).all()  # noqa: E712
+                versions = (
+                    [r.vllm for r in all_active if r.vllm]
+                    if engine == "vllm"
+                    else [r.sglang for r in all_active if r.sglang]
+                )
+                current_version = (
+                    max(versions, key=lambda v: tuple(int(x) for x in v.split(".")[:3]))
+                    if versions
+                    else None
+                )
+                is_newer = _version_newer(latest_version, current_version) if current_version else True
+                candidates.append({
+                    "engine": engine,
+                    "latest_version": latest_version,
+                    "current_version": current_version,
+                    "is_newer": is_newer,
+                })
+            except Exception as exc:
+                candidates.append({"engine": engine, "error": str(exc), "is_newer": False})
+
+        task_run.status = TaskStatus.SUCCESS
+        task_run.metadata_json = {"candidates": candidates}
+        _finish_task_run(task_run, db)
+        return {"candidates": candidates}
+    except Exception as exc:
+        task_run.status = TaskStatus.FAILED
+        task_run.error_summary = str(exc)
+        _finish_task_run(task_run, db)
+        raise
+    finally:
+        db.close()

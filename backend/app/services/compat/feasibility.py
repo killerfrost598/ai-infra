@@ -198,7 +198,30 @@ def run_feasibility(
     else:
         checks.append(CheckResult("gpu_homogeneous", "UNKNOWN", "Homogeneity not verifiable in predicted mode", "predicted"))
 
-    # -- 11. stack_available --
+    # -- 11. tp_plan_valid (multi-GPU only) --
+    if gpu_count > 1 or (snapshot and snapshot.gpu_count > 1):
+        if snapshot and variant:
+            from app.services.compat.parallel import recommend_parallel
+            pp = recommend_parallel(variant, snapshot)
+            if pp.blocked:
+                checks.append(CheckResult(
+                    "tp_plan_valid", "FAIL",
+                    pp.block_reason or "TP plan blocked",
+                    "snapshot",
+                ))
+            else:
+                label = f"TP={pp.tp_size} via {pp.interconnect_label}"
+                checks.append(CheckResult("tp_plan_valid", "PASS", label, "snapshot"))
+        else:
+            effective_count = (snapshot.gpu_count if snapshot else None) or gpu_count
+            checks.append(CheckResult(
+                "tp_plan_valid", "UNKNOWN",
+                f"Multi-GPU ({effective_count}×); TP plan requires a host snapshot",
+                "predicted",
+            ))
+    # (single-GPU: skip this check entirely)
+
+    # -- 12. stack_available --
     if best_stack:
         checks.append(CheckResult("stack_available", "PASS", f"Stack '{best_stack.container_image}' available for CC {gpu_profile.cc if gpu_profile else '?'}", source))
     elif gpu_profile:

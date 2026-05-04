@@ -1,4 +1,5 @@
 import type {
+  ApproveCandidate,
   BenchmarkRunResponse,
   CloreBalance,
   CloreOffer,
@@ -16,6 +17,7 @@ import type {
   ModelDeployment,
   Playbook,
   RentRequest,
+  ScrapeRun,
   Server,
   ServerCreate,
   Session,
@@ -252,6 +254,20 @@ export const api = {
       apiFetch<FeasibilityReport>("/api/v1/feasibility", {
         method: "POST",
         body: JSON.stringify(req),
+      }),
+  },
+
+  compat: {
+    scrapeRuns: (limit = 20) =>
+      apiFetch<ScrapeRun[]>(`/api/v1/compat/scrape-runs?limit=${limit}`),
+    triggerScrape: () =>
+      apiFetch<{ task_id: string; status: string }>("/api/v1/compat/scrape-runs/trigger", {
+        method: "POST",
+      }),
+    approve: (payload: ApproveCandidate) =>
+      apiFetch<{ stack_matrix_id: number; status: string }>("/api/v1/compat/candidates/approve", {
+        method: "POST",
+        body: JSON.stringify(payload),
       }),
   },
 };

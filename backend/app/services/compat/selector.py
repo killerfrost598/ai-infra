@@ -45,6 +45,14 @@ def select_stack(
     if not snapshot.gpus:
         raise ValueError("No GPUs found in capability snapshot — reprobe before deploying")
 
+    # Override caller's tp_size with the recommender for multi-GPU hosts
+    if snapshot.gpu_count > 1:
+        from app.services.compat.parallel import recommend_parallel
+        pp = recommend_parallel(variant, snapshot)
+        if pp.blocked:
+            raise ValueError(f"Cannot deploy: {pp.block_reason}")
+        tp_size = pp.tp_size
+
     cc = snapshot.gpus[0]["cc"]
 
     candidates = db.query(StackMatrix).filter(StackMatrix.is_active == True).all()  # noqa: E712

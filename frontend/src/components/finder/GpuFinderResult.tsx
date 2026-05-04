@@ -33,6 +33,7 @@ const CHECK_LABELS: Record<string, string> = {
   tp_size_allowed: "TP size",
   tp_size_fits_host: "TP fit",
   gpu_homogeneous: "Homogeneous",
+  tp_plan_valid: "TP plan",
   stack_available: "Stack",
 };
 
@@ -44,11 +45,12 @@ interface Props {
   onAdvise: () => void;
 }
 
-function CompatChips({ offerId, modelKey, quant, engine }: {
+function CompatChips({ offerId, modelKey, quant, engine, gpuCount }: {
   offerId: number;
   modelKey: string;
   quant: string;
   engine: string;
+  gpuCount: number;
 }) {
   const engineUpper = engine.toUpperCase() as "VLLM" | "SGLANG" | "OLLAMA";
   const { data, isLoading } = useQuery<FeasibilityReport>({
@@ -68,11 +70,17 @@ function CompatChips({ offerId, modelKey, quant, engine }: {
   }
   if (!data) return null;
 
-  const fails = data.checks.filter((c: FeasibilityCheck) => c.status === "FAIL");
-  const unknowns = data.checks.filter((c: FeasibilityCheck) => c.status === "UNKNOWN" && c.id !== "gpu_homogeneous" && c.id !== "tp_size_fits_host");
+  const tpCheck = data.checks.find((c: FeasibilityCheck) => c.id === "tp_plan_valid");
+  const fails = data.checks.filter((c: FeasibilityCheck) => c.status === "FAIL" && c.id !== "tp_plan_valid");
+  const unknowns = data.checks.filter(
+    (c: FeasibilityCheck) =>
+      c.status === "UNKNOWN" &&
+      c.id !== "gpu_homogeneous" &&
+      c.id !== "tp_size_fits_host" &&
+      c.id !== "tp_plan_valid",
+  );
   const allPass = fails.length === 0 && data.checks.filter((c: FeasibilityCheck) => c.status === "PASS").length > 0;
 
-  // Derive stack label from stack check PASS reason
   const stackCheck = data.checks.find((c: FeasibilityCheck) => c.id === "stack_available" && c.status === "PASS");
   const stackLabel = stackCheck
     ? stackCheck.reason.match(/vllm\/vllm-openai:([^\s']+)/)?.[1] ?? "Stack ✓"
@@ -85,6 +93,20 @@ function CompatChips({ offerId, modelKey, quant, engine }: {
       {allPass && stackLabel && (
         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
           Stack: {stackLabel} ✓{isVerified ? " (verified)" : " (predicted)"}
+        </span>
+      )}
+      {gpuCount > 1 && tpCheck && (
+        <span
+          title={tpCheck.reason}
+          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+            tpCheck.status === "PASS"
+              ? "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300"
+              : tpCheck.status === "FAIL"
+              ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+              : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+          }`}
+        >
+          {tpCheck.status === "PASS" ? tpCheck.reason : `TP: ${tpCheck.status === "FAIL" ? "blocked" : "?"}`}
         </span>
       )}
       {fails.map((c: FeasibilityCheck) => (
@@ -237,6 +259,7 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
             modelKey={modelKey}
             quant={quant}
             engine={engine}
+            gpuCount={offer.gpu_count}
           />
         )}
 

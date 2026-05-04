@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -14,6 +15,12 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
+    beat_schedule={
+        "compat-scrape-weekly": {
+            "task": "compat.scrape_versions",
+            "schedule": crontab(hour=2, minute=0, day_of_week=1),  # Monday 02:00 UTC
+        },
+    },
 )
 
 
