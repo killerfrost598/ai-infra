@@ -10,11 +10,16 @@ import type {
   FeasibilityReport,
   HostCapabilitySnapshot,
   FeasibilityRequest,
+  HfImportResult,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
   LeaderboardRow,
   ListResponse,
   ModelDeployment,
+  ModelEntry,
+  ModelCreate,
+  ModelQuant,
+  ModelQuantCreate,
   Playbook,
   RentRequest,
   ScrapeRun,
@@ -268,6 +273,42 @@ export const api = {
       apiFetch<{ stack_matrix_id: number; status: string }>("/api/v1/compat/candidates/approve", {
         method: "POST",
         body: JSON.stringify(payload),
+      }),
+  },
+
+  models: {
+    list: (params?: { family?: string; search?: string; archived?: boolean }) => {
+      const q = new URLSearchParams();
+      if (params?.family) q.set("family", params.family);
+      if (params?.search) q.set("search", params.search);
+      if (params?.archived) q.set("archived", "true");
+      return apiFetch<ModelEntry[]>(`/api/v1/models${q.toString() ? `?${q}` : ""}`);
+    },
+    families: () => apiFetch<string[]>("/api/v1/models/families"),
+    get: (id: string) => apiFetch<ModelEntry>(`/api/v1/models/${id}`),
+    create: (data: ModelCreate) =>
+      apiFetch<ModelEntry>("/api/v1/models", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<ModelCreate>) =>
+      apiFetch<ModelEntry>(`/api/v1/models/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    delete: (id: string) => fetch(`${BASE_URL}/api/v1/models/${id}`, { method: "DELETE" }),
+
+    addQuant: (modelId: string, data: ModelQuantCreate) =>
+      apiFetch<ModelQuant>(`/api/v1/models/${modelId}/quants`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    updateQuant: (modelId: string, quantId: string, data: Partial<ModelQuantCreate>) =>
+      apiFetch<ModelQuant>(`/api/v1/models/${modelId}/quants/${quantId}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    deleteQuant: (modelId: string, quantId: string) =>
+      fetch(`${BASE_URL}/api/v1/models/${modelId}/quants/${quantId}`, { method: "DELETE" }),
+
+    importFromHf: (hf_url: string) =>
+      apiFetch<HfImportResult>("/api/v1/models/import-from-hf", {
+        method: "POST",
+        body: JSON.stringify({ hf_url }),
       }),
   },
 };

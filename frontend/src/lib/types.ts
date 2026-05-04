@@ -394,3 +394,94 @@ export interface ApproveCandidate {
   pip_index_url?: string;
   priority?: number;
 }
+
+// ── Model knowledge base ──────────────────────────────────────────────────────
+
+export interface ModelQuant {
+  id: string;
+  model_id: string;
+  name: string;
+  hf_repo: string | null;
+  hf_url: string | null;
+  bits_per_weight: number;
+  disk_size_gb: number;
+  vram_weights_gb: number;
+  quality_score: number;
+  cc_min: string | null;
+  arch_vllm: boolean;
+  arch_sglang: boolean;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ModelEntry {
+  id: string;
+  model_key: string;
+  name: string;
+  family: string;
+  param_count_b: number;
+  hf_url: string | null;
+  hf_repo: string | null;
+  max_context_k: number;
+  tags: string[];
+  use_case: string;
+  is_reasoning: boolean;
+  supports_tools: boolean;
+  is_code_model: boolean;
+  is_moe: boolean;
+  moe_active_params_b: number | null;
+  num_attention_heads: number | null;
+  tp_allowed_sizes: number[] | null;
+  kv_cache: Record<string, unknown>;
+  recommended_engines: { engine: string; score: number; min_vram_gb: number }[];
+  recommended_flags: Record<string, string[]>;
+  source: string;
+  hf_synced_at: string | null;
+  is_archived: boolean;
+  updated_at: string;
+  created_at: string;
+  quants: ModelQuant[];
+}
+
+export interface ModelCreate {
+  model_key: string;
+  name: string;
+  family: string;
+  param_count_b: number;
+  hf_url?: string | null;
+  hf_repo?: string | null;
+  max_context_k: number;
+  tags?: string[];
+  use_case?: string;
+  is_reasoning?: boolean;
+  supports_tools?: boolean;
+  is_code_model?: boolean;
+  is_moe?: boolean;
+  moe_active_params_b?: number | null;
+  num_attention_heads?: number | null;
+  tp_allowed_sizes?: number[] | null;
+  kv_cache?: Record<string, unknown>;
+  recommended_engines?: { engine: string; score: number; min_vram_gb: number }[];
+  recommended_flags?: Record<string, string[]>;
+  quants?: Omit<ModelQuant, "id" | "model_id" | "created_at">[];
+}
+
+export interface ModelQuantCreate {
+  name: string;
+  hf_repo?: string | null;
+  hf_url?: string | null;
+  bits_per_weight: number;
+  disk_size_gb: number;
+  vram_weights_gb: number;
+  quality_score?: number;
+  cc_min?: string | null;
+  arch_vllm?: boolean;
+  arch_sglang?: boolean;
+  notes?: string | null;
+}
+
+export interface HfImportResult {
+  suggested: ModelCreate;
+  confidence: Record<string, string>;
+  raw_hf_repo: string;
+}

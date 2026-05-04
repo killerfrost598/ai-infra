@@ -1,7 +1,8 @@
 import enum
 import uuid
+from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -299,6 +300,60 @@ class ModelVariant(Base):
     context_default: Mapped[int] = mapped_column(Integer, default=8192, nullable=False)
     hf_repo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Model(Base):
+    __tablename__ = "models"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    model_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    family: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    param_count_b: Mapped[float] = mapped_column(Float, nullable=False)
+    hf_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    hf_repo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    max_context_k: Mapped[int] = mapped_column(Integer, nullable=False)
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    use_case: Mapped[str] = mapped_column(String(64), nullable=False, default="chat")
+    is_reasoning: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    supports_tools: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_code_model: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_moe: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    moe_active_params_b: Mapped[float | None] = mapped_column(Float, nullable=True)
+    num_attention_heads: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tp_allowed_sizes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    kv_cache: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    recommended_engines: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    recommended_flags: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
+    hf_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    quants: Mapped[list["ModelQuant"]] = relationship("ModelQuant", back_populates="model", cascade="all, delete-orphan", order_by="ModelQuant.quality_score.desc()")
+
+
+class ModelQuant(Base):
+    __tablename__ = "model_quants"
+    __table_args__ = (UniqueConstraint("model_id", "name", name="uq_model_quants_model_name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    model_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("models.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    hf_repo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    hf_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    bits_per_weight: Mapped[float] = mapped_column(Float, nullable=False)
+    disk_size_gb: Mapped[float] = mapped_column(Float, nullable=False)
+    vram_weights_gb: Mapped[float] = mapped_column(Float, nullable=False)
+    quality_score: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    cc_min: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    arch_vllm: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    arch_sglang: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    model: Mapped["Model"] = relationship("Model", back_populates="quants")
 
 
 class HostCapabilitySnapshot(Base):

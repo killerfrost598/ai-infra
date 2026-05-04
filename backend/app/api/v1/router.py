@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints.benchmarks import router as benchmarks_router
+from app.api.v1.endpoints.models import router as models_router
 from app.api.v1.endpoints.clore import router as clore_router
 from app.api.v1.endpoints.compat import router as compat_router
 from app.api.v1.endpoints.feasibility import router as feasibility_router
@@ -25,3 +26,4 @@ api_router.include_router(sessions_router, prefix="/sessions", tags=["sessions"]
 api_router.include_router(benchmarks_router, prefix="/benchmarks", tags=["benchmarks"])
 api_router.include_router(feasibility_router, prefix="/feasibility", tags=["feasibility"])
 api_router.include_router(compat_router, prefix="/compat", tags=["compat"])
+api_router.include_router(models_router, prefix="/models", tags=["models"])
