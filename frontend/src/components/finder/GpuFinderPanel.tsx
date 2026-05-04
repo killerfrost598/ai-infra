@@ -50,6 +50,7 @@ export function GpuFinderPanel() {
   const [formReady, setFormReady] = useState(false);
   const [bucketFilter, setBucketFilter] = useState<BucketChip>(null);
   const [showUnfit, setShowUnfit] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(20);
   const [rentTarget, setRentTarget] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
@@ -95,9 +96,14 @@ export function GpuFinderPanel() {
   const okCount          = rankResult?.ranked.filter((r) => r.bucket === "ok").length ?? 0;
   const tightCount       = rankResult?.ranked.filter((r) => r.bucket === "tight").length ?? 0;
 
-  const displayedRanked: RankedOffer[] = bucketFilter
+  const filteredRanked: RankedOffer[] = bucketFilter
     ? rankResult?.ranked.filter((r) => r.bucket === bucketFilter) ?? []
     : rankResult?.ranked ?? [];
+  const displayedRanked = filteredRanked.slice(0, visibleCount);
+  const hasMore = filteredRanked.length > visibleCount;
+
+  // Reset pagination when the result set changes (new model/quant/filter)
+  useEffect(() => { setVisibleCount(20); }, [rankResult, bucketFilter]);
 
   function openRent(offer: CloreOffer) {
     setRentTarget(offer);
@@ -257,6 +263,17 @@ export function GpuFinderPanel() {
                 onAdvise={() => openAdvisor(r.offer)}
               />
             ))}
+            {hasMore && (
+              <button
+                onClick={() => setVisibleCount((c) => c + 20)}
+                className="w-full rounded-xl border border-border py-3 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                Show {Math.min(20, filteredRanked.length - visibleCount)} more
+                <span className="ml-1 text-muted-foreground/50">
+                  ({filteredRanked.length - visibleCount} remaining)
+                </span>
+              </button>
+            )}
           </div>
         )}
 

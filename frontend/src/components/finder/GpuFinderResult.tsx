@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { RankedOffer } from "@/lib/gpu-finder";
 import { fitStatusBg } from "@/lib/vram";
@@ -8,6 +9,27 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import type { FeasibilityReport, FeasibilityCheck, RecommendedPlaybook } from "@/lib/types";
+
+function useInView(): [React.RefObject<HTMLDivElement | null>, boolean] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, inView];
+}
 
 const ENGINE_BADGE: Record<string, string> = {
   vllm:   "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
@@ -45,18 +67,19 @@ interface Props {
   onAdvise: () => void;
 }
 
-function CompatChips({ offerId, modelKey, quant, engine, gpuCount }: {
+function CompatChips({ offerId, modelKey, quant, engine, gpuCount, enabled }: {
   offerId: number;
   modelKey: string;
   quant: string;
   engine: string;
   gpuCount: number;
+  enabled: boolean;
 }) {
   const engineUpper = engine.toUpperCase() as "VLLM" | "SGLANG" | "OLLAMA";
   const { data, isLoading } = useQuery<FeasibilityReport>({
     queryKey: ["feasibility", offerId, modelKey, quant, engineUpper],
     queryFn: () => api.feasibility.check({ offer_id: offerId, model_key: modelKey, quant, engine: engineUpper }),
-    enabled: offerId > 0 && modelKey !== "" && quant !== "",
+    enabled: enabled && offerId > 0 && modelKey !== "" && quant !== "",
     staleTime: 60_000,
   });
 
@@ -135,17 +158,19 @@ function VerifiedPlaybookChip({
   gpuName,
   modelKey,
   engine,
+  enabled,
 }: {
   gpuName: string;
   modelKey: string;
   engine: string;
+  enabled: boolean;
 }) {
   const { data } = useQuery<RecommendedPlaybook[]>({
     queryKey: ["playbooks", "recommended", gpuName, modelKey, engine],
     queryFn: () =>
       api.playbooks.recommended({ model_key: modelKey, engine: engine.toUpperCase(), gpu_model: gpuName, min_runs: 3 }),
     staleTime: 300_000,
-    enabled: !!gpuName && !!modelKey,
+    enabled: enabled && !!gpuName && !!modelKey,
   });
   const top = data?.[0];
   if (!top || top.total_runs < 3) return null;
@@ -157,12 +182,12 @@ function VerifiedPlaybookChip({
   );
 }
 
-function ThroughputChip({ gpuName, modelKey }: { gpuName: string; modelKey: string }) {
+function ThroughputChip({ gpuName, modelKey, enabled }: { gpuName: string; modelKey: string; enabled: boolean }) {
   const { data } = useQuery({
     queryKey: ["benchmarks", "gpu", gpuName, modelKey],
     queryFn: () => api.benchmarks.forGpu(gpuName, modelKey),
     staleTime: 300_000,
-    enabled: !!gpuName && !!modelKey,
+    enabled: enabled && !!gpuName && !!modelKey,
   });
   const items = data?.items ?? [];
   const tpsValues = items.map((b) => b.tokens_per_second_avg).filter((v): v is number => v != null);
@@ -187,8 +212,10 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
     topEngine.engine !== pickedEngine.engine &&
     topEngine.meetsVramMin;
 
+  const [cardRef, inView] = useInView();
+
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden" ref={cardRef}>
       <div className="px-4 py-3.5 space-y-2.5">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
@@ -260,14 +287,15 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
             quant={quant}
             engine={engine}
             gpuCount={offer.gpu_count}
+            enabled={inView}
           />
         )}
 
         {/* Verified throughput + playbook chip */}
         {modelKey && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <ThroughputChip gpuName={offer.gpu_name} modelKey={modelKey} />
-            <VerifiedPlaybookChip gpuName={offer.gpu_name} modelKey={modelKey} engine={engine} />
+            <ThroughputChip gpuName={offer.gpu_name} modelKey={modelKey} enabled={inView} />
+            <VerifiedPlaybookChip gpuName={offer.gpu_name} modelKey={modelKey} engine={engine} enabled={inView} />
           </div>
         )}
 
