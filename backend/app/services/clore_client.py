@@ -140,9 +140,16 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
 
     allowed_coins = list(getattr(s, "allowed_coins", None) or [])
 
-    # GPU array (non-empty for mixed rigs)
+    # GPU array (non-empty for mixed rigs).
+    # SDK returns list[list[str]] e.g. [[' GTX 745']], flatten to list[str].
+    gpu_array: list[str] = []
     raw_gpu_array = getattr(s, "gpu_array", None)
-    gpu_array = list(raw_gpu_array) if raw_gpu_array else []
+    if raw_gpu_array:
+        for item in raw_gpu_array:
+            if isinstance(item, str):
+                gpu_array.append(item.strip())
+            elif isinstance(item, (list, tuple)) and item:
+                gpu_array.append(str(item[0]).strip())
 
     # Spot price
     spot_price_per_day = None
