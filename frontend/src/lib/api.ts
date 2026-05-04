@@ -27,6 +27,7 @@ import type {
   SSHTestResult,
   TaskRun,
   ToPlaybookResult,
+  RecommendedPlaybook,
 } from "./types";
 
 // Empty string → relative URLs. The browser calls /api/v1/... on the same
@@ -112,6 +113,19 @@ export const api = {
       apiFetch<Playbook>("/api/v1/playbooks", { method: "POST", body: JSON.stringify(data) }),
     delete: (id: string) =>
       fetch(`${BASE_URL}/api/v1/playbooks/${id}`, { method: "DELETE" }),
+    run: (playbookId: string, serverId: string) =>
+      apiFetch<{ task_id: string; status: string }>(
+        `/api/v1/playbooks/${playbookId}/run?server_id=${serverId}`,
+        { method: "POST" },
+      ),
+    recommended: (params: { model_key?: string; engine?: string; gpu_model?: string; min_runs?: number }) => {
+      const p = new URLSearchParams();
+      if (params.model_key) p.set("model_key", params.model_key);
+      if (params.engine) p.set("engine", params.engine);
+      if (params.gpu_model) p.set("gpu_model", params.gpu_model);
+      if (params.min_runs != null) p.set("min_runs", String(params.min_runs));
+      return apiFetch<RecommendedPlaybook[]>(`/api/v1/playbooks/recommended?${p}`);
+    },
   },
 
   taskRuns: {
@@ -213,11 +227,21 @@ export const api = {
       fetch(`${BASE_URL}/api/v1/sessions/${id}/interrupt`, { method: "POST" }),
     commandsSummary: (id: string) =>
       apiFetch<CommandsSummary>(`/api/v1/sessions/${id}/commands/summary`),
-    toPlaybook: (id: string, context?: string) =>
-      apiFetch<ToPlaybookResult>(`/api/v1/sessions/${id}/to-playbook`, {
-        method: "POST",
-        body: JSON.stringify({ context: context ?? "" }),
-      }),
+    toPlaybook: (
+      id: string,
+      body: { context?: string; keep_indices?: number[] },
+      opts?: { save?: boolean; name?: string; engine?: string },
+    ) => {
+      const params = new URLSearchParams();
+      if (opts?.save) params.set("save", "true");
+      if (opts?.name) params.set("name", opts.name);
+      if (opts?.engine) params.set("engine", opts.engine);
+      const qs = params.toString();
+      return apiFetch<ToPlaybookResult>(
+        `/api/v1/sessions/${id}/to-playbook${qs ? `?${qs}` : ""}`,
+        { method: "POST", body: JSON.stringify(body) },
+      );
+    },
     downloadTranscriptUrl: (id: string) => `${BASE_URL}/api/v1/sessions/${id}/download`,
     downloadCommandUrl: (sessionId: string, cmdId: string) =>
       `${BASE_URL}/api/v1/sessions/${sessionId}/commands/${cmdId}/download`,

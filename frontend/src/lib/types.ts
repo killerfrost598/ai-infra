@@ -74,7 +74,19 @@ export interface Playbook {
   git_commit: string | null;
   tags: Record<string, unknown> | null;
   requirements_json: Record<string, unknown> | null;
+  model_variant_id: string | null;
+  engine: EngineKind | null;
+  source_session_id: string | null;
   created_at: string;
+}
+
+export interface RecommendedPlaybook {
+  playbook_id: string;
+  playbook_name: string;
+  engine: EngineKind | null;
+  total_runs: number;
+  successful_runs: number;
+  success_rate: number;
 }
 
 export interface TaskRun {
@@ -210,6 +222,7 @@ export interface CommandsSummary {
 export interface ToPlaybookResult {
   playbook_yaml: string;
   command_count: number;
+  playbook_id?: string;
 }
 
 export interface CloreOffer {

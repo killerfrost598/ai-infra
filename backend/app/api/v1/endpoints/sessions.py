@@ -42,10 +42,13 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> Ses
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    env_snapshot = session_runner.capture_env_snapshot(handle.channel)
+
     session = SessionModel(
         server_id=server.id,
         label=payload.label,
         status=SessionStatus.ACTIVE,
+        metadata_json={"env": env_snapshot} if env_snapshot else None,
     )
     db.add(session)
     db.commit()
@@ -440,30 +443,47 @@ def get_commands_summary(session_id: UUID, db: Session = Depends(get_db)) -> dic
 def convert_to_playbook(
     session_id: UUID,
     body: dict = {},
+    save: bool = Query(False),
+    name: str | None = Query(None),
+    engine: str | None = Query(None),
     db: Session = Depends(get_db),
 ) -> dict:
     """Use Claude (Haiku) to convert PTY command history into an Ansible playbook.
 
     Requires `anthropic_api_key` in platform_settings.
-    Optional body: {"context": "Deploy vLLM on GPU server"}
+    Body: {"context": str, "keep_indices": list[int] | null}
+    Query: ?save=true&name=<playbook-name>&engine=VLLM
     """
+    from app.models.entities import PlatformSetting, Playbook, ModelVariant
+    import os
+
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if not session.pty_log:
         raise HTTPException(status_code=422, detail="No PTY log available for this session")
 
-    commands = session_runner.parse_pty_commands(session.pty_log)
-    if not commands:
+    all_commands = session_runner.parse_pty_commands(session.pty_log)
+    if not all_commands:
         raise HTTPException(
             status_code=422,
             detail="No parseable commands found. Session may predate PROMPT_COMMAND injection.",
         )
 
-    # Resolve Anthropic API key from platform_settings → env var
-    from app.models.entities import PlatformSetting
-    import os
+    body = body or {}
+    keep_indices: list[int] | None = body.get("keep_indices")
+    context: str = body.get("context", "")
 
+    # Filter to kept commands only if indices provided
+    if keep_indices is not None:
+        kept = [c for i, c in enumerate(all_commands) if i in keep_indices]
+    else:
+        kept = all_commands
+
+    if not kept:
+        raise HTTPException(status_code=422, detail="No commands selected to convert.")
+
+    # Resolve Anthropic API key
     setting_row = (
         db.query(PlatformSetting)
         .filter(PlatformSetting.key == "anthropic_api_key")
@@ -476,11 +496,23 @@ def convert_to_playbook(
             detail="anthropic_api_key not configured. Set it in Profile > Settings.",
         )
 
-    context = (body or {}).get("context", "")
+    # Build env comment header from session metadata
+    env_header = ""
+    if session.metadata_json and session.metadata_json.get("env"):
+        env = session.metadata_json["env"]
+        lines = ["# Environment snapshot at session start:"]
+        if env.get("nvidia_smi"):
+            lines.append(f"# GPU: {env['nvidia_smi']}")
+        if env.get("nvcc"):
+            lines.append(f"# CUDA: {env['nvcc']}")
+        if env.get("docker"):
+            lines.append(f"# Docker: {env['docker']}")
+        env_header = "\n".join(lines) + "\n#\n"
+
     cmd_lines = "\n".join(
         f"[exit={c['exit_code']} {c['duration_ms']}ms] $ {c['command']}"
         + (f"\n{c['output']}" if c.get("output") else "")
-        for c in commands
+        for c in kept
     )
 
     prompt = (
@@ -500,12 +532,62 @@ def convert_to_playbook(
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
-        playbook_yaml = message.content[0].text
+        playbook_yaml = env_header + message.content[0].text
     except Exception as exc:
         logger.error("Anthropic API error in to-playbook: %s", exc)
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}") from exc
 
-    return {"playbook_yaml": playbook_yaml, "command_count": len(commands)}
+    result: dict = {"playbook_yaml": playbook_yaml, "command_count": len(kept)}
+
+    if save:
+        if not name or not name.strip():
+            raise HTTPException(status_code=422, detail="name is required when save=true")
+
+        # Build setup.sh from the kept commands (only exit-0 ones)
+        setup_lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
+        if env_header:
+            setup_lines.insert(0, env_header.rstrip())
+            setup_lines.insert(1, "")
+        for cmd in kept:
+            if cmd.get("exit_code") == 0:
+                setup_lines.append(cmd["command"])
+        setup_sh = "\n".join(setup_lines) + "\n"
+
+        try:
+            from app.services.playbook_writer import write_playbook_to_local_repo
+            write_result = write_playbook_to_local_repo(
+                name=name.strip(),
+                setup_sh=setup_sh,
+                ansible_yaml=playbook_yaml,
+                session_id=str(session_id),
+            )
+        except Exception as exc:
+            logger.warning("playbook_writer failed: %s", exc)
+            write_result = {"git_repo": "local", "git_commit": None}
+
+        from app.models.entities import EngineKind as EK
+        engine_enum = None
+        if engine:
+            try:
+                engine_enum = EK(engine.upper())
+            except ValueError:
+                pass
+
+        playbook = Playbook(
+            name=name.strip(),
+            git_repo=write_result["git_repo"],
+            git_branch="main",
+            git_commit=write_result.get("git_commit"),
+            source_session_id=session_id,
+            engine=engine_enum,
+        )
+        db.add(playbook)
+        db.commit()
+        db.refresh(playbook)
+
+        result["playbook_id"] = str(playbook.id)
+
+    return result
 
 
 @router.get("/{session_id}/commands/{cmd_id}/download", response_class=PlainTextResponse)

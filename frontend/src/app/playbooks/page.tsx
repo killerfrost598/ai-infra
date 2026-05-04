@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { usePlaybooks, useCreatePlaybook, useDeletePlaybook } from "@/lib/queries";
-import type { Playbook } from "@/lib/types";
+import { usePlaybooks, useCreatePlaybook, useDeletePlaybook, useServers } from "@/lib/queries";
+import type { Playbook, Server } from "@/lib/types";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,10 +16,15 @@ export default function PlaybooksPage() {
 
   const createPlaybook = useCreatePlaybook();
   const deletePlaybook = useDeletePlaybook();
+  const { data: serversData } = useServers();
+  const readyServers: Server[] = (serversData?.items ?? []).filter(
+    (s: Server) => s.status === "READY" || s.status === "PROVISIONING",
+  );
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", git_repo: "", git_branch: "main", git_commit: "" });
   const [createError, setCreateError] = useState<string | null>(null);
+  const [runningId, setRunningId] = useState<string | null>(null);
 
   function setField(key: keyof typeof form, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -49,6 +56,23 @@ export default function PlaybooksPage() {
     deletePlaybook.mutate(id, {
       onError: (err) => alert(err.message),
     });
+  }
+
+  async function handleRun(playbook: Playbook) {
+    if (readyServers.length === 0) {
+      toast.error("No ready servers to run this playbook on.");
+      return;
+    }
+    const server = readyServers[0];
+    setRunningId(playbook.id);
+    try {
+      await api.playbooks.run(playbook.id, server.id);
+      toast.success(`Playbook "${playbook.name}" queued on ${server.hostname}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Run failed");
+    } finally {
+      setRunningId(null);
+    }
   }
 
   return (
@@ -158,14 +182,26 @@ export default function PlaybooksPage() {
                   )}
                 </div>
               </div>
-              <Button
-                variant="destructive"
-                size="sm"
-                loading={deletePlaybook.isPending}
-                onClick={() => handleDelete(p.id, p.name)}
-              >
-                Delete
-              </Button>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={runningId === p.id}
+                  disabled={!!runningId || readyServers.length === 0}
+                  onClick={() => handleRun(p)}
+                  title={readyServers.length === 0 ? "No ready servers" : `Run on ${readyServers[0].hostname}`}
+                >
+                  Run
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  loading={deletePlaybook.isPending}
+                  onClick={() => handleDelete(p.id, p.name)}
+                >
+                  Delete
+                </Button>
+              </div>
             </div>
           </Card>
         ))}

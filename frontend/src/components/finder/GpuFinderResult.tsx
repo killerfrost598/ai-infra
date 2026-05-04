@@ -7,7 +7,7 @@ import { fmtSpeed } from "@/components/clore/OfferCard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import type { FeasibilityReport, FeasibilityCheck } from "@/lib/types";
+import type { FeasibilityReport, FeasibilityCheck, RecommendedPlaybook } from "@/lib/types";
 
 const ENGINE_BADGE: Record<string, string> = {
   vllm:   "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
@@ -106,6 +106,32 @@ function CompatChips({ offerId, modelKey, quant, engine }: {
         </span>
       ))}
     </div>
+  );
+}
+
+function VerifiedPlaybookChip({
+  gpuName,
+  modelKey,
+  engine,
+}: {
+  gpuName: string;
+  modelKey: string;
+  engine: string;
+}) {
+  const { data } = useQuery<RecommendedPlaybook[]>({
+    queryKey: ["playbooks", "recommended", gpuName, modelKey, engine],
+    queryFn: () =>
+      api.playbooks.recommended({ model_key: modelKey, engine: engine.toUpperCase(), gpu_model: gpuName, min_runs: 3 }),
+    staleTime: 300_000,
+    enabled: !!gpuName && !!modelKey,
+  });
+  const top = data?.[0];
+  if (!top || top.total_runs < 3) return null;
+  const pct = Math.round(top.success_rate * 100);
+  return (
+    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+      ✓ Verified playbook ({pct}% · {top.total_runs} runs)
+    </span>
   );
 }
 
@@ -214,10 +240,11 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
           />
         )}
 
-        {/* Verified throughput */}
+        {/* Verified throughput + playbook chip */}
         {modelKey && (
           <div className="flex flex-wrap items-center gap-1.5">
             <ThroughputChip gpuName={offer.gpu_name} modelKey={modelKey} />
+            <VerifiedPlaybookChip gpuName={offer.gpu_name} modelKey={modelKey} engine={engine} />
           </div>
         )}
 

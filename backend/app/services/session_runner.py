@@ -268,6 +268,30 @@ def parse_pty_commands(pty_log: str) -> list[dict]:
     return commands
 
 
+def capture_env_snapshot(channel: paramiko.Channel) -> dict:
+    """Run lightweight env probes on an open PTY channel and return a dict.
+
+    Runs nvidia-smi, nvcc, and docker --version via the execute_command sentinel
+    pattern. Failures are captured as None rather than raising.
+    """
+    snapshot: dict = {}
+
+    def _try(cmd: str, timeout: float = 8.0) -> str | None:
+        try:
+            stdout, _, rc = execute_command(channel, cmd, timeout=timeout)
+            return stdout.strip() if rc == 0 else None
+        except Exception:
+            return None
+
+    snapshot["nvidia_smi"] = _try(
+        "nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>/dev/null"
+    )
+    snapshot["nvcc"] = _try("nvcc --version 2>/dev/null | grep 'release' | head -1")
+    snapshot["docker"] = _try("docker --version 2>/dev/null")
+
+    return {k: v for k, v in snapshot.items() if v is not None}
+
+
 def close_session(handle: SessionHandle) -> None:
     """Close the PTY channel and underlying SSH client."""
     try:

@@ -597,6 +597,23 @@ def run_playbook_task(self, server_id: str, playbook_id: str) -> dict:
                 _log(f"\nERROR: {exc}\n")
 
         _finish_task_run(task_run, db)
+
+        try:
+            from app.models.entities import PlaybookRunOutcome
+            outcome = PlaybookRunOutcome(
+                playbook_id=playbook.id,
+                task_run_id=task_run.id,
+                server_id=server.id,
+                model_variant_id=getattr(playbook, "model_variant_id", None),
+                gpu_model=server.gpu_model,
+                succeeded=(task_run.status == TaskStatus.SUCCESS),
+                duration_seconds=task_run.duration_seconds,
+            )
+            db.add(outcome)
+            db.commit()
+        except Exception:
+            logger.warning("Failed to insert PlaybookRunOutcome for playbook %s", playbook_id, exc_info=True)
+
         return {"status": task_run.status.value, "server_id": server_id, "playbook_id": playbook_id}
 
     finally:

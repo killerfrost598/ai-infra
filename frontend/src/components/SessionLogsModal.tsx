@@ -7,11 +7,13 @@ import {
   FileText,
   History,
   RefreshCw,
+  Star,
   Terminal,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { ParsedCommand, Session } from "@/lib/types";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 type LogTab = "commands" | "output" | "history";
@@ -46,11 +48,51 @@ export function SessionLogsModal({
 }: SessionLogsModalProps) {
   const [activeTab, setActiveTab] = useState<LogTab>("commands");
   const [selectedCmd, setSelectedCmd] = useState<ParsedCommand | null>(null);
+  const [keepIndices, setKeepIndices] = useState<Set<number>>(new Set());
+  const [promoting, setPromoting] = useState(false);
+  const [promoteName, setPromoteName] = useState("");
+  const [showPromoteForm, setShowPromoteForm] = useState(false);
 
   useEffect(() => {
     setSelectedCmd(null);
     setActiveTab("commands");
+    setKeepIndices(new Set());
+    setShowPromoteForm(false);
+    setPromoteName("");
   }, [sessionId]);
+
+  const toggleKeep = useCallback((index: number) => {
+    setKeepIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
+  const handlePromote = useCallback(async () => {
+    if (!sessionId || !promoteName.trim()) return;
+    setPromoting(true);
+    try {
+      const indices = keepIndices.size > 0 ? [...keepIndices] : undefined;
+      const result = await api.sessions.toPlaybook(
+        sessionId,
+        { keep_indices: indices },
+        { save: true, name: promoteName.trim() },
+      );
+      toast.success(
+        result.playbook_id
+          ? `Playbook saved (${result.command_count} steps)`
+          : `Playbook YAML generated (${result.command_count} steps)`,
+      );
+      setShowPromoteForm(false);
+      setPromoteName("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Promote failed");
+    } finally {
+      setPromoting(false);
+    }
+  }, [sessionId, keepIndices, promoteName]);
 
   const tabs: Array<{ id: LogTab; label: string; icon: LucideIcon }> = [
     { id: "commands", label: "Commands", icon: Terminal },
@@ -120,15 +162,67 @@ export function SessionLogsModal({
             commands={commands}
             loading={cmdLoading}
             selectedCmd={selectedCmd}
+            keepIndices={keepIndices}
             onSelect={(cmd) => {
               setSelectedCmd(cmd);
               setActiveTab("output");
             }}
+            onToggleKeep={toggleKeep}
           />
         )}
         {activeTab === "output" && <OutputTab cmd={selectedCmd} />}
         {activeTab === "history" && <HistoryTab ptyLog={session?.pty_log ?? null} />}
       </div>
+
+      {/* Promote-to-Playbook footer */}
+      {activeTab === "commands" && commands.length > 0 && (
+        <div className="shrink-0 border-t border-border/70 bg-background/60 p-2 backdrop-blur">
+          {showPromoteForm ? (
+            <div className="space-y-2">
+              <input
+                type="text"
+                value={promoteName}
+                onChange={(e) => setPromoteName(e.target.value)}
+                placeholder="Playbook name…"
+                className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handlePromote();
+                  if (e.key === "Escape") setShowPromoteForm(false);
+                }}
+              />
+              <div className="flex gap-1.5">
+                <Button
+                  size="sm"
+                  className="flex-1 h-7 text-xs"
+                  onClick={handlePromote}
+                  disabled={!promoteName.trim() || promoting}
+                >
+                  {promoting ? "Saving…" : keepIndices.size > 0 ? `Save ${keepIndices.size} steps` : "Save all steps"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() => setShowPromoteForm(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowPromoteForm(true)}
+              className="w-full rounded-md border border-dashed border-border/70 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary/60 hover:bg-primary/5 hover:text-primary"
+            >
+              <Star className="mr-1.5 inline h-3 w-3" />
+              {keepIndices.size > 0
+                ? `Promote ${keepIndices.size} starred step${keepIndices.size !== 1 ? "s" : ""} to Playbook`
+                : "Promote to Playbook"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -139,12 +233,16 @@ function CommandsTab({
   commands,
   loading,
   selectedCmd,
+  keepIndices,
   onSelect,
+  onToggleKeep,
 }: {
   commands: ParsedCommand[];
   loading: boolean;
   selectedCmd: ParsedCommand | null;
+  keepIndices: Set<number>;
   onSelect: (cmd: ParsedCommand) => void;
+  onToggleKeep: (index: number) => void;
 }) {
   if (loading)
     return <div className="p-4 text-xs text-muted-foreground">Loading commands…</div>;
@@ -159,32 +257,50 @@ function CommandsTab({
   return (
     <div className="divide-y divide-border/50">
       {commands.map((cmd, i) => (
-        <button
+        <div
           key={`${cmd.started_ms}-${cmd.command}-${i}`}
-          onClick={() => onSelect(cmd)}
-          className={`w-full border-l-2 px-3 py-2.5 text-left transition-colors ${
+          className={`flex items-stretch border-l-2 transition-colors ${
             selectedCmd === cmd
               ? "border-l-primary bg-primary/10"
               : "border-l-transparent hover:border-l-muted-foreground/30 hover:bg-muted/50"
           }`}
         >
-          <div className="flex items-center gap-2">
-            <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                cmd.exit_code === 0 ? "bg-emerald-500" : "bg-red-500"
-              }`}
-            />
-            <code className="flex-1 truncate text-xs font-mono text-foreground">
-              {cmd.command}
-            </code>
-            <span className="shrink-0 text-[10px] text-muted-foreground/50">
-              {formatDuration(cmd.duration_ms)}
-            </span>
-          </div>
-          <div className="mt-1 pl-3.5 text-[10px] text-muted-foreground/60">
-            {formatTime(cmd.started_ms)}
-          </div>
-        </button>
+          {/* ★ keep toggle */}
+          <button
+            onClick={() => onToggleKeep(i)}
+            title={keepIndices.has(i) ? "Remove from playbook" : "Add to playbook"}
+            className={`shrink-0 px-2 py-2.5 transition-colors ${
+              keepIndices.has(i)
+                ? "text-amber-400 hover:text-amber-300"
+                : "text-muted-foreground/20 hover:text-muted-foreground/60"
+            }`}
+          >
+            <Star className={`h-3 w-3 ${keepIndices.has(i) ? "fill-current" : ""}`} />
+          </button>
+
+          {/* Command row */}
+          <button
+            onClick={() => onSelect(cmd)}
+            className="flex-1 px-2 py-2.5 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                  cmd.exit_code === 0 ? "bg-emerald-500" : "bg-red-500"
+                }`}
+              />
+              <code className="flex-1 truncate text-xs font-mono text-foreground">
+                {cmd.command}
+              </code>
+              <span className="shrink-0 text-[10px] text-muted-foreground/50">
+                {formatDuration(cmd.duration_ms)}
+              </span>
+            </div>
+            <div className="mt-1 pl-3.5 text-[10px] text-muted-foreground/60">
+              {formatTime(cmd.started_ms)}
+            </div>
+          </button>
+        </div>
       ))}
     </div>
   );

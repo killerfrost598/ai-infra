@@ -82,6 +82,35 @@ class Playbook(Base):
     git_commit: Mapped[str | None] = mapped_column(String(128), nullable=True)
     tags: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     requirements_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    model_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_variants.id", ondelete="SET NULL"), nullable=True
+    )
+    engine: Mapped[EngineKind | None] = mapped_column(Enum(EngineKind), nullable=True)
+    source_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PlaybookRunOutcome(Base):
+    __tablename__ = "playbook_run_outcomes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    playbook_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("playbooks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    task_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    server_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    model_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_variants.id", ondelete="SET NULL"), nullable=True
+    )
+    gpu_model: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -163,6 +192,7 @@ class Session(Base):
     started_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     terminated_at: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pty_log: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     commands: Mapped[list["SessionCommand"]] = relationship(
         "SessionCommand", back_populates="session", order_by="SessionCommand.sequence_num"
