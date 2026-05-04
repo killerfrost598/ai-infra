@@ -4,9 +4,21 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.entities import PlatformSetting
 from app.schemas.settings import SettingResponse, SettingUpsert, SettingsListResponse
-from app.services.settings_service import KNOWN_KEYS, get_setting, upsert_setting
+from app.services.settings_service import CLORE_FILTER_KEYS, KNOWN_KEYS, get_setting, upsert_setting
 
 router = APIRouter()
+
+_FILTERED_CACHE_KEYS = ("clore:offers:filtered", "clore:offers:meta")
+
+
+def _invalidate_filtered_cache() -> None:
+    """Delete the filtered offers cache so the next page load re-applies settings."""
+    try:
+        import redis as _redis
+        r = _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=2)
+        r.delete(*_FILTERED_CACHE_KEYS)
+    except Exception:
+        pass  # Non-fatal — cache will expire naturally
 
 
 @router.get("", response_model=SettingsListResponse)
@@ -51,6 +63,8 @@ def set_setting(
     if not payload.value.strip():
         raise HTTPException(status_code=422, detail="Value cannot be empty")
     row = upsert_setting(key, payload.value.strip(), db)
+    if key in CLORE_FILTER_KEYS:
+        _invalidate_filtered_cache()
     return SettingResponse(key=row.key, is_configured=True, updated_at=row.updated_at)
 
 
@@ -107,3 +121,5 @@ def delete_setting(key: str, db: Session = Depends(get_db)) -> None:
     if row:
         db.delete(row)
         db.commit()
+    if key in CLORE_FILTER_KEYS:
+        _invalidate_filtered_cache()

@@ -34,10 +34,59 @@ const SETTING_META: Record<string, SettingMeta> = {
     placeholder: "-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----",
     inputType: "textarea",
   },
+  clore_min_pcie_gen: {
+    label: "Min PCIe Generation",
+    description:
+      "Exclude servers below this PCIe generation. PCIe < 3 creates GPU↔host bandwidth bottlenecks for inference workloads. Recommended: 3.",
+    placeholder: "e.g. 3",
+  },
+  clore_min_pcie_width: {
+    label: "Min PCIe Width",
+    description:
+      "Exclude servers with a PCIe link narrower than this. x8 is the minimum for reliable inference throughput. Recommended: 8.",
+    placeholder: "e.g. 8",
+  },
+  clore_min_disk_gb: {
+    label: "Min Disk (GB)",
+    description:
+      "Exclude servers with less total storage than this. 100 GB is the practical minimum for a single large model. Recommended: 100.",
+    placeholder: "e.g. 100",
+  },
+  clore_min_dl_mbps: {
+    label: "Min Download Speed (Mbps)",
+    description: "Exclude servers with download bandwidth below this threshold.",
+    placeholder: "e.g. 500",
+  },
+  clore_min_ul_mbps: {
+    label: "Min Upload Speed (Mbps)",
+    description: "Exclude servers with upload bandwidth below this threshold.",
+    placeholder: "e.g. 200",
+  },
+  clore_min_cuda: {
+    label: "Min CUDA Version",
+    description:
+      "Exclude servers running a CUDA version older than this. Use major.minor format.",
+    placeholder: "e.g. 12.0",
+  },
+  clore_min_vram_gb: {
+    label: "Min Total VRAM (GB)",
+    description:
+      "Exclude servers whose total VRAM (gpu_count × per_gpu_vram) is below this. Useful for filtering out single-GPU rigs that can't load your target models.",
+    placeholder: "e.g. 24",
+  },
 };
 
 const API_KEY_KEYS = ["clore_api_key", "anthropic_api_key"];
 const SSH_KEY_KEYS = ["ssh_private_key"];
+const CLORE_FILTER_KEYS = [
+  "clore_min_pcie_gen",
+  "clore_min_pcie_width",
+  "clore_min_disk_gb",
+  "clore_min_dl_mbps",
+  "clore_min_ul_mbps",
+  "clore_min_cuda",
+  "clore_min_vram_gb",
+];
 
 function ConfiguredBadge({ configured }: { configured: boolean }) {
   if (configured) {
@@ -230,6 +279,18 @@ export default function SettingsPage() {
 
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">API Keys</p>
           <div className="space-y-4">{renderSection(API_KEY_KEYS)}</div>
+
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Clore Global Filters</p>
+          <Card className="px-6 py-4 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground mb-1">Quality bar for GPU marketplace</p>
+            <p className="text-xs text-muted-foreground">
+              These filters apply globally to both the Marketplace and GPU Finder pages.
+              The offer list is cached for 10 minutes — saving or clearing a filter immediately
+              invalidates the cache so the next page load reflects the updated criteria.
+              All fields are optional; leave blank to apply no filter on that dimension.
+            </p>
+          </Card>
+          <div className="space-y-4">{renderSection(CLORE_FILTER_KEYS)}</div>
 
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">SSH</p>
           <Card className="px-6 py-4 text-sm text-muted-foreground">

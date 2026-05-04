@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { RefreshCw } from "lucide-react";
-import { useCloreOffers } from "@/lib/queries";
+import { useCloreOffers, useRefreshCloreOffers } from "@/lib/queries";
 import { useCatalogue } from "@/lib/models/catalogue";
 import {
   rankOffersForConfig,
@@ -31,7 +31,8 @@ type BucketChip = RankedBucket | null;
 
 export function GpuFinderPanel() {
   const { data: catalogue, isLoading: loadingCatalogue } = useCatalogue();
-  const { data: offersData, isLoading: loadingOffers, refetch, dataUpdatedAt } = useCloreOffers();
+  const { data: offersData, isLoading: loadingOffers } = useCloreOffers();
+  const refreshMutation = useRefreshCloreOffers();
   const offers = offersData?.offers;
   const models = catalogue?.models ?? [];
 
@@ -114,8 +115,8 @@ export function GpuFinderPanel() {
     setAdvisorOpen(true);
   }
 
-  const updatedAt = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  const updatedAt = offersData?.meta?.fetched_at
+    ? new Date(offersData.meta.fetched_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
 
   return (
@@ -196,14 +197,19 @@ export function GpuFinderPanel() {
             {updatedAt && (
               <span className="text-[10px] text-muted-foreground/50">Updated {updatedAt}</span>
             )}
+            {offersData?.meta && offersData.meta.total_filtered < offersData.meta.total_raw && (
+              <span className="text-[10px] text-muted-foreground/50">
+                {offersData.meta.total_filtered}/{offersData.meta.total_raw} passed quality bar
+              </span>
+            )}
             <Button
               variant="ghost"
               size="sm"
               className="h-7 gap-1.5 px-2 text-xs"
-              disabled={loadingOffers}
-              onClick={() => refetch()}
+              disabled={loadingOffers || refreshMutation.isPending}
+              onClick={() => refreshMutation.mutate()}
             >
-              <RefreshCw className={`size-3 ${loadingOffers ? "animate-spin" : ""}`} />
+              <RefreshCw className={`size-3 ${loadingOffers || refreshMutation.isPending ? "animate-spin" : ""}`} />
               Refresh
             </Button>
           </div>

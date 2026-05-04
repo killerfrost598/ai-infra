@@ -86,7 +86,7 @@ def check_feasibility(req: FeasibilityRequest, db: Session = Depends(get_db)) ->
         # Try Redis cache for Clore offers
         try:
             r = _get_redis()
-            cached = r.get("clore:offers:all")
+            cached = r.get("clore:offers:raw")
             if cached:
                 offers = json.loads(cached)
                 for o in offers:

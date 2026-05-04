@@ -246,6 +246,19 @@ export interface CloreOffer {
   mrl: number | null;
 }
 
+export interface CloreOffersMeta {
+  fetched_at: string;
+  total_raw: number;
+  total_filtered: number;
+  applied_filters: Record<string, number | string | null>;
+  from_cache: boolean;
+}
+
+export interface CloreOffersResponse {
+  offers: CloreOffer[];
+  meta: CloreOffersMeta;
+}
+
 export interface CloreRental {
   id: string;
   gpu_name: string;

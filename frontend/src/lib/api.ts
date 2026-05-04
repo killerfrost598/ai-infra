@@ -3,6 +3,7 @@ import type {
   BenchmarkRunResponse,
   CloreBalance,
   CloreOffer,
+  CloreOffersResponse,
   CloreRental,
   ModelDeploymentCreate,
   CommandsSummary,
@@ -161,11 +162,11 @@ export const api = {
   },
 
   clore: {
-    offers: (gpuName?: string) => {
+    offers: (opts?: { refresh?: boolean }) => {
       const params = new URLSearchParams();
-      if (gpuName) params.set("gpu_name", gpuName);
+      if (opts?.refresh) params.set("refresh", "true");
       const q = params.toString();
-      return apiFetch<{ offers: CloreOffer[] }>(`/api/v1/clore/offers${q ? `?${q}` : ""}`);
+      return apiFetch<CloreOffersResponse>(`/api/v1/clore/offers${q ? `?${q}` : ""}`);
     },
     rentals: () => apiFetch<{ rentals: CloreRental[] }>("/api/v1/clore/rentals"),
     rent: (req: RentRequest) =>

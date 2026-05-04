@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api } from "./api"
-import type { InferenceBenchmarkCreate, Playbook, RentRequest, ServerCreate } from "./types"
+import type { CloreOffersResponse, InferenceBenchmarkCreate, Playbook, RentRequest, ServerCreate } from "./types"
 
 // ─── Query Keys ──────────────────────────────────────────────────────────────
 
@@ -11,7 +11,7 @@ export const keys = {
   servers: () => ["servers"] as const,
   server: (id: string) => ["servers", id] as const,
   rentals: () => ["clore", "rentals"] as const,
-  cloreOffers: (gpu?: string) => ["clore", "offers", gpu ?? ""] as const,
+  cloreOffers: () => ["clore", "offers"] as const,
   cloreBalance: () => ["clore", "balance"] as const,
   taskRuns: (serverId?: string) => ["task-runs", serverId ?? ""] as const,
   deployments: () => ["deployments"] as const,
@@ -45,13 +45,22 @@ export function useRentals() {
   })
 }
 
-export function useCloreOffers(gpu?: string) {
+export function useCloreOffers() {
   return useQuery({
-    queryKey: keys.cloreOffers(gpu),
-    queryFn: () => api.clore.offers(gpu || undefined),
+    queryKey: keys.cloreOffers(),
+    queryFn: () => api.clore.offers(),
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
+  })
+}
+
+export function useRefreshCloreOffers() {
+  const qc = useQueryClient()
+  return useMutation<CloreOffersResponse>({
+    mutationFn: () => api.clore.offers({ refresh: true }),
+    onSuccess: (data) => qc.setQueryData(keys.cloreOffers(), data),
+    onError: (e: Error) => toast.error(e.message),
   })
 }
 

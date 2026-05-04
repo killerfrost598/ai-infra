@@ -80,7 +80,7 @@ def get_leaderboard(
         import json
         import redis as _redis
         r = _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=2)
-        cached = r.get("clore:offers:all")
+        cached = r.get("clore:offers:raw")
         if cached:
             offers = json.loads(cached)
             gpu_prices: dict[str, list[float]] = {}

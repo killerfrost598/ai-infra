@@ -16,8 +16,28 @@ logger = logging.getLogger(__name__)
 KNOWN_KEYS: tuple[str, ...] = (
     "clore_api_key",
     "anthropic_api_key",
-    "ssh_private_key",  # Platform-wide SSH private key for server connections
+    "ssh_private_key",
+    # Clore.ai global quality-bar filters — applied to all marketplace fetches.
+    # All are optional; unset keys mean no filtering on that dimension.
+    "clore_min_pcie_gen",
+    "clore_min_pcie_width",
+    "clore_min_disk_gb",
+    "clore_min_dl_mbps",
+    "clore_min_ul_mbps",
+    "clore_min_cuda",
+    "clore_min_vram_gb",
 )
+
+# Keys that, when saved or cleared, must invalidate the filtered offers cache.
+CLORE_FILTER_KEYS: frozenset[str] = frozenset({
+    "clore_min_pcie_gen",
+    "clore_min_pcie_width",
+    "clore_min_disk_gb",
+    "clore_min_dl_mbps",
+    "clore_min_ul_mbps",
+    "clore_min_cuda",
+    "clore_min_vram_gb",
+})
 
 # Environment variable names used as fallback when a key is absent from the DB.
 _ENV_FALLBACKS: dict[str, str] = {

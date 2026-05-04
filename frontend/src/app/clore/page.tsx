@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
-  useCloreOffers, useRentals, useServers, useBenchmarks,
+  useCloreOffers, useRefreshCloreOffers, useRentals, useServers, useBenchmarks,
   useTerminateRental, useCreateSession,
 } from "@/lib/queries";
 import type { CloreOffer, CloreRental, InferenceBenchmark, Server } from "@/lib/types";
@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { CacheStatusBar } from "@/components/clore/CacheStatusBar";
 import { OfferCard, fmtSpeed } from "@/components/clore/OfferCard";
 import { RentDialog } from "@/components/clore/RentDialog";
 import { RegisterRentalForm } from "@/components/clore/RegisterRentalForm";
@@ -61,6 +62,8 @@ export default function ClorePage() {
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────
+// These are session-level refinements applied client-side on top of the
+// globally-filtered data returned by the backend cache.
 
 interface Filters {
   gpu: string;
@@ -73,7 +76,7 @@ interface Filters {
 }
 
 const DEFAULT_FILTERS: Filters = {
-  gpu: "", minVram: 0, minDisk: 0, minPcieVersion: 3, minPcieWidth: 8, minUpload: 0, minDownload: 0,
+  gpu: "", minVram: 0, minDisk: 0, minPcieVersion: 0, minPcieWidth: 0, minUpload: 0, minDownload: 0,
 };
 
 function applyFilters(offers: CloreOffer[], f: Filters): CloreOffer[] {
@@ -97,11 +100,11 @@ type BenchmarkMap = Record<string, InferenceBenchmark[]>;
 
 function MarketplaceTab() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
-  const [gpuSearch, setGpuSearch] = useState("");
   const [dialogOffer, setDialogOffer] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
 
-  const { data: offersData, isLoading, error, refetch } = useCloreOffers(gpuSearch || undefined);
+  const { data: offersData, isLoading, error } = useCloreOffers();
+  const refreshMutation = useRefreshCloreOffers();
   const { data: benchData } = useBenchmarks(undefined, undefined, 200);
 
   const offers: CloreOffer[] = offersData?.offers ?? [];
@@ -164,13 +167,19 @@ function MarketplaceTab() {
           <FilterField label="Min download (Mbps)">
             <NumInput value={filters.minDownload} onChange={(v) => setFilter("minDownload", v)} min={0} step={100} />
           </FilterField>
-          <div className="flex items-end">
-            <Button variant="outline" size="sm" className="w-full" onClick={() => { setGpuSearch(filters.gpu); refetch(); }}>
-              Refresh
-            </Button>
-          </div>
         </div>
       </Card>
+
+      {offersData?.meta && (
+        <CacheStatusBar
+          fetchedAt={offersData.meta.fetched_at}
+          totalRaw={offersData.meta.total_raw}
+          totalFiltered={offersData.meta.total_filtered}
+          appliedFilters={offersData.meta.applied_filters}
+          isRefreshing={refreshMutation.isPending}
+          onRefresh={() => refreshMutation.mutate()}
+        />
+      )}
 
       {error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -248,6 +257,7 @@ function buildGroups(offers: CloreOffer[]): GpuGroup[] {
 
 function GpuGroupsTab() {
   const { data, isLoading, error } = useCloreOffers();
+  const refreshMutation = useRefreshCloreOffers();
   const offers: CloreOffer[] = data?.offers ?? [];
   const groups = useMemo(() => buildGroups(offers), [offers]);
 
@@ -263,6 +273,16 @@ function GpuGroupsTab() {
         </div>
       )}
       {isLoading && <Spinner text="Loading offers…" />}
+      {data?.meta && (
+        <CacheStatusBar
+          fetchedAt={data.meta.fetched_at}
+          totalRaw={data.meta.total_raw}
+          totalFiltered={data.meta.total_filtered}
+          appliedFilters={data.meta.applied_filters}
+          isRefreshing={refreshMutation.isPending}
+          onRefresh={() => refreshMutation.mutate()}
+        />
+      )}
       {!isLoading && !error && (
         <p className="text-xs text-muted-foreground/60">{groups.length} GPU models across {offers.length} offers</p>
       )}

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -8,10 +9,17 @@ from app.db.session import get_db
 from app.models.entities import ProviderAccount, Server, ServerStatus
 from app.schemas.servers import ServerResponse
 from app.services.clore_client import CloreClient, CloreOffer
+from app.services.clore_filters import apply_filters, load_clore_filters
 from app.services.settings_service import get_setting
 
-_OFFERS_CACHE_KEY = "clore:offers:all"
-_OFFERS_TTL = 60  # seconds
+# Two-key cache design:
+#   clore:offers:raw      — full unfiltered list (used by feasibility + benchmarks)
+#   clore:offers:filtered — quality-bar filtered list (used by UI pages)
+#   clore:offers:meta     — metadata for the filtered list (timestamps, counts)
+_RAW_KEY = "clore:offers:raw"
+_FILTERED_KEY = "clore:offers:filtered"
+_META_KEY = "clore:offers:meta"
+_CACHE_TTL = 600  # 10 minutes
 
 
 def _get_redis():
@@ -96,55 +104,77 @@ def get_balance(db: Session = Depends(get_db)) -> dict:
 
 @router.get("/offers")
 def list_offers(
-    gpu_name: str | None = None,
-    min_vram_gb: int | None = None,
-    min_disk_gb: int | None = None,
-    min_pcie_version: int | None = None,
-    min_pcie_width: int | None = None,
+    refresh: bool = False,
     db: Session = Depends(get_db),
 ) -> dict:
-    """List available GPU marketplace offers from Clore.ai with optional server-side pre-filtering.
+    """Return the globally-filtered Clore.ai marketplace offer list.
 
-    Results are cached in Redis for 60 s so repeated page loads don't hit the Clore SDK.
+    Results are cached in Redis for 10 minutes. Global quality-bar filters
+    (PCIe gen/width, disk, network, CUDA, total VRAM) are read from
+    ``platform_settings`` and applied before caching.
+
+    Pass ``?refresh=true`` to bypass the cache and fetch live data immediately.
     """
     api_key = _resolve_clore_key(db)
 
-    offers: list[CloreOffer] | None = None
+    # Serve from filtered cache when not forcing a refresh
+    if not refresh:
+        try:
+            r = _get_redis()
+            filtered_raw = r.get(_FILTERED_KEY)
+            meta_raw = r.get(_META_KEY)
+            if filtered_raw and meta_raw:
+                meta = json.loads(meta_raw)
+                meta["from_cache"] = True
+                return {"offers": json.loads(filtered_raw), "meta": meta}
+        except Exception:
+            pass
 
-    # Try Redis cache first (full unfiltered list)
-    try:
-        r = _get_redis()
-        cached = r.get(_OFFERS_CACHE_KEY)
-        if cached:
-            offers = [CloreOffer(**o) for o in json.loads(cached)]
-    except Exception:
-        pass  # Redis unavailable — fall through to live API
+    # Attempt to reuse raw cache (avoids hitting the Clore SDK if only settings changed)
+    raw_offers: list[CloreOffer] | None = None
+    if not refresh:
+        try:
+            r = _get_redis()
+            raw_data = r.get(_RAW_KEY)
+            if raw_data:
+                raw_offers = [CloreOffer(**o) for o in json.loads(raw_data)]
+        except Exception:
+            pass
 
-    if offers is None:
+    # Fetch live from Clore SDK when cache is cold or refresh was requested
+    if raw_offers is None:
         try:
             with CloreClient(api_key) as client:
-                offers = client.list_offers()
+                raw_offers = client.list_offers()
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         try:
             r = _get_redis()
-            r.setex(_OFFERS_CACHE_KEY, _OFFERS_TTL, json.dumps([o.model_dump() for o in offers]))
+            r.setex(_RAW_KEY, _CACHE_TTL, json.dumps([o.model_dump() for o in raw_offers]))
         except Exception:
-            pass  # Non-fatal if caching fails
+            pass
 
-    # Apply filters against the full list
-    if gpu_name:
-        offers = [o for o in offers if gpu_name.lower() in o.gpu_name.lower()]
-    if min_vram_gb:
-        offers = [o for o in offers if o.vram_gb >= min_vram_gb]
-    if min_disk_gb:
-        offers = [o for o in offers if (o.disk_gb or 0) >= min_disk_gb]
-    if min_pcie_version:
-        offers = [o for o in offers if o.pcie_version is not None and int(o.pcie_version) >= min_pcie_version]
-    if min_pcie_width:
-        offers = [o for o in offers if (o.pcie_width or 0) >= min_pcie_width]
+    # Apply global quality-bar filters
+    clore_filters = load_clore_filters(db)
+    filtered_offers, applied = apply_filters(raw_offers, clore_filters)
 
-    return {"offers": [o.model_dump() for o in offers]}
+    meta = {
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "total_raw": len(raw_offers),
+        "total_filtered": len(filtered_offers),
+        "applied_filters": applied,
+        "from_cache": False,
+    }
+
+    filtered_dicts = [o.model_dump() for o in filtered_offers]
+    try:
+        r = _get_redis()
+        r.setex(_FILTERED_KEY, _CACHE_TTL, json.dumps(filtered_dicts))
+        r.setex(_META_KEY, _CACHE_TTL, json.dumps(meta))
+    except Exception:
+        pass
+
+    return {"offers": filtered_dicts, "meta": meta}
 
 
 @router.get("/rentals")
