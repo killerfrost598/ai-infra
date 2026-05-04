@@ -22,13 +22,13 @@ const schema = z.object({
   name: z.string().min(1),
   hf_repo: z.string().optional().nullable(),
   hf_url: z.string().optional().nullable(),
-  bits_per_weight: z.coerce.number().positive(),
-  disk_size_gb: z.coerce.number().positive(),
-  vram_weights_gb: z.coerce.number().positive(),
-  quality_score: z.coerce.number().min(0).max(1),
+  bits_per_weight: z.number().positive(),
+  disk_size_gb: z.number().positive(),
+  vram_weights_gb: z.number().positive(),
+  quality_score: z.number().min(0).max(1),
   cc_min: z.string().optional().nullable(),
-  arch_vllm: z.boolean().default(true),
-  arch_sglang: z.boolean().default(true),
+  arch_vllm: z.boolean(),
+  arch_sglang: z.boolean(),
   notes: z.string().optional().nullable(),
 });
 
@@ -105,18 +105,18 @@ export function QuantEditDialog({ model, quant, open, onOpenChange, onSaved }: P
           </Field>
           <div className="grid grid-cols-3 gap-2">
             <Field label="Bits/weight" error={form.formState.errors.bits_per_weight?.message}>
-              <Input {...form.register("bits_per_weight")} type="number" step="0.5" placeholder="16" />
+              <Input {...form.register("bits_per_weight", { valueAsNumber: true })} type="number" step="0.5" placeholder="16" />
             </Field>
             <Field label="Disk (GB)" error={form.formState.errors.disk_size_gb?.message}>
-              <Input {...form.register("disk_size_gb")} type="number" step="0.1" placeholder="8.4" />
+              <Input {...form.register("disk_size_gb", { valueAsNumber: true })} type="number" step="0.1" placeholder="8.4" />
             </Field>
             <Field label="VRAM (GB)" error={form.formState.errors.vram_weights_gb?.message}>
-              <Input {...form.register("vram_weights_gb")} type="number" step="0.1" placeholder="8.0" />
+              <Input {...form.register("vram_weights_gb", { valueAsNumber: true })} type="number" step="0.1" placeholder="8.0" />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Quality score (0–1)" error={form.formState.errors.quality_score?.message}>
-              <Input {...form.register("quality_score")} type="number" step="0.01" min="0" max="1" placeholder="1.0" />
+              <Input {...form.register("quality_score", { valueAsNumber: true })} type="number" step="0.01" min="0" max="1" placeholder="1.0" />
             </Field>
             <Field label="Min compute cap.">
               <Input {...form.register("cc_min")} placeholder="8.0" />

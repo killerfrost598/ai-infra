@@ -11,24 +11,28 @@ import { api } from "@/lib/api";
 import type { FeasibilityReport, FeasibilityCheck, RecommendedPlaybook } from "@/lib/types";
 import { ServerInfoModal } from "@/components/clore/ServerInfoModal";
 
-function useInView(): [React.RefObject<HTMLDivElement | null>, boolean] {
-  const ref = useRef<HTMLDivElement | null>(null);
+function useInView(): [React.RefCallback<HTMLDivElement>, boolean] {
+  const observerRef = useRef<IntersectionObserver | null>(null);
   const [inView, setInView] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
+
+  const ref: React.RefCallback<HTMLDivElement> = (el) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
     if (!el) return;
-    const observer = new IntersectionObserver(
+    observerRef.current = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
           setInView(true);
-          observer.disconnect();
+          observerRef.current?.disconnect();
         }
       },
       { threshold: 0.1 },
     );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+    observerRef.current.observe(el);
+  };
+
   return [ref, inView];
 }
 

@@ -22,15 +22,15 @@ const schema = z.object({
   model_key: z.string().min(1),
   name: z.string().min(1),
   family: z.string().min(1),
-  param_count_b: z.coerce.number().positive(),
+  param_count_b: z.number().positive(),
   hf_url: z.string().optional().nullable(),
   hf_repo: z.string().optional().nullable(),
-  max_context_k: z.coerce.number().int().positive(),
-  use_case: z.string().default("chat"),
-  is_reasoning: z.boolean().default(false),
-  supports_tools: z.boolean().default(false),
-  is_code_model: z.boolean().default(false),
-  is_moe: z.boolean().default(false),
+  max_context_k: z.number().int().positive(),
+  use_case: z.string().min(1),
+  is_reasoning: z.boolean(),
+  supports_tools: z.boolean(),
+  is_code_model: z.boolean(),
+  is_moe: z.boolean(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -109,10 +109,10 @@ export function ModelEditDialog({ model, open, onOpenChange, onSaved }: Props) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Parameters (B)" error={form.formState.errors.param_count_b?.message}>
-              <Input {...form.register("param_count_b")} type="number" step="0.1" placeholder="4.0" />
+              <Input {...form.register("param_count_b", { valueAsNumber: true })} type="number" step="0.1" placeholder="4.0" />
             </Field>
             <Field label="Max context (k tokens)" error={form.formState.errors.max_context_k?.message}>
-              <Input {...form.register("max_context_k")} type="number" placeholder="128" />
+              <Input {...form.register("max_context_k", { valueAsNumber: true })} type="number" placeholder="128" />
             </Field>
           </div>
           <Field label="HuggingFace URL">
