@@ -53,11 +53,14 @@ DB migrations run automatically on backend startup (`alembic upgrade head`).
 ## Features
 
 - **Clore.ai marketplace** — browse ~2,300 GPU servers, filter by GPU model, VRAM, PCIe, price; rent with SSH key or password; currency auto-filtered to what each server accepts
+- **GPU Finder** — pick a model + quantization + engine, see ranked servers with VRAM fit, compat chips, and predicted throughput
 - **Interactive SSH terminal** — xterm.js PTY sessions with command history, exit codes, and duration tracking
+- **Lab page** — live terminal + parsed command history + one-click "convert session to playbook" via Claude Haiku
 - **Playbooks** — register a git repo + script, run it on any server via SSH, stream live logs
 - **Task runs** — all async operations logged with SSE live streaming
-- **Inference benchmarks** — track tokens/s by GPU model, integrated into marketplace offer cards
-- **Lab page** — live terminal + parsed command history + one-click "convert session to playbook" via Claude Haiku
+- **Inference benchmarks** — tokens/s leaderboard by GPU model, integrated into marketplace offer cards
+- **Compat drift control** — weekly PyPI scrape for vLLM/SGLang updates; operator approves before stack_matrix update
+- **Multi-GPU TP planning** — NVLink-aware tensor-parallel recommendations for multi-GPU hosts
 
 ---
 
@@ -66,11 +69,10 @@ DB migrations run automatically on backend startup (`alembic upgrade head`).
 | Prefix | Operations |
 |---|---|
 | `GET /health` | health check |
-| `/servers` | CRUD + SSH test |
+| `/servers` | CRUD + SSH test + reprobe + snapshot |
 | `/model-deployments` | CRUD |
-| `/playbooks` | CRUD + `POST /{id}/run` |
+| `/playbooks` | CRUD + `POST /{id}/run` + `GET /recommended` |
 | `/task-runs` | list + get + SSE log stream |
-| `/api-keys` | list + create + revoke |
 | `/settings` | get (presence flags only) + upsert |
 | `/clore/offers` | list with filters + Redis cache |
 | `/clore/rentals` | list + create (rent+register) + terminate + dry-run |
@@ -79,7 +81,9 @@ DB migrations run automatically on backend startup (`alembic upgrade head`).
 | `WS /sessions/{id}/pty` | interactive PTY terminal |
 | `/sessions/{id}/commands/summary` | parsed command history |
 | `/sessions/{id}/to-playbook` | convert session to playbook via Claude Haiku |
-| `/benchmarks` | CRUD + `GET /gpu/{model}` |
+| `/benchmarks` | CRUD + `GET /gpu/{model}` + `GET /leaderboard` |
+| `POST /feasibility` | 12-check compat report (predicted or verified) |
+| `/compat/candidates` | list scrape runs + approve candidate |
 
 ---
 
@@ -89,8 +93,8 @@ DB migrations run automatically on backend startup (`alembic upgrade head`).
 ai-infra/
 ├── docker-compose.yml
 ├── .env.example
-├── ARCHITECTURE.md     # system design, ADRs, data flow
-├── DEVELOPMENT.md      # roadmap, conventions, bugs, SDK notes
+├── DEVELOPMENT.md      # ADRs, architecture, conventions, bugs, SDK notes
+├── ROADMAP.md          # completed phases + upcoming work
 ├── README.md
 ├── backend/
 │   ├── app/
