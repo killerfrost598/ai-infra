@@ -229,9 +229,11 @@ export interface CloreOffer {
   id: string;
   gpu_name: string;
   gpu_count: number;
+  gpu_array: string[];
   vram_gb: number;
   cuda_version: string | null;
   price_per_day: number;
+  spot_price_per_day: number | null;
   upload_mbps: number | null;
   download_mbps: number | null;
   cpu_model: string | null;
@@ -240,6 +242,8 @@ export interface CloreOffer {
   pcie_version: string | null;
   pcie_width: number | null;
   allowed_coins: string[];
+  score: number | null;
+  mrl: number | null;
 }
 
 export interface CloreRental {

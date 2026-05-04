@@ -12,8 +12,8 @@
 | Phase 6 — Compat drift + multi-GPU TP | ✅ shipped |
 | Phase 7 — Doc cleanup | ✅ shipped |
 | Phase 8 — `/find` feasibility pagination | ✅ shipped |
-| Phase 10 — Reusable `ServerInfoModal` | 🔜 next |
-| Phase 9 — Model knowledge base + CRUD + HF auto-import | 🔜 |
+| Phase 10 — Reusable `ServerInfoModal` | ✅ shipped |
+| Phase 9 — Model knowledge base + CRUD + HF auto-import | 🔜 next |
 
 > **Scoping note (2026-05-04):** Deploy / infer / playbook execution paths shipped in phases 4–5 are kept as reference implementations only. Active focus is the **GPU + model knowledge base**: capturing what each diverse GPU can run, which models work where, and how to operate them.
 

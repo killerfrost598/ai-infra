@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import type { FeasibilityReport, FeasibilityCheck, RecommendedPlaybook } from "@/lib/types";
+import { ServerInfoModal } from "@/components/clore/ServerInfoModal";
 
 function useInView(): [React.RefObject<HTMLDivElement | null>, boolean] {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -213,6 +214,7 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
     topEngine.meetsVramMin;
 
   const [cardRef, inView] = useInView();
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   return (
     <Card className="overflow-hidden" ref={cardRef}>
@@ -325,6 +327,9 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
           <Button variant="ghost" size="sm" className="text-xs" onClick={onAdvise}>
             Advisor →
           </Button>
+          <Button variant="ghost" size="sm" className="text-xs" onClick={() => setDetailsOpen(true)}>
+            Details
+          </Button>
           <div className="ml-auto">
             <Button size="sm" className="text-xs" onClick={onRent}>
               Rent
@@ -332,6 +337,8 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
           </div>
         </div>
       </div>
+
+      <ServerInfoModal offer={offer} open={detailsOpen} onOpenChange={setDetailsOpen} />
     </Card>
   );
 }

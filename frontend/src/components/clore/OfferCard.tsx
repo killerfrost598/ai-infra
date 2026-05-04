@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { CloreOffer, InferenceBenchmark } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ServerInfoModal } from "./ServerInfoModal";
 
 export function fmtSpeed(mbps: number | null | undefined): string {
   if (mbps == null) return "—";
@@ -28,6 +29,7 @@ interface Props {
 
 export function OfferCard({ offer, benchmarks, onRent, onAdvise }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const pcieColor = pcieBadgeColor(offer.pcie_version);
   const pcieWidthColor =
@@ -80,10 +82,15 @@ export function OfferCard({ offer, benchmarks, onRent, onAdvise }: Props) {
         <Button variant="ghost" size="sm" onClick={() => setExpanded((x) => !x)} title="Show full specs">
           {expanded ? "Less" : "More"}
         </Button>
+        <Button variant="ghost" size="sm" onClick={() => setDetailsOpen(true)} title="Full server details">
+          Details
+        </Button>
         <div className="ml-auto">
           <Button size="sm" onClick={onRent}>Rent</Button>
         </div>
       </div>
+
+      <ServerInfoModal offer={offer} open={detailsOpen} onOpenChange={setDetailsOpen} />
 
       {expanded && (
         <div className="border-t border-border px-6 pb-4 pt-3 space-y-3">

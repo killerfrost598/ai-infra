@@ -63,9 +63,11 @@ class CloreOffer(BaseModel):
     id: str
     gpu_name: str
     gpu_count: int = 1
+    gpu_array: list[str] = []        # raw per-GPU strings (non-empty for mixed rigs)
     vram_gb: int
     cuda_version: str | None = None
     price_per_day: float
+    spot_price_per_day: float | None = None
     # Network
     upload_mbps: float | None = None
     download_mbps: float | None = None
@@ -76,8 +78,10 @@ class CloreOffer(BaseModel):
     # PCIe (critical for AI inference GPU ↔ host bandwidth)
     pcie_version: str | None = None
     pcie_width: int | None = None
-    # Currencies this server accepts — use before calling rent_server()
+    # Marketplace metadata
     allowed_coins: list[str] = []
+    score: float | None = None       # server reliability / uptime score
+    mrl: int | None = None           # minimum rental length in hours
 
 
 class CloreBalance(BaseModel):
@@ -136,13 +140,40 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
 
     allowed_coins = list(getattr(s, "allowed_coins", None) or [])
 
+    # GPU array (non-empty for mixed rigs)
+    raw_gpu_array = getattr(s, "gpu_array", None)
+    gpu_array = list(raw_gpu_array) if raw_gpu_array else []
+
+    # Spot price
+    spot_price_per_day = None
+    price_obj = getattr(s, "price", None)
+    if price_obj is not None:
+        usd_obj = getattr(price_obj, "usd", None)
+        if usd_obj is not None:
+            spot_val = getattr(usd_obj, "spot", None)
+            if spot_val is not None:
+                v = _to_float(spot_val)
+                spot_price_per_day = v if v > 0 else None
+
+    # Score and MRL
+    score_raw = getattr(s, "score", None)
+    score = _to_float(score_raw) if score_raw is not None else None
+    score = score if score and score > 0 else None
+
+    mrl_raw = getattr(s, "mrl", None)
+    if mrl_raw is None and specs is not None:
+        mrl_raw = getattr(specs, "mrl", None)
+    mrl = int(mrl_raw) if mrl_raw is not None else None
+
     return CloreOffer(
         id=str(s.id),
         gpu_name=gpu_name,
         gpu_count=gpu_count,
+        gpu_array=gpu_array,
         vram_gb=vram_gb,
         cuda_version=cuda_version,
         price_per_day=price_per_day,
+        spot_price_per_day=spot_price_per_day,
         upload_mbps=upload_mbps,
         download_mbps=download_mbps,
         cpu_model=cpu_model,
@@ -151,6 +182,8 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
         pcie_version=pcie_version,
         pcie_width=pcie_width,
         allowed_coins=allowed_coins,
+        score=score,
+        mrl=mrl,
     )
 
 
