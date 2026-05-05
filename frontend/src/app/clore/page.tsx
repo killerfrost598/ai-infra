@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
+import { toast } from "sonner";
 import {
   useCloreOffers, useRefreshCloreOffers, useRentals, useServers, useBenchmarks,
   useTerminateRental, useCreateSession,
@@ -16,6 +17,8 @@ import { CacheStatusBar } from "@/components/clore/CacheStatusBar";
 import { OfferCard, fmtSpeed } from "@/components/clore/OfferCard";
 import { RentDialog } from "@/components/clore/RentDialog";
 import { RegisterRentalForm } from "@/components/clore/RegisterRentalForm";
+import { PageHeader } from "@/components/layouts/page-header";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
 const ModelAdvisorSheet = dynamic(
   () => import("@/components/advisor/ModelAdvisorSheet").then((m) => m.ModelAdvisorSheet),
@@ -32,27 +35,36 @@ const TAB_LABELS: Record<Tab, string> = {
   rentals: "Rentals",
 };
 
+const TAB_DESCRIPTIONS: Record<Tab, string> = {
+  marketplace: "Filter and rent individual offers with benchmark context.",
+  "gpu-groups": "Compare grouped GPUs by price bands and hardware traits.",
+  rentals: "Manage active rentals, registration state, and SSH entry points.",
+};
+
 export default function ClorePage() {
   const [tab, setTab] = useState<Tab>("marketplace");
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Clore.ai</h1>
-        <div className="flex rounded-lg border border-border bg-muted/40 p-0.5 text-sm">
-          {(["marketplace", "gpu-groups", "rentals"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded-md px-4 py-1.5 transition-colors ${
-                tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {TAB_LABELS[t]}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title="Clore.ai"
+        description={TAB_DESCRIPTIONS[tab]}
+        actions={(
+          <div className="flex flex-wrap rounded-lg border border-border bg-muted/40 p-0.5 text-sm">
+            {(["marketplace", "gpu-groups", "rentals"] as Tab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`rounded-md px-3 py-1.5 transition-colors sm:px-4 ${
+                  tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {TAB_LABELS[t]}
+              </button>
+            ))}
+          </div>
+        )}
+      />
 
       {tab === "marketplace" && <MarketplaceTab />}
       {tab === "gpu-groups"  && <GpuGroupsTab />}
@@ -97,9 +109,30 @@ function applyFilters(offers: CloreOffer[], f: Filters): CloreOffer[] {
 // ── Marketplace tab ───────────────────────────────────────────────────────────
 
 type BenchmarkMap = Record<string, InferenceBenchmark[]>;
+type MarketplaceSortKey = "price" | "vram" | "upload" | "disk";
+
+const SORT_LABELS: Record<MarketplaceSortKey, string> = {
+  price: "Price", vram: "VRAM", upload: "Upload", disk: "Disk",
+};
+const SORT_DEFAULT_ASC: Record<MarketplaceSortKey, boolean> = {
+  price: true, vram: false, upload: false, disk: false,
+};
+
+function sortOffers(offers: CloreOffer[], key: MarketplaceSortKey, asc: boolean): CloreOffer[] {
+  return [...offers].sort((a, b) => {
+    let diff = 0;
+    if (key === "price") diff = a.price_per_day - b.price_per_day;
+    else if (key === "vram") diff = b.vram_gb - a.vram_gb;
+    else if (key === "upload") diff = (b.upload_mbps ?? 0) - (a.upload_mbps ?? 0);
+    else if (key === "disk") diff = (b.disk_gb ?? 0) - (a.disk_gb ?? 0);
+    return asc ? diff : -diff;
+  });
+}
 
 function MarketplaceTab() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [sortKey, setSortKey] = useState<MarketplaceSortKey>("price");
+  const [sortAsc, setSortAsc] = useState(true);
   const [dialogOffer, setDialogOffer] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
 
@@ -117,10 +150,18 @@ function MarketplaceTab() {
     return map;
   }, [benchData]);
 
-  const filtered = useMemo(() => applyFilters(offers, filters), [offers, filters]);
+  const filtered = useMemo(
+    () => sortOffers(applyFilters(offers, filters), sortKey, sortAsc),
+    [offers, filters, sortKey, sortAsc],
+  );
 
   function setFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function toggleSort(key: MarketplaceSortKey) {
+    if (sortKey === key) setSortAsc((v) => !v);
+    else { setSortKey(key); setSortAsc(SORT_DEFAULT_ASC[key]); }
   }
 
   const hasActiveFilters =
@@ -167,6 +208,15 @@ function MarketplaceTab() {
           <FilterField label="Min download (Mbps)">
             <NumInput value={filters.minDownload} onChange={(v) => setFilter("minDownload", v)} min={0} step={100} />
           </FilterField>
+        </div>
+        <div className="flex items-center gap-1 pt-1 border-t border-border/40">
+          <span className="text-[10px] text-muted-foreground/50 mr-1 uppercase tracking-wide">Sort</span>
+          {(Object.keys(SORT_LABELS) as MarketplaceSortKey[]).map((k) => (
+            <button key={k} onClick={() => toggleSort(k)}
+              className={`rounded px-2.5 py-1 text-xs transition-colors ${sortKey === k ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+              {SORT_LABELS[k]}{sortKey === k ? (sortAsc ? " ↑" : " ↓") : ""}
+            </button>
+          ))}
         </div>
       </Card>
 
@@ -360,7 +410,11 @@ function GpuGroupCard({ group, expanded, onToggle, onRent, onAdvise }: {
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 hover:bg-muted/10 transition-colors">
-        <button onClick={() => onAdvise(group.offers[0])} className="flex flex-1 min-w-0 items-center gap-3 text-left">
+        <button
+          onClick={() => onAdvise(group.offers[0])}
+          className="flex flex-1 min-w-0 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`Open model advisor for ${group.gpu_name}`}
+        >
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <p className="font-medium">{group.gpu_name}</p>
@@ -373,7 +427,12 @@ function GpuGroupCard({ group, expanded, onToggle, onRent, onAdvise }: {
             </p>
           </div>
         </button>
-        <button onClick={onToggle} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" title="Show offers">
+        <button
+          onClick={onToggle}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title="Show offers"
+          aria-label={`${expanded ? "Hide" : "Show"} offers for ${group.gpu_name}`}
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
             strokeLinecap="round" strokeLinejoin="round"
             className={`transition-transform ${expanded ? "rotate-180" : ""}`}>
@@ -469,6 +528,7 @@ function RentalsTab() {
 
   const [startingSSH, setStartingSSH] = useState<string | null>(null);
   const [registeringId, setRegisteringId] = useState<string | null>(null);
+  const [terminateTarget, setTerminateTarget] = useState<CloreRental | null>(null);
 
   const serverByExtId = useMemo(
     () => new Map(servers.map((s) => [s.external_server_id, s])),
@@ -476,8 +536,8 @@ function RentalsTab() {
   );
 
   function handleTerminate(id: string) {
-    if (!confirm("Terminate this rental? The server will be stopped and all data lost.")) return;
-    terminateRental.mutate(id, { onError: (e) => alert(e.message) });
+    const target = rentals.find((r) => r.id === id) ?? null;
+    setTerminateTarget(target);
   }
 
   async function handleStartSSH(serverId: string) {
@@ -487,7 +547,7 @@ function RentalsTab() {
       sessionStorage.setItem("lab_session_id", session.id);
       router.push("/lab");
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "Failed to start SSH session");
+      toast.error(e instanceof Error ? e.message : "Failed to start SSH session");
       setStartingSSH(null);
     }
   }
@@ -556,6 +616,23 @@ function RentalsTab() {
           );
         })}
       </div>
+
+      <ConfirmActionDialog
+        open={!!terminateTarget}
+        onOpenChange={(open) => {
+          if (!open) setTerminateTarget(null);
+        }}
+        title={terminateTarget ? `Terminate rental on ${terminateTarget.gpu_name}?` : "Terminate rental?"}
+        description="The server will be stopped and rental data will be lost."
+        confirmLabel="Terminate Rental"
+        onConfirm={() => {
+          if (!terminateTarget) return;
+          terminateRental.mutate(terminateTarget.id, {
+            onError: (e) => toast.error(e.message),
+            onSettled: () => setTerminateTarget(null),
+          });
+        }}
+      />
     </>
   );
 }

@@ -7,6 +7,8 @@ import { api } from "@/lib/api";
 import type { ScrapeRun, CompatCandidate, ApproveCandidate } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/layouts/page-header";
+import { EmptyState, ErrorState, LoadingState } from "@/components/layouts/page-states";
 
 const STATUS_ICON: Record<string, React.ReactNode> = {
   SUCCESS: <CheckCircle className="h-4 w-4 text-emerald-500" />,
@@ -136,7 +138,7 @@ function CandidateRow({
 
 export default function CompatCandidatesPage() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery<ScrapeRun[]>({
+  const { data, isLoading, error } = useQuery<ScrapeRun[]>({
     queryKey: ["compat", "scrape-runs"],
     queryFn: () => api.compat.scrapeRuns(),
     staleTime: 60_000,
@@ -152,27 +154,26 @@ export default function CompatCandidatesPage() {
   const latestRun = data?.[0];
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Compat Drift</h1>
-          <p className="text-sm text-muted-foreground">Weekly version scrape · approve to update StackMatrix</p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5 text-xs"
-          disabled={trigger.isPending}
-          onClick={() => trigger.mutate()}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${trigger.isPending ? "animate-spin" : ""}`} />
-          Run now
-        </Button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Compat Drift"
+        description="Review weekly version scrape candidates and approve StackMatrix updates."
+        actions={(
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 text-xs"
+            disabled={trigger.isPending}
+            onClick={() => trigger.mutate()}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${trigger.isPending ? "animate-spin" : ""}`} />
+            Run now
+          </Button>
+        )}
+      />
 
-      {isLoading && (
-        <p className="text-sm text-muted-foreground/60">Loading…</p>
-      )}
+      {isLoading && <LoadingState />}
+      {error && <ErrorState message={error instanceof Error ? error.message : "Failed to load compatibility runs."} />}
 
       {latestRun && (
         <Card>
@@ -226,10 +227,12 @@ export default function CompatCandidatesPage() {
         </div>
       )}
 
-      {!isLoading && !latestRun && (
-        <Card className="p-8 text-center">
-          <p className="text-sm text-muted-foreground">No scrape runs yet. Click "Run now" to check for updates.</p>
-        </Card>
+      {!isLoading && !error && !latestRun && (
+        <EmptyState
+          title="No scrape runs yet."
+          description="Click “Run now” to check for compatibility updates."
+          className="py-8"
+        />
       )}
     </div>
   );

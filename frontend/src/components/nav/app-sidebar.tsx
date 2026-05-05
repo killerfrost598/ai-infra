@@ -6,6 +6,7 @@ import {
   BarChart2,
   BookOpen,
   BookOpenText,
+  Brain,
   FlaskConical,
   LayoutDashboard,
   Layers,
@@ -43,17 +44,17 @@ const NAV_ITEMS = [
   { href: "/playbooks",              label: "Playbooks",   icon: BookOpen },
   { href: "/clore",                  label: "Clore",       icon: Monitor },
   { href: "/find",                   label: "GPU Finder",  icon: ScanSearch },
+  { href: "/models",                 label: "Models",      icon: Brain },
   { href: "/benchmarks",             label: "Benchmarks",  icon: BarChart2 },
   { href: "/lab",                    label: "Lab",         icon: FlaskConical },
   { href: "/compat/candidates",      label: "Compat",      icon: ShieldCheck },
-  { href: "/docs",                   label: "Docs",        icon: BookOpenText },
+  { href: "/docs",                   label: "Guides",      icon: BookOpenText },
   { href: "/settings",               label: "Settings",    icon: Settings },
 ]
 
 function NavItems() {
   const pathname = usePathname()
-  const { state } = useSidebar()
-  const isExpanded = state === "expanded"
+  const { isMobile, setOpen } = useSidebar()
 
   function isActive(href: string) {
     if (href === "/") return pathname === "/"
@@ -67,7 +68,12 @@ function NavItems() {
         return (
           <SidebarMenuItem key={href}>
             <SidebarMenuButton asChild isActive={active} tooltip={label}>
-              <Link href={href}>
+              <Link
+                href={href}
+                onClick={() => {
+                  if (isMobile) setOpen(false)
+                }}
+              >
                 <Icon />
                 <span>{label}</span>
               </Link>

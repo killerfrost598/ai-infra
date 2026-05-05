@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { keys, useServers, useRentals, useCreateServer, useDeleteServer, useCreateSession } from "@/lib/queries";
 import type { CloreRental, Server, ServerCreate, SSHTestResult } from "@/lib/types";
@@ -14,6 +15,9 @@ import { PtyTerminal } from "@/components/PtyTerminal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layouts/page-header";
+import { EmptyState, ErrorState, LoadingState } from "@/components/layouts/page-states";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +48,7 @@ export default function ServersPage() {
   const [authMode, setAuthMode] = useState<"password" | "key">("password");
   const [formError, setFormError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Server | null>(null);
   const [sshPrivateKey, setSshPrivateKey] = useState("");
 
   const form = useForm<ServerFormValues>({
@@ -110,7 +115,7 @@ export default function ServersPage() {
       const session = await createSession.mutateAsync({ server_id: serverId });
       setTerminalSession({ id: session.id, serverName });
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "Failed to start SSH session");
+      toast.error(e instanceof Error ? e.message : "Failed to start SSH session");
     } finally {
       setStartingSSH(null);
     }
@@ -138,27 +143,34 @@ export default function ServersPage() {
   });
 
   function handleDelete(server: Server) {
-    if (!confirm(`Delete server ${server.hostname}? This cannot be undone.`)) return;
-    setDeletingId(server.id);
-    deleteServer.mutate(server.id, {
-      onSettled: () => setDeletingId(null),
+    setDeleteTarget(server);
+  }
+
+  function confirmDeleteServer() {
+    if (!deleteTarget) return;
+    setDeletingId(deleteTarget.id);
+    deleteServer.mutate(deleteTarget.id, {
+      onSettled: () => {
+        setDeletingId(null);
+        setDeleteTarget(null);
+      },
     });
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Servers</h1>
-          {!isLoading && <p className="mt-0.5 text-sm text-muted-foreground">{total} registered</p>}
-        </div>
-        <Button onClick={openForm}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Add Server
-        </Button>
-      </div>
+      <PageHeader
+        title="Servers"
+        description={!isLoading ? `${total} registered` : "Register external or rented servers and manage SSH access."}
+        actions={(
+          <Button onClick={openForm}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add Server
+          </Button>
+        )}
+      />
 
       {showForm && (
         <Card className="overflow-hidden">
@@ -243,28 +255,13 @@ export default function ServersPage() {
         </Card>
       )}
 
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading…
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
+      {isLoading && <LoadingState />}
+      {error && <ErrorState message={error.message} />}
       {!isLoading && !error && servers.length === 0 && (
-        <Card className="flex flex-col items-center gap-3 py-12 text-center">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted/40 text-muted-foreground">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" />
-              <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-            </svg>
-          </div>
-          <p className="text-sm text-muted-foreground">No servers registered yet.</p>
-          <Button variant="outline" size="sm" onClick={openForm}>Register your first server</Button>
-        </Card>
+        <EmptyState
+          title="No servers registered yet."
+          action={<Button variant="outline" size="sm" onClick={openForm}>Register your first server</Button>}
+        />
       )}
 
       <div className="space-y-2">
@@ -289,7 +286,7 @@ export default function ServersPage() {
                 </div>
               </Link>
 
-              <div className="flex shrink-0 items-center gap-2 transition-opacity">
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 transition-opacity sm:flex-nowrap">
                 <Button
                   variant="outline"
                   size="sm"
@@ -297,7 +294,7 @@ export default function ServersPage() {
                   disabled={s.status === "TERMINATED"}
                   onClick={() => handleTestSSH(s.id)}
                 >
-                  {s.status === "PROVISIONING" ? "Re-check" : "Test"}
+                  {s.status === "PROVISIONING" ? "Re-check SSH" : "Test SSH"}
                 </Button>
                 <Button
                   variant="outline"
@@ -306,11 +303,8 @@ export default function ServersPage() {
                   disabled={s.status === "TERMINATED"}
                   onClick={() => handleStartSSH(s.id, s.hostname)}
                 >
-                  SSH
+                  Open Terminal
                 </Button>
-                <Link href={`/servers/${s.id}`}>
-                  <Button variant="ghost" size="sm">Open →</Button>
-                </Link>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -332,7 +326,8 @@ export default function ServersPage() {
                   </span>
                   <button
                     onClick={() => setExpandedTestId(null)}
-                    className="text-xs text-muted-foreground hover:text-foreground"
+                    className="text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Close SSH connectivity details"
                   >
                     ×
                   </button>
@@ -426,6 +421,17 @@ export default function ServersPage() {
           ))}
         </div>
       )}
+
+      <ConfirmActionDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={deleteTarget ? `Delete server ${deleteTarget.hostname}?` : "Delete server?"}
+        description="This removes the server record from the platform. This action cannot be undone."
+        confirmLabel="Delete Server"
+        onConfirm={confirmDeleteServer}
+      />
     </div>
   );
 }

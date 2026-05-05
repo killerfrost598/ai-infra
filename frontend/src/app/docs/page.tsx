@@ -30,25 +30,33 @@ const CARDS = [
 
 export default function DocsIndexPage() {
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
-      {CARDS.map(({ href, icon: Icon, title, description, cta }) => (
-        <Link
-          key={href}
-          href={href}
-          className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-6 transition-colors hover:border-indigo-500/50 hover:bg-muted/30"
-        >
-          <div className="flex size-10 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-500">
-            <Icon className="size-5" />
-          </div>
-          <div className="flex-1 space-y-2">
-            <h2 className="font-semibold">{title}</h2>
-            <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
-          </div>
-          <span className="text-sm text-indigo-400 group-hover:text-indigo-300 transition-colors">
-            {cta}
-          </span>
-        </Link>
-      ))}
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Guides &amp; References</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Deep-dive docs for sizing, engine choice, and runtime tuning.
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        {CARDS.map(({ href, icon: Icon, title, description, cta }) => (
+          <Link
+            key={href}
+            href={href}
+            className="group flex flex-col gap-4 rounded-xl border border-border bg-card p-6 transition-colors hover:border-indigo-500/50 hover:bg-muted/30"
+          >
+            <div className="flex size-10 items-center justify-center rounded-lg bg-indigo-600/10 text-indigo-500">
+              <Icon className="size-5" />
+            </div>
+            <div className="flex-1 space-y-2">
+              <h2 className="font-semibold">{title}</h2>
+              <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
+            </div>
+            <span className="text-sm text-indigo-400 group-hover:text-indigo-300 transition-colors">
+              {cta}
+            </span>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

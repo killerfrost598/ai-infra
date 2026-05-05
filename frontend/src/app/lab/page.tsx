@@ -295,21 +295,30 @@ export default function LabPage() {
           {tabs.map((tab) => (
             <div
               key={tab.tabId}
+              role="button"
+              tabIndex={0}
               onClick={() => setActiveTabId(tab.tabId)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveTabId(tab.tabId);
+                }
+              }}
               className={`flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors ${
                 tab.tabId === activeTabId
                   ? "border-primary/60 bg-primary/10 text-foreground"
                   : "border-border/70 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              }`}
+              } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
             >
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                 tab.status === "ACTIVE" ? "bg-emerald-500" : "bg-muted-foreground/30"
               }`} />
               <span className="max-w-[120px] truncate">{tab.label}</span>
               <button
-                className="ml-0.5 rounded px-0.5 opacity-50 transition-all hover:bg-destructive/20 hover:text-destructive hover:opacity-100"
+                className="ml-0.5 rounded px-0.5 opacity-50 transition-all hover:bg-destructive/20 hover:text-destructive hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={(e) => { e.stopPropagation(); confirmCloseTab(tab.tabId); }}
                 title="Close tab"
+                aria-label={`Close ${tab.label} tab`}
               >
                 ×
               </button>
@@ -328,6 +337,12 @@ export default function LabPage() {
 
         {/* Right actions */}
         <div className="flex shrink-0 items-center gap-2">
+          {activeTab && (
+            <div className="hidden items-center gap-2 text-[11px] text-muted-foreground lg:flex">
+              <span className={`h-1.5 w-1.5 rounded-full ${activeTab.status === "ACTIVE" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+              <span className="max-w-[180px] truncate">{activeTab.label}</span>
+            </div>
+          )}
           {activeTab?.status === "ACTIVE" && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -368,7 +383,7 @@ export default function LabPage() {
               onClick={() => setLogsOpen((v) => !v)}
             >
               <History className="h-3 w-3" />
-              {logsOpen ? "Hide Logs" : "Logs"}
+              {logsOpen ? "Hide Logs" : "Logs Panel"}
             </Button>
           )}
           <Button
@@ -377,7 +392,7 @@ export default function LabPage() {
             className="h-7 text-xs"
             onClick={() => { setShowHistory(true); loadHistory(); }}
           >
-            History
+            Session History
           </Button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Info } from "lucide-react";
 import type { CloreOffer, InferenceBenchmark } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -80,10 +81,18 @@ export function OfferCard({ offer, benchmarks, onRent, onAdvise }: Props) {
 
       <div className="flex items-center gap-2 border-t border-border/40 px-6 py-2">
         <Button variant="ghost" size="sm" onClick={() => setExpanded((x) => !x)} title="Show full specs">
-          {expanded ? "Less" : "More"}
+          {expanded ? "Hide specs" : "Specs"}
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => setDetailsOpen(true)} title="Full server details">
-          Details
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDetailsOpen(true)}
+          className="gap-1.5 text-xs"
+          title={`View details for ${offer.gpu_name}`}
+          aria-label={`View details for ${offer.gpu_name}`}
+        >
+          <Info className="size-3.5" />
+          View details
         </Button>
         <div className="ml-auto">
           <Button size="sm" onClick={onRent}>Rent</Button>

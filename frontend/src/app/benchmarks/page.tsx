@@ -8,6 +8,9 @@ import { DataTable } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layouts/page-header";
+import { ErrorState, LoadingState } from "@/components/layouts/page-states";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
 const EMPTY_FORM: InferenceBenchmarkCreate = {
   gpu_model: "", gpu_vram_gb: null, model_name: "", model_family: null,
@@ -31,6 +34,7 @@ export default function BenchmarksPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<InferenceBenchmarkCreate>(EMPTY_FORM);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<InferenceBenchmark | null>(null);
 
   function setField<K extends keyof InferenceBenchmarkCreate>(key: K, value: InferenceBenchmarkCreate[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -145,10 +149,7 @@ export default function BenchmarksPage() {
       header: "",
       cell: ({ row }) => (
         <button
-          onClick={() => {
-            if (!confirm("Delete this benchmark record?")) return;
-            deleteBenchmark.mutate(row.original.id);
-          }}
+          onClick={() => setPendingDelete(row.original)}
           disabled={deleteBenchmark.isPending}
           className="text-xs text-muted-foreground/40 hover:text-destructive transition-colors"
           title="Delete"
@@ -161,17 +162,15 @@ export default function BenchmarksPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Inference Benchmarks</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Token throughput and concurrency data across GPU × model combinations.
-          </p>
-        </div>
-        <Button onClick={() => setShowForm((s) => !s)}>
-          {showForm ? "Cancel" : "Record benchmark"}
-        </Button>
-      </div>
+      <PageHeader
+        title="Inference Benchmarks"
+        description="Token throughput and concurrency data across GPU × model combinations."
+        actions={(
+          <Button onClick={() => setShowForm((s) => !s)}>
+            {showForm ? "Cancel" : "Record benchmark"}
+          </Button>
+        )}
+      />
 
       {showForm && (
         <Card className="px-6 py-5 space-y-4">
@@ -257,17 +256,8 @@ export default function BenchmarksPage() {
         )}
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading…
-        </div>
-      )}
+      {error && <ErrorState message={error.message} />}
+      {isLoading && <LoadingState />}
 
       {!isLoading && (
         <>
@@ -281,6 +271,22 @@ export default function BenchmarksPage() {
           />
         </>
       )}
+
+      <ConfirmActionDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title="Delete benchmark record?"
+        description={pendingDelete ? `${pendingDelete.gpu_model} · ${pendingDelete.model_name}` : "This benchmark record will be removed."}
+        confirmLabel="Delete Record"
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          deleteBenchmark.mutate(pendingDelete.id, {
+            onSettled: () => setPendingDelete(null),
+          });
+        }}
+      />
     </div>
   );
 }

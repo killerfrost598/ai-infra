@@ -52,6 +52,7 @@ export function GpuFinderPanel() {
   const [bucketFilter, setBucketFilter] = useState<BucketChip>(null);
   const [showUnfit, setShowUnfit] = useState(false);
   const [visibleCount, setVisibleCount] = useState(20);
+  const [sortKey, setSortKey] = useState<"rank" | "price_asc" | "price_desc">("rank");
   const [rentTarget, setRentTarget] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
@@ -97,9 +98,19 @@ export function GpuFinderPanel() {
   const okCount          = rankResult?.ranked.filter((r) => r.bucket === "ok").length ?? 0;
   const tightCount       = rankResult?.ranked.filter((r) => r.bucket === "tight").length ?? 0;
 
-  const filteredRanked: RankedOffer[] = bucketFilter
+  const baseRanked: RankedOffer[] = bucketFilter
     ? rankResult?.ranked.filter((r) => r.bucket === bucketFilter) ?? []
     : rankResult?.ranked ?? [];
+
+  const filteredRanked: RankedOffer[] = useMemo(() => {
+    if (sortKey === "rank") return baseRanked;
+    return [...baseRanked].sort((a, b) =>
+      sortKey === "price_asc"
+        ? a.offer.price_per_day - b.offer.price_per_day
+        : b.offer.price_per_day - a.offer.price_per_day,
+    );
+  }, [baseRanked, sortKey]);
+
   const displayedRanked = filteredRanked.slice(0, visibleCount);
   const hasMore = filteredRanked.length > visibleCount;
 
@@ -202,6 +213,14 @@ export function GpuFinderPanel() {
                 {offersData.meta.total_filtered}/{offersData.meta.total_raw} passed quality bar
               </span>
             )}
+            <div className="flex items-center gap-1 border-l border-border pl-2">
+              {(["rank", "price_asc", "price_desc"] as const).map((k) => (
+                <button key={k} onClick={() => setSortKey(k)}
+                  className={`rounded px-2 py-1 text-xs transition-colors ${sortKey === k ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                  {k === "rank" ? "Rank" : k === "price_asc" ? "Price ↑" : "Price ↓"}
+                </button>
+              ))}
+            </div>
             <Button
               variant="ghost"
               size="sm"

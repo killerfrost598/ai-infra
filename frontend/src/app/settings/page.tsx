@@ -6,6 +6,9 @@ import type { SettingEntry } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layouts/page-header";
+import { ErrorState, LoadingState } from "@/components/layouts/page-states";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
 interface SettingMeta {
   label: string;
@@ -111,6 +114,7 @@ function SettingCard({ setting, meta }: { setting: SettingEntry; meta: SettingMe
   const [input, setInput] = useState("");
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function handleSave() {
     const value = input.trim();
@@ -130,10 +134,14 @@ function SettingCard({ setting, meta }: { setting: SettingEntry; meta: SettingMe
   }
 
   function handleDelete() {
-    if (!confirm(`Clear "${meta.label}"? The value will be removed from the database.`)) return;
+    setConfirmOpen(true);
+  }
+
+  function confirmDelete() {
     setError("");
     deleteSetting.mutate(setting.key, {
       onError: (err) => setError(err.message),
+      onSettled: () => setConfirmOpen(false),
     });
   }
 
@@ -195,6 +203,15 @@ function SettingCard({ setting, meta }: { setting: SettingEntry; meta: SettingMe
         </Button>
       </div>
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+
+      <ConfirmActionDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`Clear "${meta.label}"?`}
+        description="This stored value will be removed from the database."
+        confirmLabel="Clear Value"
+        onConfirm={confirmDelete}
+      />
     </Card>
   );
 }
@@ -253,25 +270,13 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Profile</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          API keys and platform configuration — stored in DB, takes precedence over env vars.
-          Values are write-only; use Clear to remove.
-        </p>
-      </div>
+      <PageHeader
+        title="Profile"
+        description="API keys and platform configuration stored in DB; values are write-only and can be cleared."
+      />
 
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading…
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
+      {isLoading && <LoadingState />}
+      {error && <ErrorState message={error.message} />}
 
       {!isLoading && !error && (
         <>

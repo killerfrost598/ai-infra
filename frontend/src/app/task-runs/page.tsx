@@ -6,6 +6,8 @@ import { useTaskRuns } from "@/lib/queries";
 import type { TaskRun } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataTable } from "@/components/ui/data-table";
+import { PageHeader } from "@/components/layouts/page-header";
+import { ErrorState, LoadingState } from "@/components/layouts/page-states";
 
 const ACTIVE = new Set(["PENDING", "RUNNING"]);
 
@@ -84,30 +86,19 @@ export default function TaskRunsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Task Runs</h1>
-          {!isLoading && <p className="mt-0.5 text-sm text-muted-foreground">{total} total</p>}
-        </div>
-        {activeCount > 0 && (
+      <PageHeader
+        title="Task Runs"
+        description={!isLoading ? `${total} total` : "Track asynchronous task progress and inspect execution output."}
+        actions={activeCount > 0 ? (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-800 bg-amber-950/50 px-2.5 py-0.5 text-xs text-amber-400">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
             {activeCount} active
           </span>
-        )}
-      </div>
+        ) : undefined}
+      />
 
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading…
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
+      {isLoading && <LoadingState />}
+      {error && <ErrorState message={error.message} />}
 
       {!isLoading && (
         <DataTable

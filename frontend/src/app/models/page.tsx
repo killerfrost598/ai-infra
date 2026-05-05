@@ -12,6 +12,9 @@ import { Card } from "@/components/ui/card";
 import { ModelEditDialog } from "@/components/models/ModelEditDialog";
 import { QuantEditDialog } from "@/components/models/QuantEditDialog";
 import { HfImportDialog } from "@/components/models/HfImportDialog";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
+import { PageHeader } from "@/components/layouts/page-header";
+import { EmptyState } from "@/components/layouts/page-states";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -23,12 +26,18 @@ type DialogState =
   | { kind: "add-quant"; model: ModelEntry }
   | { kind: "edit-quant"; model: ModelEntry; quant: ModelQuant };
 
+type PendingDeleteState =
+  | { kind: "none" }
+  | { kind: "model"; id: string; name: string }
+  | { kind: "quant"; modelId: string; quantId: string; quantName: string };
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ModelsPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<DialogState>({ kind: "none" });
+  const [pendingDelete, setPendingDelete] = useState<PendingDeleteState>({ kind: "none" });
 
   const { data: models = [], isLoading } = useQuery({
     queryKey: ["models"],
@@ -73,19 +82,37 @@ export default function ModelsPage() {
     setDialog({ kind: "none" });
   }
 
+  function confirmDelete() {
+    if (pendingDelete.kind === "model") {
+      deleteModel.mutate(pendingDelete.id, {
+        onSettled: () => setPendingDelete({ kind: "none" }),
+      });
+      return;
+    }
+    if (pendingDelete.kind === "quant") {
+      deleteQuant.mutate(
+        { modelId: pendingDelete.modelId, quantId: pendingDelete.quantId },
+        { onSettled: () => setPendingDelete({ kind: "none" }) }
+      );
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <h1 className="text-2xl font-bold">Model Knowledge Base</h1>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setDialog({ kind: "hf-import" })}>
-            <Upload className="mr-1.5 size-3.5" /> Import from HuggingFace
-          </Button>
-          <Button size="sm" onClick={() => setDialog({ kind: "add-model" })}>
-            <Plus className="mr-1.5 size-3.5" /> Add model
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Model Knowledge Base"
+        description="Manage model families, quantizations, and HuggingFace metadata used by finder workflows."
+        actions={(
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setDialog({ kind: "hf-import" })}>
+              <Upload className="mr-1.5 size-3.5" /> Import from HuggingFace
+            </Button>
+            <Button size="sm" onClick={() => setDialog({ kind: "add-model" })}>
+              <Plus className="mr-1.5 size-3.5" /> Add model
+            </Button>
+          </div>
+        )}
+      />
 
       <Input
         placeholder="Search models…"
@@ -103,12 +130,10 @@ export default function ModelsPage() {
       )}
 
       {!isLoading && byFamily.length === 0 && (
-        <div className="rounded-xl border border-border bg-card px-6 py-12 text-center">
-          <p className="text-sm font-medium text-foreground/70">No models yet</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Import from HuggingFace or add manually.
-          </p>
-        </div>
+        <EmptyState
+          title="No models yet"
+          description="Import from HuggingFace or add manually."
+        />
       )}
 
       <div className="space-y-4">
@@ -119,14 +144,10 @@ export default function ModelsPage() {
             models={familyModels}
             onAddModel={() => setDialog({ kind: "add-model" })}
             onEditModel={(m) => setDialog({ kind: "edit-model", model: m })}
-            onDeleteModel={(m) => {
-              if (confirm(`Delete ${m.name} and all its quants?`)) deleteModel.mutate(m.id);
-            }}
+            onDeleteModel={(m) => setPendingDelete({ kind: "model", id: m.id, name: m.name })}
             onAddQuant={(m) => setDialog({ kind: "add-quant", model: m })}
             onEditQuant={(m, q) => setDialog({ kind: "edit-quant", model: m, quant: q })}
-            onDeleteQuant={(m, q) => {
-              if (confirm(`Delete quant "${q.name}"?`)) deleteQuant.mutate({ modelId: m.id, quantId: q.id });
-            }}
+            onDeleteQuant={(m, q) => setPendingDelete({ kind: "quant", modelId: m.id, quantId: q.id, quantName: q.name })}
           />
         ))}
       </div>
@@ -156,6 +177,27 @@ export default function ModelsPage() {
           onSaved={() => { qc.invalidateQueries({ queryKey: ["models"] }); qc.invalidateQueries({ queryKey: ["model-catalogue"] }); closeDialog(); }}
         />
       )}
+
+      <ConfirmActionDialog
+        open={pendingDelete.kind !== "none"}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete({ kind: "none" });
+        }}
+        title={
+          pendingDelete.kind === "model"
+            ? `Delete ${pendingDelete.name}?`
+            : pendingDelete.kind === "quant"
+              ? `Delete quant "${pendingDelete.quantName}"?`
+              : "Delete item?"
+        }
+        description={
+          pendingDelete.kind === "model"
+            ? "This will remove the model and all its quantizations from the knowledge base."
+            : "This will remove the selected quantization."
+        }
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }
@@ -295,9 +337,11 @@ function Tag({ label }: { label: string }) {
 function IconButton({ icon, title, onClick, danger }: { icon: React.ReactNode; title: string; onClick: () => void; danger?: boolean }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
-      className={`rounded p-1 transition-colors ${danger ? "hover:bg-red-500/10 hover:text-red-500" : "hover:bg-muted text-muted-foreground hover:text-foreground"}`}
+      aria-label={title}
+      className={`rounded p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${danger ? "hover:bg-red-500/10 hover:text-red-500" : "hover:bg-muted text-muted-foreground hover:text-foreground"}`}
     >
       {icon}
     </button>

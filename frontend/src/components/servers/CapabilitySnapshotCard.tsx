@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { HostCapabilitySnapshot } from "@/lib/types";
 import { Card } from "@/components/ui/card";
@@ -31,7 +32,7 @@ export function CapabilitySnapshotCard({ serverId, snapshot, onReprobed }: Props
       await api.servers.reprobe(serverId);
       onReprobed();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Reprobe failed");
+      toast.error(err instanceof Error ? err.message : "Reprobe failed");
     } finally {
       setReprobing(false);
     }

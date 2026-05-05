@@ -11,6 +11,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layouts/page-header";
+import { EmptyState, ErrorState, LoadingState } from "@/components/layouts/page-states";
 
 export default function DeploymentsPage() {
   const { data, isLoading, error } = useDeployments();
@@ -48,15 +50,15 @@ export default function DeploymentsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Deployments</h1>
-          {!isLoading && <p className="mt-0.5 text-sm text-muted-foreground">{total} total</p>}
-        </div>
-        <Button onClick={() => setShowForm((s) => !s)}>
-          {showForm ? "Cancel" : "New deployment"}
-        </Button>
-      </div>
+      <PageHeader
+        title="Deployments"
+        description={!isLoading ? `${total} total` : "Deploy vLLM/SGLang/Ollama models onto provisioned servers."}
+        actions={(
+          <Button onClick={() => setShowForm((s) => !s)}>
+            {showForm ? "Cancel" : "New deployment"}
+          </Button>
+        )}
+      />
 
       {showForm && (
         <Form {...form}>
@@ -198,22 +200,13 @@ export default function DeploymentsPage() {
         </Form>
       )}
 
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading…
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
+      {isLoading && <LoadingState />}
+      {error && <ErrorState message={error.message} />}
       {!isLoading && !error && deployments.length === 0 && !showForm && (
-        <Card className="flex flex-col items-center gap-2 py-12 text-center">
-          <p className="text-sm text-muted-foreground">No deployments yet.</p>
-          <p className="text-xs text-muted-foreground/60">Create a deployment from a provisioned server.</p>
-        </Card>
+        <EmptyState
+          title="No deployments yet."
+          description="Create a deployment from a provisioned server."
+        />
       )}
 
       <div className="space-y-2">

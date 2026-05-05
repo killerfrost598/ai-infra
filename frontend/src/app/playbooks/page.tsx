@@ -8,6 +8,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layouts/page-header";
+import { EmptyState, ErrorState, LoadingState } from "@/components/layouts/page-states";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
 export default function PlaybooksPage() {
   const { data, isLoading, error } = usePlaybooks();
@@ -25,6 +28,7 @@ export default function PlaybooksPage() {
   const [form, setForm] = useState({ name: "", git_repo: "", git_branch: "main", git_commit: "" });
   const [createError, setCreateError] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   function setField(key: keyof typeof form, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -52,9 +56,14 @@ export default function PlaybooksPage() {
   }
 
   function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete playbook "${name}"?`)) return;
-    deletePlaybook.mutate(id, {
-      onError: (err) => alert(err.message),
+    setDeleteTarget({ id, name });
+  }
+
+  function confirmDeletePlaybook() {
+    if (!deleteTarget) return;
+    deletePlaybook.mutate(deleteTarget.id, {
+      onError: (err) => toast.error(err.message),
+      onSettled: () => setDeleteTarget(null),
     });
   }
 
@@ -77,15 +86,15 @@ export default function PlaybooksPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Playbooks</h1>
-          {!isLoading && <p className="mt-0.5 text-sm text-muted-foreground">{total} registered</p>}
-        </div>
-        <Button onClick={() => setShowForm((s) => !s)}>
-          {showForm ? "Cancel" : "Register playbook"}
-        </Button>
-      </div>
+      <PageHeader
+        title="Playbooks"
+        description={!isLoading ? `${total} registered` : "Git-tracked automation playbooks for repeatable server workflows."}
+        actions={(
+          <Button onClick={() => setShowForm((s) => !s)}>
+            {showForm ? "Cancel" : "Register playbook"}
+          </Button>
+        )}
+      />
 
       {showForm && (
         <Card className="px-5 py-4 space-y-3">
@@ -146,22 +155,13 @@ export default function PlaybooksPage() {
         </Card>
       )}
 
-      {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading…
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
+      {isLoading && <LoadingState />}
+      {error && <ErrorState message={error.message} />}
       {!isLoading && !error && playbooks.length === 0 && !showForm && (
-        <Card className="flex flex-col items-center gap-2 py-12 text-center">
-          <p className="text-sm text-muted-foreground">No playbooks registered yet.</p>
-          <p className="text-xs text-muted-foreground/60">Playbooks are Ansible repositories used to automate model deployment.</p>
-        </Card>
+        <EmptyState
+          title="No playbooks registered yet."
+          description="Playbooks are Ansible repositories used to automate model deployment."
+        />
       )}
 
       <div className="space-y-2">
@@ -206,6 +206,17 @@ export default function PlaybooksPage() {
           </Card>
         ))}
       </div>
+
+      <ConfirmActionDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={deleteTarget ? `Delete "${deleteTarget.name}"?` : "Delete playbook?"}
+        description="This will remove the playbook registration from the platform."
+        confirmLabel="Delete Playbook"
+        onConfirm={confirmDeletePlaybook}
+      />
     </div>
   );
 }

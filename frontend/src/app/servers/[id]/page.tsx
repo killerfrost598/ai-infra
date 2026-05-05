@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { AlertTriangle, Check, CheckCircle2, Clock3, Copy, FileText, ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
 import type { HostCapabilitySnapshot, InferenceBenchmark, Server, SessionListItem, SSHTestResult, TaskRun } from "@/lib/types";
@@ -12,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PerformanceTab } from "@/components/benchmarks/PerformanceTab";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
 export default function ServerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -31,6 +33,7 @@ export default function ServerDetailPage() {
   const [benchmarksLoading, setBenchmarksLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "performance">("overview");
   const [snapshot, setSnapshot] = useState<HostCapabilitySnapshot | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   // Task run detail modal
   const [taskRunModal, setTaskRunModal] = useState<TaskRun | null>(null);
@@ -71,7 +74,7 @@ export default function ServerDetailPage() {
       sessionStorage.setItem("lab_session_id", session.id);
       router.push("/lab");
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to start session");
+      toast.error(err instanceof Error ? err.message : "Failed to start session");
       setStartingSession(false);
     }
   }
@@ -91,13 +94,12 @@ export default function ServerDetailPage() {
 
   async function handleDelete() {
     if (!server) return;
-    if (!confirm(`Permanently delete ${server.hostname}?\n\nThis removes the server record and all associated task runs. The server itself is NOT terminated on the provider.`)) return;
     setDeleting(true);
     try {
       await api.servers.delete(id);
       router.push("/servers");
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      toast.error(err instanceof Error ? err.message : "Delete failed");
       setDeleting(false);
     }
   }
@@ -139,7 +141,7 @@ export default function ServerDetailPage() {
       {/* Breadcrumb + actions */}
       <div className="flex items-center justify-between">
         <Link href="/servers" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Servers</Link>
-        <Button variant="destructive" size="sm" loading={deleting} onClick={handleDelete}>
+        <Button variant="destructive" size="sm" loading={deleting} onClick={() => setConfirmDeleteOpen(true)}>
           {deleting ? "Deleting…" : "Delete server"}
         </Button>
       </div>
@@ -431,6 +433,15 @@ export default function ServerDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmActionDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title={server ? `Delete ${server.hostname}?` : "Delete server?"}
+        description="This removes the server record and associated task runs. The provider server is not terminated."
+        confirmLabel="Delete Server"
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

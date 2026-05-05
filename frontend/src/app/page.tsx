@@ -85,9 +85,30 @@ const sections = [
     color: "text-rose-400",
     bg: "bg-rose-500/10",
   },
+  {
+    href: "/docs",
+    label: "Guides",
+    description: "Reference guides for VRAM sizing, inference engines, and runtime settings.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      </svg>
+    ),
+    color: "text-cyan-400",
+    bg: "bg-cyan-500/10",
+  },
 ];
 
-export default function DocsPage() {
+const QUICK_START_STEPS = [
+  { href: "/settings", label: "Configure API keys", detail: "Set Clore and optional Anthropic keys in Settings." },
+  { href: "/clore", label: "Rent a GPU server", detail: "Choose an offer in Marketplace and complete rental auth." },
+  { href: "/servers", label: "Verify registration", detail: "Confirm server appears in Servers and test SSH connectivity." },
+  { href: "/lab", label: "Open a terminal session", detail: "Use Lab for interactive command execution and session logs." },
+  { href: "/deployments", label: "Deploy a model runtime", detail: "Launch your vLLM/SGLang deployment from a ready server." },
+];
+
+export default function OverviewPage() {
   return (
     <div className="space-y-8">
       <div className="space-y-2">
@@ -97,12 +118,33 @@ export default function DocsPage() {
             System online
           </span>
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">AI Inference Platform</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Operator Overview</h1>
         <p className="max-w-xl text-muted-foreground">
           Single-operator GPU ops platform. Rent Clore.ai servers, provision them over SSH,
           deploy vLLM models, and track inference benchmarks.
         </p>
       </div>
+
+      <Card className="px-5 py-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">First-run checklist</p>
+        <div className="space-y-2">
+          {QUICK_START_STEPS.map((step, index) => (
+            <Link
+              key={step.href}
+              href={step.href}
+              className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 transition-colors hover:border-muted-foreground/30 hover:bg-muted/40"
+            >
+              <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
+                {index + 1}
+              </span>
+              <span>
+                <span className="block text-sm font-medium">{step.label}</span>
+                <span className="block text-xs text-muted-foreground">{step.detail}</span>
+              </span>
+            </Link>
+          ))}
+        </div>
+      </Card>
 
       <div className="grid gap-4 sm:grid-cols-2">
         {sections.map((s) => (

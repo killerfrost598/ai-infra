@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Info } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { RankedOffer } from "@/lib/gpu-finder";
 import { fitStatusBg } from "@/lib/vram";
@@ -331,8 +332,16 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
           <Button variant="ghost" size="sm" className="text-xs" onClick={onAdvise}>
             Advisor →
           </Button>
-          <Button variant="ghost" size="sm" className="text-xs" onClick={() => setDetailsOpen(true)}>
-            Details
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={() => setDetailsOpen(true)}
+            title={`View details for ${offer.gpu_name}`}
+            aria-label={`View details for ${offer.gpu_name}`}
+          >
+            <Info className="size-3.5" />
+            View details
           </Button>
           <div className="ml-auto">
             <Button size="sm" className="text-xs" onClick={onRent}>

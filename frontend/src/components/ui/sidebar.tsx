@@ -14,7 +14,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 const SIDEBAR_STORAGE_KEY = "sidebar:state"
 const SIDEBAR_WIDTH = "16rem"
-const SIDEBAR_WIDTH_ICON = "3.5rem"
+const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -49,24 +49,29 @@ export const SidebarProvider = React.forwardRef<HTMLDivElement, SidebarProviderP
     ref
   ) {
     const isMobile = useIsMobile()
-    const [_open, _setOpen] = React.useState(defaultOpen)
+    const [desktopOpen, setDesktopOpen] = React.useState(defaultOpen)
+    const [mobileOpen, setMobileOpen] = React.useState(false)
 
     React.useEffect(() => {
       try {
         const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY)
-        if (stored !== null && openProp === undefined) _setOpen(stored === "true")
+        if (stored !== null && openProp === undefined) setDesktopOpen(stored === "true")
       } catch {}
     }, [openProp])
 
-    const open = openProp ?? _open
+    const open = isMobile ? mobileOpen : (openProp ?? desktopOpen)
     const setOpen = React.useCallback(
       (value: boolean) => {
-        onOpenChange ? onOpenChange(value) : _setOpen(value)
+        if (isMobile) {
+          setMobileOpen(value)
+          return
+        }
+        onOpenChange ? onOpenChange(value) : setDesktopOpen(value)
         try {
           localStorage.setItem(SIDEBAR_STORAGE_KEY, String(value))
         } catch {}
       },
-      [onOpenChange]
+      [isMobile, onOpenChange]
     )
 
     const toggleSidebar = React.useCallback(() => setOpen(!open), [open, setOpen])
@@ -97,7 +102,7 @@ export const SidebarProvider = React.forwardRef<HTMLDivElement, SidebarProviderP
                 ...style,
               } as React.CSSProperties
             }
-            className={cn("group/sidebar-wrapper flex min-h-svh w-full", className)}
+            className={cn("group/sidebar-wrapper flex h-svh w-full overflow-hidden", className)}
             {...props}
           >
             {children}
@@ -170,7 +175,10 @@ export const SidebarInset = React.forwardRef<HTMLElement, React.HTMLAttributes<H
     return (
       <main
         ref={ref}
-        className={cn("relative flex min-h-svh flex-1 flex-col bg-background overflow-auto", className)}
+        className={cn(
+          "relative flex h-svh min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-background",
+          className
+        )}
         {...props}
       />
     )
@@ -191,7 +199,45 @@ export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
     { side = "left", variant = "sidebar", collapsible = "icon", className, children, ...props },
     ref
   ) {
-    const { state } = useSidebar()
+    const { state, isMobile, open, setOpen } = useSidebar()
+
+    if (isMobile) {
+      return (
+        <>
+          <button
+            type="button"
+            aria-label="Close Sidebar"
+            tabIndex={open ? 0 : -1}
+            className={cn(
+              "fixed inset-0 z-40 bg-background/70 backdrop-blur-sm transition-opacity md:hidden",
+              open ? "opacity-100" : "pointer-events-none opacity-0"
+            )}
+            onClick={() => setOpen(false)}
+          />
+          <aside
+            ref={ref}
+            data-state={open ? "expanded" : "collapsed"}
+            data-collapsible={collapsible}
+            data-variant={variant}
+            data-side={side}
+            className={cn(
+              "fixed inset-y-0 left-0 z-50 w-[--sidebar-width] text-sidebar-foreground md:hidden",
+              "transform transition-transform duration-200 ease-linear",
+              open ? "translate-x-0" : "-translate-x-full",
+              className
+            )}
+            {...props}
+          >
+            <div
+              data-sidebar="sidebar"
+              className="flex h-full w-[--sidebar-width] flex-col border-r border-sidebar-border bg-sidebar"
+            >
+              {children}
+            </div>
+          </aside>
+        </>
+      )
+    }
 
     return (
       <aside
@@ -202,7 +248,7 @@ export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
         data-side={side}
         className={cn(
           "group peer hidden md:block text-sidebar-foreground",
-          "relative h-svh shrink-0 transition-[width] duration-200 ease-linear",
+          "sticky top-0 h-svh shrink-0 transition-[width] duration-200 ease-linear",
           state === "expanded"
             ? "w-[--sidebar-width]"
             : "w-[--sidebar-width-icon]",
@@ -267,7 +313,7 @@ export const SidebarContent = React.forwardRef<HTMLDivElement, React.HTMLAttribu
         data-sidebar="content"
         className={cn(
           "flex min-h-0 flex-1 flex-col gap-2 overflow-auto",
-          "group-data-[collapsible=icon]:overflow-hidden",
+          "group-data-[state=collapsed]:overflow-hidden",
           className
         )}
         {...props}
@@ -304,7 +350,7 @@ export const SidebarGroupLabel = React.forwardRef<
         "duration-200 flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium",
         "text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-[margin,opacity] ease-linear",
         "focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
-        "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
+        "group-data-[state=collapsed]:-mt-8 group-data-[state=collapsed]:opacity-0",
         className
       )}
       {...props}
@@ -367,7 +413,7 @@ const sidebarMenuButtonVariants = cva(
     "disabled:pointer-events-none disabled:opacity-50",
     "data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground",
     "[&>svg]:size-4 [&>svg]:shrink-0",
-    "group-data-[collapsible=icon]:!size-8 group-data-[collapsible=icon]:!p-2",
+    "group-data-[state=collapsed]:!size-8 group-data-[state=collapsed]:!p-2",
     "[&>span:last-child]:truncate",
   ],
   {
@@ -380,7 +426,7 @@ const sidebarMenuButtonVariants = cva(
       size: {
         default: "h-8 text-sm",
         sm: "h-7 text-xs",
-        lg: "h-12 text-sm group-data-[collapsible=icon]:!p-0",
+        lg: "h-12 text-sm group-data-[state=collapsed]:!p-0",
       },
     },
     defaultVariants: { variant: "default", size: "default" },
