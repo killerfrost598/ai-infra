@@ -17,6 +17,7 @@ KNOWN_KEYS: tuple[str, ...] = (
     "clore_api_key",
     "anthropic_api_key",
     "ssh_private_key",
+    "hf_token",
     # Clore.ai global quality-bar filters — applied to all marketplace fetches.
     # All are optional; unset keys mean no filtering on that dimension.
     "clore_min_pcie_gen",
