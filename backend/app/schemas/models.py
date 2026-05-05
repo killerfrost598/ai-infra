@@ -18,6 +18,14 @@ class ModelQuantCreate(BaseSchema):
     arch_vllm: bool = True
     arch_sglang: bool = True
     notes: str | None = None
+    quant_format: str = "unknown"
+    quant_variant: str | None = None
+    safetensors_dtypes: dict | None = None
+    tags: list[str] = []
+    library_name: str | None = None
+    gated: str | None = None
+    hf_downloads: int | None = None
+    hf_likes: int | None = None
 
 
 class ModelQuantUpdate(BaseSchema):
@@ -32,6 +40,14 @@ class ModelQuantUpdate(BaseSchema):
     arch_vllm: bool | None = None
     arch_sglang: bool | None = None
     notes: str | None = None
+    quant_format: str | None = None
+    quant_variant: str | None = None
+    safetensors_dtypes: dict | None = None
+    tags: list[str] | None = None
+    library_name: str | None = None
+    gated: str | None = None
+    hf_downloads: int | None = None
+    hf_likes: int | None = None
 
 
 class ModelQuantResponse(UUIDSchema):
@@ -47,6 +63,14 @@ class ModelQuantResponse(UUIDSchema):
     arch_vllm: bool
     arch_sglang: bool
     notes: str | None
+    quant_format: str
+    quant_variant: str | None
+    safetensors_dtypes: dict | None
+    tags: list[str]
+    library_name: str | None
+    gated: str | None
+    hf_downloads: int | None
+    hf_likes: int | None
 
 
 class ModelCreate(BaseSchema):
@@ -70,6 +94,20 @@ class ModelCreate(BaseSchema):
     recommended_engines: list[dict] = []
     recommended_flags: dict = {}
     quants: list[ModelQuantCreate] = []
+    # Extended HF metadata
+    org: str | None = None
+    architecture: str | None = None
+    pipeline_tag: str | None = None
+    library_name: str | None = None
+    license: str | None = None
+    languages: list[str] | None = None
+    gated: str | None = None
+    base_model: str | None = None
+    hf_downloads: int | None = None
+    hf_likes: int | None = None
+    hf_trending_score: float | None = None
+    hf_last_modified: datetime | None = None
+    hf_created_at: datetime | None = None
 
 
 class ModelUpdate(BaseSchema):
@@ -92,6 +130,19 @@ class ModelUpdate(BaseSchema):
     recommended_engines: list[dict] | None = None
     recommended_flags: dict | None = None
     is_archived: bool | None = None
+    org: str | None = None
+    architecture: str | None = None
+    pipeline_tag: str | None = None
+    library_name: str | None = None
+    license: str | None = None
+    languages: list[str] | None = None
+    gated: str | None = None
+    base_model: str | None = None
+    hf_downloads: int | None = None
+    hf_likes: int | None = None
+    hf_trending_score: float | None = None
+    hf_last_modified: datetime | None = None
+    hf_created_at: datetime | None = None
 
 
 class ModelResponse(UUIDSchema):
@@ -119,6 +170,20 @@ class ModelResponse(UUIDSchema):
     is_archived: bool
     updated_at: datetime
     quants: list[ModelQuantResponse] = []
+    # Extended HF metadata
+    org: str | None
+    architecture: str | None
+    pipeline_tag: str | None
+    library_name: str | None
+    license: str | None
+    languages: list[str] | None
+    gated: str | None
+    base_model: str | None
+    hf_downloads: int | None
+    hf_likes: int | None
+    hf_trending_score: float | None
+    hf_last_modified: datetime | None
+    hf_created_at: datetime | None
 
 
 class HfImportRequest(BaseSchema):

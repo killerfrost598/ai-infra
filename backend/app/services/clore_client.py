@@ -82,6 +82,11 @@ class CloreOffer(BaseModel):
     allowed_coins: list[str] = []
     score: float | None = None       # server reliability / uptime score
     mrl: int | None = None           # minimum rental length in hours
+    # Parsed GPU fields — None for mixed rigs (excluded from grouped view)
+    gpu_vendor: str | None = None
+    gpu_family: str | None = None
+    gpu_variant: str | None = None
+    gpu_cc: str | None = None          # CUDA compute capability e.g. "8.6"
 
 
 class CloreBalance(BaseModel):
@@ -102,6 +107,8 @@ class CloreServer(BaseModel):
 
 def _sdk_to_offer(s: Any) -> CloreOffer:
     """Map a clore-ai SDK MarketplaceServer object to our CloreOffer schema."""
+    from app.services.gpu_name_parser import is_mixed_rig, parse_gpu_name
+
     # gpu_model includes a count prefix: "2x NVIDIA GeForce RTX 4070"
     raw_model = getattr(s, "gpu_model", None) or "Unknown"
     gpu_name = re.sub(r"^\d+[xX]\s+", "", raw_model).strip() or raw_model
@@ -172,6 +179,17 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
         mrl_raw = getattr(specs, "mrl", None)
     mrl = int(mrl_raw) if mrl_raw is not None else None
 
+    # Parse GPU identity — skip for mixed rigs (they appear in list view only)
+    if is_mixed_rig(gpu_array):
+        gpu_vendor = gpu_family = gpu_variant = gpu_cc = None
+    else:
+        from app.services.gpu_name_parser import cc_lookup
+        parsed = parse_gpu_name(gpu_name)
+        gpu_vendor: str | None = parsed.vendor
+        gpu_family: str | None = parsed.family
+        gpu_variant: str | None = parsed.variant
+        gpu_cc: str | None = cc_lookup(gpu_name)
+
     return CloreOffer(
         id=str(s.id),
         gpu_name=gpu_name,
@@ -191,6 +209,10 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
         allowed_coins=allowed_coins,
         score=score,
         mrl=mrl,
+        gpu_vendor=gpu_vendor,
+        gpu_family=gpu_family,
+        gpu_variant=gpu_variant,
+        gpu_cc=gpu_cc,
     )
 
 
