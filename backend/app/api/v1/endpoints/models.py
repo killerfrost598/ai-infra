@@ -1,10 +1,12 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import cast, exists, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.entities import Model, ModelQuant
+from app.models.entities import Model, ModelQuant, TaskRun
 from app.schemas.models import (
     HfImportRequest,
     HfImportResult,
@@ -14,6 +16,9 @@ from app.schemas.models import (
     ModelQuantUpdate,
     ModelResponse,
     ModelUpdate,
+    SeedRequest,
+    SeedResponse,
+    SyncStatus,
 )
 from app.services.hf_parser import parse_hf_model
 
@@ -36,16 +41,29 @@ def _get_quant_or_404(model_id: UUID, quant_id: UUID, db: Session) -> ModelQuant
     return q
 
 
-# ── Model CRUD ────────────────────────────────────────────────────────────────
+# ── Model list + filters ──────────────────────────────────────────────────────
 
 @router.get("", response_model=list[ModelResponse])
 def list_models(
     family: str | None = Query(None),
     search: str | None = Query(None),
     archived: bool = Query(False),
+    use_case: str | None = Query(None),
+    source: str | None = Query(None),
+    is_reasoning: bool | None = Query(None),
+    supports_tools: bool | None = Query(None),
+    is_code_model: bool | None = Query(None),
+    is_moe: bool | None = Query(None),
+    tag: str | None = Query(None, description="Filter models that carry this tag"),
+    param_min: float | None = Query(None),
+    param_max: float | None = Query(None),
+    gated: bool | None = Query(None, description="True = only gated models, False = only ungated"),
+    quant_format: str | None = Query(None, description="Filter models with at least one quant of this format"),
+    sort: str | None = Query(None, description="downloads | likes | params | created | name (default)"),
     db: Session = Depends(get_db),
 ) -> list[Model]:
     q = db.query(Model).filter(Model.is_archived == archived)
+
     if family:
         q = q.filter(Model.family.ilike(f"%{family}%"))
     if search:
@@ -53,14 +71,101 @@ def list_models(
         q = q.filter(
             (Model.name.ilike(term)) | (Model.model_key.ilike(term)) | (Model.family.ilike(term))
         )
-    return q.order_by(Model.family, Model.param_count_b).all()
+    if use_case:
+        q = q.filter(Model.use_case == use_case)
+    if source:
+        q = q.filter(Model.source == source)
+    if is_reasoning is not None:
+        q = q.filter(Model.is_reasoning == is_reasoning)
+    if supports_tools is not None:
+        q = q.filter(Model.supports_tools == supports_tools)
+    if is_code_model is not None:
+        q = q.filter(Model.is_code_model == is_code_model)
+    if is_moe is not None:
+        q = q.filter(Model.is_moe == is_moe)
+    if tag:
+        q = q.filter(cast(Model.tags, JSONB).contains([tag]))
+    if param_min is not None:
+        q = q.filter(Model.param_count_b >= param_min)
+    if param_max is not None:
+        q = q.filter(Model.param_count_b <= param_max)
+    if gated is not None:
+        if gated:
+            q = q.filter(Model.gated.isnot(None))
+        else:
+            q = q.filter(Model.gated.is_(None))
+    if quant_format:
+        q = q.filter(
+            exists().where(
+                (ModelQuant.model_id == Model.id) & (ModelQuant.quant_format == quant_format)
+            )
+        )
 
+    if sort == "downloads":
+        q = q.order_by(Model.hf_downloads.desc().nullslast())
+    elif sort == "likes":
+        q = q.order_by(Model.hf_likes.desc().nullslast())
+    elif sort == "params":
+        q = q.order_by(Model.param_count_b.desc())
+    elif sort == "created":
+        q = q.order_by(Model.hf_created_at.desc().nullslast())
+    else:
+        q = q.order_by(Model.family, Model.param_count_b)
+
+    return q.all()
+
+
+# ── Static sub-routes (must be before /{model_id}) ───────────────────────────
 
 @router.get("/families", response_model=list[str])
 def list_families(db: Session = Depends(get_db)) -> list[str]:
-    rows = db.query(Model.family).filter(Model.is_archived == False).distinct().order_by(Model.family).all()
+    rows = (
+        db.query(Model.family)
+        .filter(Model.is_archived == False)  # noqa: E712
+        .distinct()
+        .order_by(Model.family)
+        .all()
+    )
     return [r[0] for r in rows]
 
+
+@router.get("/tag-vocabulary", response_model=list[str])
+def tag_vocabulary(db: Session = Depends(get_db)) -> list[str]:
+    rows = db.execute(
+        text(
+            "SELECT DISTINCT jsonb_array_elements_text(tags::jsonb) AS t "
+            "FROM models WHERE NOT is_archived ORDER BY t"
+        )
+    ).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
+@router.get("/sync-status", response_model=SyncStatus)
+def sync_status(db: Session = Depends(get_db)) -> SyncStatus:
+    last = (
+        db.query(TaskRun)
+        .filter(TaskRun.task_type.in_(["models.seed_one", "models.seed_all"]))
+        .order_by(TaskRun.created_at.desc())
+        .first()
+    )
+    if not last:
+        return SyncStatus(
+            task_type=None, status=None, started_at=None,
+            finished_at=None, duration_seconds=None,
+            error_summary=None, metadata=None,
+        )
+    return SyncStatus(
+        task_type=last.task_type,
+        status=last.status.value if last.status else None,
+        started_at=last.started_at,
+        finished_at=last.finished_at,
+        duration_seconds=last.duration_seconds,
+        error_summary=last.error_summary,
+        metadata=last.metadata_json,
+    )
+
+
+# ── Model CRUD ────────────────────────────────────────────────────────────────
 
 @router.post("", response_model=ModelResponse, status_code=201)
 def create_model(payload: ModelCreate, db: Session = Depends(get_db)) -> Model:
@@ -151,7 +256,30 @@ def delete_quant(model_id: UUID, quant_id: UUID, db: Session = Depends(get_db)) 
     db.commit()
 
 
-# ── HF import ─────────────────────────────────────────────────────────────────
+# ── HF seeder endpoints ───────────────────────────────────────────────────────
+
+@router.post("/seed", response_model=SeedResponse, status_code=202)
+def seed_model(payload: SeedRequest, db: Session = Depends(get_db)) -> SeedResponse:
+    if "/" not in payload.repo_id:
+        raise HTTPException(status_code=422, detail="repo_id must be in 'org/repo' format")
+    from app.workers.tasks import seed_model_from_hf
+    result = seed_model_from_hf.delay(payload.repo_id)
+    return SeedResponse(celery_task_id=result.id, repo_id=payload.repo_id)
+
+
+@router.post("/refresh-all", status_code=202)
+def refresh_all_models(db: Session = Depends(get_db)) -> dict:
+    count = (
+        db.query(Model)
+        .filter(Model.source == "hf", Model.is_archived == False)  # noqa: E712
+        .count()
+    )
+    from app.workers.tasks import seed_all_models
+    result = seed_all_models.delay()
+    return {"celery_task_id": result.id, "queued": count}
+
+
+# ── HF import (legacy — will be removed in Phase 10.6) ───────────────────────
 
 @router.post("/import-from-hf", response_model=HfImportResult)
 def import_from_hf(payload: HfImportRequest) -> HfImportResult:

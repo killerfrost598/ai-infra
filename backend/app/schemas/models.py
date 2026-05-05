@@ -194,3 +194,24 @@ class HfImportResult(BaseSchema):
     suggested: ModelCreate
     confidence: dict[str, str]  # field -> "high" | "medium" | "low" | "missing"
     raw_hf_repo: str
+
+
+# ── HF seeder schemas ─────────────────────────────────────────────────────────
+
+class SeedRequest(BaseSchema):
+    repo_id: str
+
+
+class SeedResponse(BaseSchema):
+    celery_task_id: str
+    repo_id: str
+
+
+class SyncStatus(BaseSchema):
+    task_type: str | None
+    status: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_seconds: int | None
+    error_summary: str | None
+    metadata: dict | None

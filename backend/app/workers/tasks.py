@@ -683,3 +683,109 @@ def scrape_versions(self) -> dict:
         raise
     finally:
         db.close()
+
+
+# ── HF model seeder tasks ─────────────────────────────────────────────────────
+
+@celery_app.task(bind=True, name="models.seed_one")
+def seed_model_from_hf(self, repo_id: str) -> dict:
+    """Fetch a single HF repo and upsert it into the models + model_quants tables."""
+    from app.services.hf_seeder import seed_one_repo
+
+    db = SessionLocal()
+    task_run = TaskRun(
+        task_type="models.seed_one",
+        status=TaskStatus.RUNNING,
+        started_at=_utcnow(),
+        metadata_json={"repo_id": repo_id},
+    )
+    try:
+        db.add(task_run)
+        db.commit()
+
+        model = seed_one_repo(repo_id, db=db)
+
+        task_run.status = TaskStatus.SUCCESS
+        task_run.metadata_json = {
+            "repo_id": repo_id,
+            "model_id": str(model.id),
+            "quant_count": len(model.quants),
+        }
+        _finish_task_run(task_run, db)
+        return {"status": "success", "repo_id": repo_id, "task_run_id": str(task_run.id)}
+
+    except Exception as exc:
+        logger.exception("seed_model_from_hf failed for %s", repo_id)
+        task_run.status = TaskStatus.FAILED
+        task_run.error_summary = str(exc)
+        _finish_task_run(task_run, db)
+        return {"status": "failed", "repo_id": repo_id, "error": str(exc)}
+
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, name="models.seed_all")
+def seed_all_models(self) -> dict:
+    """Re-seed every model with source='hf' from HuggingFace."""
+    from app.models.entities import Model as ModelEntity
+    from app.services.hf_seeder import seed_one_repo
+
+    db = SessionLocal()
+    task_run = TaskRun(
+        task_type="models.seed_all",
+        status=TaskStatus.RUNNING,
+        started_at=_utcnow(),
+    )
+    try:
+        db.add(task_run)
+        db.commit()
+
+        repo_ids = [
+            m.model_key
+            for m in db.query(ModelEntity)
+            .filter(ModelEntity.source == "hf", ModelEntity.is_archived == False)  # noqa: E712
+            .all()
+        ]
+
+        succeeded = 0
+        failed_repos: list[dict] = []
+        for repo_id in repo_ids:
+            try:
+                seed_one_repo(repo_id, db=db)
+                succeeded += 1
+            except Exception as exc:
+                logger.warning("seed_all_models: %s failed: %s", repo_id, exc)
+                failed_repos.append({"repo_id": repo_id, "error": str(exc)})
+
+        failed = len(failed_repos)
+        if failed == 0:
+            task_run.status = TaskStatus.SUCCESS
+        elif succeeded > 0:
+            task_run.status = TaskStatus.PARTIAL
+        else:
+            task_run.status = TaskStatus.FAILED
+
+        task_run.metadata_json = {
+            "total": len(repo_ids),
+            "succeeded": succeeded,
+            "failed": failed,
+            "errors": failed_repos[:20],
+        }
+        _finish_task_run(task_run, db)
+        return {
+            "status": task_run.status.value,
+            "total": len(repo_ids),
+            "succeeded": succeeded,
+            "failed": failed,
+        }
+
+    except Exception as exc:
+        logger.exception("seed_all_models task failed")
+        task_run.status = TaskStatus.FAILED
+        task_run.error_summary = str(exc)
+        _finish_task_run(task_run, db)
+        return {"status": "failed", "error": str(exc)}
+
+    finally:
+        db.close()
