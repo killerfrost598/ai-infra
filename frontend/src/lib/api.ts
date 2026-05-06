@@ -280,11 +280,35 @@ export const api = {
   },
 
   models: {
-    list: (params?: { family?: string; search?: string; archived?: boolean }) => {
+    list: (params?: {
+      family?: string;
+      search?: string;
+      archived?: boolean;
+      use_case?: string;
+      tag?: string;
+      param_min?: number;
+      param_max?: number;
+      gated?: string;
+      quant_format?: string;
+      sort?: string;
+      is_reasoning?: boolean;
+      is_code_model?: boolean;
+      is_moe?: boolean;
+    }) => {
       const q = new URLSearchParams();
-      if (params?.family) q.set("family", params.family);
-      if (params?.search) q.set("search", params.search);
-      if (params?.archived) q.set("archived", "true");
+      if (params?.family)       q.set("family", params.family);
+      if (params?.search)       q.set("search", params.search);
+      if (params?.archived)     q.set("archived", "true");
+      if (params?.use_case)     q.set("use_case", params.use_case);
+      if (params?.tag)          q.set("tag", params.tag);
+      if (params?.param_min != null) q.set("param_min", String(params.param_min));
+      if (params?.param_max != null) q.set("param_max", String(params.param_max));
+      if (params?.gated)        q.set("gated", params.gated);
+      if (params?.quant_format) q.set("quant_format", params.quant_format);
+      if (params?.sort)         q.set("sort", params.sort);
+      if (params?.is_reasoning) q.set("is_reasoning", "true");
+      if (params?.is_code_model) q.set("is_code_model", "true");
+      if (params?.is_moe)       q.set("is_moe", "true");
       return apiFetch<ModelEntry[]>(`/api/v1/models${q.toString() ? `?${q}` : ""}`);
     },
     families: () => apiFetch<string[]>("/api/v1/models/families"),
