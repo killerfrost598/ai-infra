@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EngineName, Model } from "@/lib/models/schema";
 import { CONTEXT_STEPS_K, type ContextStepK, type KvDtype } from "@/lib/vram";
 import { USE_CASE_LABELS, type UseCase } from "@/lib/engine-advisor";
@@ -81,9 +81,12 @@ export function GpuFinderForm({ models, state, onChange }: Props) {
     } catch {}
   }, [state]);
 
+  const [quantsExpanded, setQuantsExpanded] = useState(false);
+
   const selectedModel = models.find((m) => m.id === state.modelId) ?? models[0];
   const availableEngines = selectedModel?.recommended_engines.map((e) => e.engine) ?? [];
   const quants = selectedModel?.quants.slice().sort((a, b) => b.quality_score - a.quality_score) ?? [];
+  const selectedQuant = quants.find((q) => q.name === state.quantName);
 
   function set<K extends keyof GpuFinderFormState>(key: K, value: GpuFinderFormState[K]) {
     onChange({ ...state, [key]: value });
@@ -116,30 +119,51 @@ export function GpuFinderForm({ models, state, onChange }: Props) {
 
       {/* Quantization */}
       <div className="space-y-1.5">
-        <Label>Quantization</Label>
-        <div className="flex flex-wrap gap-1.5">
-          {quants.map((q) => {
-            const fmt = (q as { quant_format?: string }).quant_format;
-            const colorCls = fmt ? quantStyle(fmt) : "";
-            const isActive = state.quantName === q.name;
-            return (
-              <button
-                key={q.name}
-                onClick={() => set("quantName", q.name)}
-                className={[
-                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
-                  colorCls,
-                  isActive ? "ring-2 ring-offset-1 ring-indigo-500" : "opacity-60 hover:opacity-90",
-                ].filter(Boolean).join(" ")}
-              >
-                {q.name}
-                {q.vram_weights_gb > 0
-                  ? <span className="ml-1 text-[9px] opacity-60">{q.vram_weights_gb.toFixed(0)}GB</span>
-                  : null}
-              </button>
-            );
-          })}
-        </div>
+        <button
+          onClick={() => setQuantsExpanded((v) => !v)}
+          className="flex w-full items-center justify-between"
+        >
+          <Label>Quantization</Label>
+          <div className="flex items-center gap-1.5">
+            {selectedQuant && !quantsExpanded && (
+              <span className={[
+                "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                quantStyle((selectedQuant as { quant_format?: string }).quant_format),
+              ].join(" ")}>
+                {selectedQuant.name}
+                {selectedQuant.vram_weights_gb > 0 && (
+                  <span className="ml-1 opacity-60">{selectedQuant.vram_weights_gb.toFixed(0)}GB</span>
+                )}
+              </span>
+            )}
+            <span className="text-[10px] text-muted-foreground/50">{quantsExpanded ? "▲" : "▼"}</span>
+          </div>
+        </button>
+        {quantsExpanded && (
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {quants.map((q) => {
+              const fmt = (q as { quant_format?: string }).quant_format;
+              const colorCls = fmt ? quantStyle(fmt) : "";
+              const isActive = state.quantName === q.name;
+              return (
+                <button
+                  key={q.name}
+                  onClick={() => { set("quantName", q.name); setQuantsExpanded(false); }}
+                  className={[
+                    "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                    colorCls,
+                    isActive ? "ring-2 ring-offset-1 ring-indigo-500" : "opacity-60 hover:opacity-90",
+                  ].filter(Boolean).join(" ")}
+                >
+                  {q.name}
+                  {q.vram_weights_gb > 0
+                    ? <span className="ml-1 text-[9px] opacity-60">{q.vram_weights_gb.toFixed(0)}GB</span>
+                    : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Engine */}

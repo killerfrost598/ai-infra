@@ -19,6 +19,7 @@ interface Props {
 
 export function VramCalculator({ model, gpuVramGb, gpuCount = 1 }: Props) {
   const [quantIdx, setQuantIdx] = useState(0);
+  const [quantsExpanded, setQuantsExpanded] = useState(false);
   const [contextIdx, setContextIdx] = useState(2); // default 8K
   const [batchSize, setBatchSize] = useState(4);
   const [kvDtype, setKvDtype] = useState<KvDtype>("fp16");
@@ -46,29 +47,50 @@ export function VramCalculator({ model, gpuVramGb, gpuCount = 1 }: Props) {
     <div className="space-y-5">
       {/* Quant picker */}
       <div className="space-y-2">
-        <SectionLabel>Quantization</SectionLabel>
-        <div className="flex flex-wrap gap-1.5">
-          {model.quants.map((q, i) => {
-            const fmt = (q as { quant_format?: string }).quant_format;
-            const colorCls = fmt ? quantStyle(fmt) : "";
-            return (
-              <button
-                key={q.name}
-                onClick={() => setQuantIdx(i)}
-                className={[
-                  "rounded border px-2.5 py-1 text-xs transition-colors",
-                  colorCls,
-                  quantIdx === i ? "ring-2 ring-offset-1 ring-indigo-500" : "opacity-70 hover:opacity-100",
-                ].filter(Boolean).join(" ")}
-              >
-                {q.name}
-                {q.vram_weights_gb > 0
-                  ? <span className="ml-1 text-[9px] opacity-70">{q.vram_weights_gb.toFixed(1)}GB</span>
-                  : null}
-              </button>
-            );
-          })}
-        </div>
+        <button
+          onClick={() => setQuantsExpanded((v) => !v)}
+          className="flex w-full items-center justify-between"
+        >
+          <SectionLabel>Quantization</SectionLabel>
+          <div className="flex items-center gap-1.5">
+            {!quantsExpanded && (
+              <span className={[
+                "rounded border px-2 py-0.5 text-[10px] font-medium",
+                quantStyle((quant as { quant_format?: string }).quant_format),
+              ].join(" ")}>
+                {quant.name}
+                {quant.vram_weights_gb > 0 && (
+                  <span className="ml-1 opacity-60">{quant.vram_weights_gb.toFixed(1)}GB</span>
+                )}
+              </span>
+            )}
+            <span className="text-[10px] text-muted-foreground/50">{quantsExpanded ? "▲" : "▼"}</span>
+          </div>
+        </button>
+        {quantsExpanded && (
+          <div className="flex flex-wrap gap-1.5">
+            {model.quants.map((q, i) => {
+              const fmt = (q as { quant_format?: string }).quant_format;
+              const colorCls = fmt ? quantStyle(fmt) : "";
+              return (
+                <button
+                  key={q.name}
+                  onClick={() => { setQuantIdx(i); setQuantsExpanded(false); }}
+                  className={[
+                    "rounded border px-2.5 py-1 text-xs transition-colors",
+                    colorCls,
+                    quantIdx === i ? "ring-2 ring-offset-1 ring-indigo-500" : "opacity-70 hover:opacity-100",
+                  ].filter(Boolean).join(" ")}
+                >
+                  {q.name}
+                  {q.vram_weights_gb > 0
+                    ? <span className="ml-1 text-[9px] opacity-70">{q.vram_weights_gb.toFixed(1)}GB</span>
+                    : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {quant.notes && (
           <p className="text-[10px] text-amber-600 dark:text-amber-400">{quant.notes}</p>
         )}
