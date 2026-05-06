@@ -11,7 +11,6 @@ import type {
   FeasibilityReport,
   HostCapabilitySnapshot,
   FeasibilityRequest,
-  HfImportResult,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
   LeaderboardRow,
@@ -331,12 +330,6 @@ export const api = {
       }),
     deleteQuant: (modelId: string, quantId: string) =>
       fetch(`${BASE_URL}/api/v1/models/${modelId}/quants/${quantId}`, { method: "DELETE" }),
-
-    importFromHf: (hf_url: string) =>
-      apiFetch<HfImportResult>("/api/v1/models/import-from-hf", {
-        method: "POST",
-        body: JSON.stringify({ hf_url }),
-      }),
 
     seed: (repo_id: string) =>
       apiFetch<SeedResponse>("/api/v1/models/seed", {

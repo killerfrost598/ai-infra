@@ -550,9 +550,3 @@ export interface ModelQuantCreate {
   arch_sglang?: boolean;
   notes?: string | null;
 }
-
-export interface HfImportResult {
-  suggested: ModelCreate;
-  confidence: Record<string, string>;
-  raw_hf_repo: string;
-}

@@ -8,8 +8,6 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.entities import Model, ModelQuant, TaskRun
 from app.schemas.models import (
-    HfImportRequest,
-    HfImportResult,
     ModelCreate,
     ModelQuantCreate,
     ModelQuantResponse,
@@ -20,8 +18,6 @@ from app.schemas.models import (
     SeedResponse,
     SyncStatus,
 )
-from app.services.hf_parser import parse_hf_model
-
 router = APIRouter()
 
 
@@ -277,18 +273,3 @@ def refresh_all_models(db: Session = Depends(get_db)) -> dict:
     from app.workers.tasks import seed_all_models
     result = seed_all_models.delay()
     return {"celery_task_id": result.id, "queued": count}
-
-
-# ── HF import (legacy — will be removed in Phase 10.6) ───────────────────────
-
-@router.post("/import-from-hf", response_model=HfImportResult)
-def import_from_hf(payload: HfImportRequest) -> HfImportResult:
-    try:
-        result = parse_hf_model(payload.hf_url)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"HuggingFace fetch failed: {exc}") from exc
-    return HfImportResult(
-        suggested=ModelCreate(**result["suggested"]),
-        confidence=result["confidence"],
-        raw_hf_repo=result["raw_hf_repo"],
-    )

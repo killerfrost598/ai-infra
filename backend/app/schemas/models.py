@@ -186,16 +186,6 @@ class ModelResponse(UUIDSchema):
     hf_created_at: datetime | None
 
 
-class HfImportRequest(BaseSchema):
-    hf_url: str
-
-
-class HfImportResult(BaseSchema):
-    suggested: ModelCreate
-    confidence: dict[str, str]  # field -> "high" | "medium" | "low" | "missing"
-    raw_hf_repo: str
-
-
 # ── HF seeder schemas ─────────────────────────────────────────────────────────
 
 class SeedRequest(BaseSchema):
