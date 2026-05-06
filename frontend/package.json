@@ -3,9 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "copy-catalogue": "node -e \"const{mkdirSync,existsSync,copyFileSync}=require('fs');mkdirSync('public/data',{recursive:true});if(existsSync('../data/models.json')){copyFileSync('../data/models.json','public/data/models.json');console.log('catalogue copied');}else{console.log('catalogue: using committed copy');}\"",
-    "predev": "npm run copy-catalogue",
-    "prebuild": "npm run copy-catalogue",
     "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
     "start": "next start -p 3000",

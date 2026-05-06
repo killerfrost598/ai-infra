@@ -31,6 +31,65 @@ logger = logging.getLogger(__name__)
 _CACHE_TTL = 24 * 3600
 _USER_AGENT = "ai-infra-seeder/0.2 (+local)"
 
+# ── Author classification ──────────────────────────────────────────────────────
+
+STANDARD_AUTHORS: dict[str, str] = {
+    "meta-llama": "Meta", "facebook": "Meta",
+    "google": "Google", "google-research": "Google",
+    "google-deepmind": "Google DeepMind", "deepmind": "Google DeepMind",
+    "microsoft": "Microsoft", "nvidia": "NVIDIA",
+    "deepseek-ai": "DeepSeek",
+    "qwen": "Alibaba (Qwen)", "alibaba-nlp": "Alibaba",
+    "mistralai": "Mistral AI", "mistral-community": "Mistral AI",
+    "apple": "Apple", "ibm": "IBM", "ibm-granite": "IBM",
+    "cohereforai": "Cohere", "coherelabs": "Cohere",
+    "01-ai": "01.AI", "databricks": "Databricks",
+    "xai-org": "xAI", "tiiuae": "TII (Falcon)",
+    "allenai": "Allen AI", "openai": "OpenAI",
+    "stabilityai": "Stability AI", "bigcode": "BigCode",
+    "bigscience": "BigScience",
+    "huggingfaceh4": "Hugging Face H4", "huggingfacetb": "Hugging Face",
+    "ai21labs": "AI21", "snowflake": "Snowflake",
+    "internlm": "InternLM", "thudm": "THUDM (Zhipu)",
+    "zai-org": "Zhipu AI", "baichuan-inc": "Baichuan",
+    "moonshotai": "Moonshot AI", "minimax-ai": "MiniMax",
+    "rakutengroup": "Rakuten", "amazon": "Amazon",
+    "salesforce": "Salesforce", "intel": "Intel", "amd": "AMD",
+    "perplexity-ai": "Perplexity", "kyutai": "Kyutai",
+    "nousresearch": "Nous Research", "togethercomputer": "Together AI",
+    "upstage": "Upstage",
+}
+
+KNOWN_COMMUNITY_AUTHORS: dict[str, str] = {
+    "unsloth": "Unsloth", "mlx-community": "MLX Community",
+    "thebloke": "TheBloke", "bartowski": "bartowski",
+    "lmstudio-community": "LM Studio Community", "lmstudio-ai": "LM Studio",
+    "maziyarpanahi": "MaziyarPanahi", "quantfactory": "QuantFactory",
+    "legraphista": "legraphista",
+    "nm-testing": "Neural Magic", "neuralmagic": "Neural Magic",
+    "redhatai": "Red Hat AI", "cortexso": "Cortex",
+    "modelcloud": "ModelCloud", "ggml-org": "ggml.org",
+    "ggerganov": "ggerganov", "casperhansen": "casperhansen",
+    "second-state": "Second State", "tensorblock": "TensorBlock",
+    "qwen-mlx": "Qwen-MLX", "ikawrakow": "ikawrakow",
+    "mradermacher": "mradermacher", "city96": "city96",
+    "hugging-quants": "Hugging Quants", "intel-optimized": "Intel Optimized",
+}
+
+
+def classify_author(repo_id: str) -> tuple[str, str, str]:
+    """Return (author, author_class, author_label). author_class: standard | community | private."""
+    if "/" not in repo_id:
+        return repo_id, "private", repo_id
+    author = repo_id.split("/", 1)[0]
+    key = author.lower()
+    if key in STANDARD_AUTHORS:
+        return author, "standard", STANDARD_AUTHORS[key]
+    if key in KNOWN_COMMUNITY_AUTHORS:
+        return author, "community", KNOWN_COMMUNITY_AUTHORS[key]
+    return author, "private", author
+
+
 # ── GGUF constants ─────────────────────────────────────────────────────────────
 
 GGUF_VARIANT_RE = re.compile(
@@ -460,12 +519,17 @@ def _build_model_fields(
 
     caps = _detect_capabilities(tags, name)
     is_moe, moe_active = _detect_moe(cfg)
+    author, author_class, author_label = classify_author(repo_id)
 
     return {
         "model_key": repo_id,
         "name": name,
         "family": org,
         "org": org,
+        "author": author,
+        "author_class": author_class,
+        "author_label": author_label,
+        "author_url": f"https://huggingface.co/{author}",
         "param_count_b": param_count_b,
         "architecture": architecture,
         "pipeline_tag": info.get("pipeline_tag"),
@@ -509,10 +573,15 @@ def _build_quant_dicts(
     siblings: list[dict[str, Any]] = quant_info.get("siblings") or []
 
     fmt, variant, bpw = _detect_quant_format(tags, safe, gguf, repo_id, quant_info.get("library_name"))
+    q_author, q_author_class, q_author_label = classify_author(repo_id)
 
     base: dict[str, Any] = {
         "hf_repo": repo_id,
         "hf_url": f"https://huggingface.co/{repo_id}",
+        "author": q_author,
+        "author_class": q_author_class,
+        "author_label": q_author_label,
+        "author_url": f"https://huggingface.co/{q_author}",
         "quant_format": fmt,
         "quant_variant": variant,
         "tags": tags,

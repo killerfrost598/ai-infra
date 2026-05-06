@@ -18,6 +18,8 @@ from app.schemas.models import (
     SeedResponse,
     SyncStatus,
 )
+from app.services.settings_service import get_default_seed_models, get_excluded_quant_formats
+
 router = APIRouter()
 
 
@@ -94,6 +96,19 @@ def list_models(
         q = q.filter(
             exists().where(
                 (ModelQuant.model_id == Model.id) & (ModelQuant.quant_format == quant_format)
+            )
+        )
+
+    # Global excluded_quant_formats setting — hide models whose every quant is excluded
+    excluded = get_excluded_quant_formats(db)
+    if excluded:
+        from sqlalchemy import select as sa_select
+        q = q.filter(
+            exists(
+                sa_select(ModelQuant.id).where(
+                    ModelQuant.model_id == Model.id,
+                    ModelQuant.quant_format.notin_(excluded),
+                ).correlate(Model)
             )
         )
 
@@ -273,3 +288,20 @@ def refresh_all_models(db: Session = Depends(get_db)) -> dict:
     from app.workers.tasks import seed_all_models
     result = seed_all_models.delay()
     return {"celery_task_id": result.id, "queued": count}
+
+
+@router.post("/seed-defaults", status_code=202)
+def seed_default_models(db: Session = Depends(get_db)) -> dict:
+    """Enqueue a seed task for every repo in the default_seed_models setting."""
+    repos = get_default_seed_models(db)
+    if not repos:
+        raise HTTPException(
+            status_code=409,
+            detail="No default models configured. Add HF repo IDs in Settings → Default models.",
+        )
+    from app.workers.tasks import seed_model_from_hf
+    task_ids = []
+    for repo_id in repos:
+        result = seed_model_from_hf.delay(repo_id)
+        task_ids.append(result.id)
+    return {"queued": len(repos), "repo_ids": repos, "celery_task_ids": task_ids}

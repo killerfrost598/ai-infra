@@ -27,6 +27,9 @@ KNOWN_KEYS: tuple[str, ...] = (
     "clore_min_ul_mbps",
     "clore_min_cuda",
     "clore_min_vram_gb",
+    # Models knowledge base
+    "default_seed_models",       # newline-separated HF repo IDs to auto-seed on first run
+    "excluded_quant_formats",    # comma/newline-separated quant formats to hide globally
 )
 
 # Keys that, when saved or cleared, must invalidate the filtered offers cache.
@@ -65,6 +68,33 @@ def get_setting(key: str, db: Session) -> str | None:
         if value and value != "replace_me":
             return value
     return None
+
+
+_VALID_QUANT_FORMATS: frozenset[str] = frozenset({
+    "gguf", "awq", "gptq", "bnb", "fp8", "fp16", "int8", "int4", "fp4", "mlx", "unknown",
+})
+
+
+def get_default_seed_models(db: Session) -> list[str]:
+    """Return the ordered list of HF repo IDs from the default_seed_models setting."""
+    raw = get_setting("default_seed_models", db) or ""
+    repos = []
+    for line in raw.replace(",", "\n").splitlines():
+        repo = line.strip()
+        if repo and "/" in repo:
+            repos.append(repo)
+    return repos
+
+
+def get_excluded_quant_formats(db: Session) -> set[str]:
+    """Return the set of quant format keys to exclude globally from /models responses."""
+    raw = get_setting("excluded_quant_formats", db) or ""
+    result = set()
+    for token in raw.replace(",", "\n").splitlines():
+        fmt = token.strip().lower()
+        if fmt in _VALID_QUANT_FORMATS:
+            result.add(fmt)
+    return result
 
 
 def upsert_setting(key: str, value: str, db: Session) -> PlatformSetting:

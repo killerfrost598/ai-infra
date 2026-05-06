@@ -26,6 +26,10 @@ class ModelQuantCreate(BaseSchema):
     gated: str | None = None
     hf_downloads: int | None = None
     hf_likes: int | None = None
+    author: str | None = None
+    author_class: str | None = None
+    author_label: str | None = None
+    author_url: str | None = None
 
 
 class ModelQuantUpdate(BaseSchema):
@@ -48,6 +52,10 @@ class ModelQuantUpdate(BaseSchema):
     gated: str | None = None
     hf_downloads: int | None = None
     hf_likes: int | None = None
+    author: str | None = None
+    author_class: str | None = None
+    author_label: str | None = None
+    author_url: str | None = None
 
 
 class ModelQuantResponse(UUIDSchema):
@@ -71,6 +79,10 @@ class ModelQuantResponse(UUIDSchema):
     gated: str | None
     hf_downloads: int | None
     hf_likes: int | None
+    author: str | None
+    author_class: str | None
+    author_label: str | None
+    author_url: str | None
 
 
 class ModelCreate(BaseSchema):
@@ -108,6 +120,10 @@ class ModelCreate(BaseSchema):
     hf_trending_score: float | None = None
     hf_last_modified: datetime | None = None
     hf_created_at: datetime | None = None
+    author: str | None = None
+    author_class: str | None = None
+    author_label: str | None = None
+    author_url: str | None = None
 
 
 class ModelUpdate(BaseSchema):
@@ -143,6 +159,10 @@ class ModelUpdate(BaseSchema):
     hf_trending_score: float | None = None
     hf_last_modified: datetime | None = None
     hf_created_at: datetime | None = None
+    author: str | None = None
+    author_class: str | None = None
+    author_label: str | None = None
+    author_url: str | None = None
 
 
 class ModelResponse(UUIDSchema):
@@ -184,6 +204,10 @@ class ModelResponse(UUIDSchema):
     hf_trending_score: float | None
     hf_last_modified: datetime | None
     hf_created_at: datetime | None
+    author: str | None
+    author_class: str | None
+    author_label: str | None
+    author_url: str | None
 
 
 # ── HF seeder schemas ─────────────────────────────────────────────────────────
