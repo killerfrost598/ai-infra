@@ -1,5 +1,5 @@
 export const FORMAT_STYLE: Record<string, string> = {
-  gguf:    "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-300/50 dark:border-amber-700/40",
+  gguf:    "bg-white text-amber-800 dark:bg-zinc-900 dark:text-amber-300 border-amber-300/50 dark:border-amber-700/40",
   awq:     "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300 border-violet-300/50 dark:border-violet-700/40",
   gptq:    "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300 border-sky-300/50 dark:border-sky-700/40",
   fp8:     "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-300/50 dark:border-emerald-700/40",
