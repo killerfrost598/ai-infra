@@ -12,6 +12,9 @@ import {
   Download,
   Heart,
   TrendingUp,
+  Building2,
+  Users,
+  User,
 } from "lucide-react";
 import type { ModelEntry, ModelQuant } from "@/lib/types";
 import type { GpuProfile } from "@/lib/gpu-profiles";
@@ -96,32 +99,31 @@ export function ModelCard({
             )}
           </div>
 
-          {/* HF stats */}
-          {(model.hf_downloads != null || model.hf_likes != null || model.hf_trending_score != null) && (
-            <div className="mt-0.5 flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground/60">
-              {model.hf_downloads != null && (
-                <span className="flex items-center gap-0.5">
-                  <Download className="size-2.5" />
-                  {fmtNum(model.hf_downloads)}
-                </span>
-              )}
-              {model.hf_likes != null && (
-                <span className="flex items-center gap-0.5">
-                  <Heart className="size-2.5" />
-                  {fmtNum(model.hf_likes)}
-                </span>
-              )}
-              {model.hf_trending_score != null && (
-                <span className="flex items-center gap-0.5">
-                  <TrendingUp className="size-2.5" />
-                  {model.hf_trending_score.toFixed(1)}
-                </span>
-              )}
-              {model.family && (
-                <span className="text-muted-foreground/40">{model.family}</span>
-              )}
-            </div>
-          )}
+          {/* HF stats + author */}
+          <div className="mt-0.5 flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground/60">
+            {model.hf_downloads != null && (
+              <span className="flex items-center gap-0.5">
+                <Download className="size-2.5" />
+                {fmtNum(model.hf_downloads)}
+              </span>
+            )}
+            {model.hf_likes != null && (
+              <span className="flex items-center gap-0.5">
+                <Heart className="size-2.5" />
+                {fmtNum(model.hf_likes)}
+              </span>
+            )}
+            {model.hf_trending_score != null && (
+              <span className="flex items-center gap-0.5">
+                <TrendingUp className="size-2.5" />
+                {model.hf_trending_score.toFixed(1)}
+              </span>
+            )}
+            {model.family && (
+              <span className="text-muted-foreground/40">{model.family}</span>
+            )}
+            {model.author_label && <AuthorBadge model={model} />}
+          </div>
 
           {/* Quant chips (collapsed view) */}
           {!expanded && quants.length > 0 && (
@@ -202,7 +204,7 @@ function ExpandedQuantRow({
       <QuantChip quant={quant} targetGpu={targetGpu} />
       <span className="text-[10px] text-muted-foreground/60 min-w-0 truncate">
         {quant.bits_per_weight}bpw · {quant.disk_size_gb.toFixed(1)} GB disk ·{" "}
-        {quant.vram_weights_gb.toFixed(1)} GB VRAM
+        {quant.vram_weights_gb.toFixed(1)} GB size
         {quant.cc_min ? ` · CC≥${quant.cc_min}` : ""}
         {quant.arch_vllm ? " · vLLM" : ""}
         {quant.arch_sglang ? " · SGLang" : ""}
@@ -212,6 +214,48 @@ function ExpandedQuantRow({
         <IconBtn icon={<Trash2 className="size-2.5" />} label="Delete" onClick={onDelete} danger />
       </div>
     </div>
+  );
+}
+
+function AuthorBadge({ model }: { model: ModelEntry }) {
+  const { author_class, author_label, author_url } = model;
+  if (!author_label) return null;
+
+  const icon =
+    author_class === "standard" ? <Building2 className="size-2.5" /> :
+    author_class === "community" ? <Users className="size-2.5" /> :
+    <User className="size-2.5" />;
+
+  const cls =
+    author_class === "standard"
+      ? "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400"
+      : author_class === "community"
+      ? "border-border/60 text-muted-foreground"
+      : "border-transparent text-muted-foreground/40";
+
+  const inner = (
+    <span
+      className={[
+        "inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 text-[9px] font-medium",
+        cls,
+      ].join(" ")}
+    >
+      {icon}
+      {author_label}
+    </span>
+  );
+
+  return author_url ? (
+    <a
+      href={author_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {inner}
+    </a>
+  ) : (
+    inner
   );
 }
 

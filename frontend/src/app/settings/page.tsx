@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layouts/page-header";
 import { ErrorState, LoadingState } from "@/components/layouts/page-states";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
+import { DefaultModelsCard } from "@/components/settings/DefaultModelsCard";
+import { GlobalFiltersCard } from "@/components/settings/GlobalFiltersCard";
 
 interface SettingMeta {
   label: string;
@@ -89,15 +91,6 @@ const SETTING_META: Record<string, SettingMeta> = {
 const API_KEY_KEYS = ["clore_api_key", "anthropic_api_key"];
 const HF_KEY_KEYS = ["hf_token"];
 const SSH_KEY_KEYS = ["ssh_private_key"];
-const CLORE_FILTER_KEYS = [
-  "clore_min_pcie_gen",
-  "clore_min_pcie_width",
-  "clore_min_disk_gb",
-  "clore_min_dl_mbps",
-  "clore_min_ul_mbps",
-  "clore_min_cuda",
-  "clore_min_vram_gb",
-];
 
 function ConfiguredBadge({ configured }: { configured: boolean }) {
   if (configured) {
@@ -371,19 +364,11 @@ export default function SettingsPage() {
           <div className="space-y-4">
             {renderSection(HF_KEY_KEYS)}
             <RefreshModelsCard />
+            <DefaultModelsCard />
           </div>
 
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Clore Global Filters</p>
-          <Card className="px-6 py-4 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground mb-1">Quality bar for GPU marketplace</p>
-            <p className="text-xs text-muted-foreground">
-              These filters apply globally to both the Marketplace and GPU Finder pages.
-              The offer list is cached for 10 minutes — saving or clearing a filter immediately
-              invalidates the cache so the next page load reflects the updated criteria.
-              All fields are optional; leave blank to apply no filter on that dimension.
-            </p>
-          </Card>
-          <div className="space-y-4">{renderSection(CLORE_FILTER_KEYS)}</div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Global Filters</p>
+          <GlobalFiltersCard />
 
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">SSH</p>
           <Card className="px-6 py-4 text-sm text-muted-foreground">

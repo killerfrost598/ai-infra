@@ -310,6 +310,7 @@ export interface SettingEntry {
   key: string;
   is_configured: boolean;
   updated_at: string | null;
+  value?: string | null;
 }
 
 export interface SettingsResponse {

@@ -102,6 +102,7 @@ const sections = [
 
 const QUICK_START_STEPS = [
   { href: "/settings", label: "Configure API keys", detail: "Set Clore and optional Anthropic keys in Settings." },
+  { href: "/settings#default-models", label: "Choose default models", detail: "List the HF repos you want auto-seeded — then click Seed defaults now." },
   { href: "/clore", label: "Rent a GPU server", detail: "Choose an offer in Marketplace and complete rental auth." },
   { href: "/servers", label: "Verify registration", detail: "Confirm server appears in Servers and test SSH connectivity." },
   { href: "/lab", label: "Open a terminal session", detail: "Use Lab for interactive command execution and session logs." },

@@ -10,15 +10,16 @@ from app.models.entities import ProviderAccount, Server, ServerStatus
 from app.schemas.servers import ServerResponse
 from app.services.clore_client import CloreClient, CloreOffer
 from app.services.clore_filters import apply_filters, load_clore_filters
+from app.services.clore_grouping import group_offers
 from app.services.settings_service import get_setting
 
-# Two-key cache design:
-#   clore:offers:raw      — full unfiltered list (used by feasibility + benchmarks)
-#   clore:offers:filtered — quality-bar filtered list (used by UI pages)
-#   clore:offers:meta     — metadata for the filtered list (timestamps, counts)
-_RAW_KEY = "clore:offers:raw"
-_FILTERED_KEY = "clore:offers:filtered"
-_META_KEY = "clore:offers:meta"
+# v2 cache keys — include parsed GPU fields and offer groups.
+# Old keys (without :v2) are deleted on every write to prevent stale data.
+_RAW_KEY = "clore:offers:raw:v2"
+_FILTERED_KEY = "clore:offers:filtered:v2"
+_GROUPS_KEY = "clore:offers:groups:v2"
+_META_KEY = "clore:offers:meta:v2"
+_OLD_KEYS = ["clore:offers:raw", "clore:offers:filtered", "clore:offers:meta"]
 _CACHE_TTL = 600  # 10 minutes
 
 
@@ -122,11 +123,16 @@ def list_offers(
         try:
             r = _get_redis()
             filtered_raw = r.get(_FILTERED_KEY)
+            groups_raw = r.get(_GROUPS_KEY)
             meta_raw = r.get(_META_KEY)
-            if filtered_raw and meta_raw:
+            if filtered_raw and groups_raw and meta_raw:
                 meta = json.loads(meta_raw)
                 meta["from_cache"] = True
-                return {"offers": json.loads(filtered_raw), "meta": meta}
+                return {
+                    "offers": json.loads(filtered_raw),
+                    "groups": json.loads(groups_raw),
+                    "meta": meta,
+                }
         except Exception:
             pass
 
@@ -158,6 +164,10 @@ def list_offers(
     clore_filters = load_clore_filters(db)
     filtered_offers, applied = apply_filters(raw_offers, clore_filters)
 
+    # Build grouped representation for the UI grouped browse view
+    groups = group_offers(filtered_offers)
+    group_dicts = [g.model_dump() for g in groups]
+
     meta = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "total_raw": len(raw_offers),
@@ -169,12 +179,15 @@ def list_offers(
     filtered_dicts = [o.model_dump() for o in filtered_offers]
     try:
         r = _get_redis()
+        # Nuke old-format keys before writing new ones
+        r.delete(*_OLD_KEYS)
         r.setex(_FILTERED_KEY, _CACHE_TTL, json.dumps(filtered_dicts))
+        r.setex(_GROUPS_KEY, _CACHE_TTL, json.dumps(group_dicts))
         r.setex(_META_KEY, _CACHE_TTL, json.dumps(meta))
     except Exception:
         pass
 
-    return {"offers": filtered_dicts, "meta": meta}
+    return {"offers": filtered_dicts, "groups": group_dicts, "meta": meta}
 
 
 @router.get("/rentals")

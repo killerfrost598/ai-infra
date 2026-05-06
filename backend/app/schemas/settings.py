@@ -7,6 +7,7 @@ class SettingResponse(BaseSchema):
     key: str
     is_configured: bool
     updated_at: datetime | None = None
+    value: str | None = None  # populated for non-secret keys only
 
 
 class SettingUpsert(BaseSchema):

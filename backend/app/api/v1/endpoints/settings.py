@@ -9,6 +9,7 @@ from app.services.settings_service import CLORE_FILTER_KEYS, KNOWN_KEYS, get_set
 router = APIRouter()
 
 _FILTERED_CACHE_KEYS = ("clore:offers:filtered", "clore:offers:meta")
+_SECRET_KEYS: frozenset[str] = frozenset({"clore_api_key", "hf_token", "anthropic_api_key", "ssh_private_key"})
 
 
 def _invalidate_filtered_cache() -> None:
@@ -43,6 +44,7 @@ def list_settings(db: Session = Depends(get_db)) -> SettingsListResponse:
                 key=key,
                 is_configured=bool(value),
                 updated_at=row.updated_at if row else None,
+                value=value if key not in _SECRET_KEYS else None,
             )
         )
     return SettingsListResponse(settings=settings)

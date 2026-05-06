@@ -11,7 +11,7 @@ import {
   type RankedBucket,
   type RankedOffer,
 } from "@/lib/gpu-finder";
-import type { CloreOffer } from "@/lib/types";
+import type { CloreOffer, CloreOfferGroup } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { RentDialog } from "@/components/clore/RentDialog";
 import {
@@ -21,6 +21,7 @@ import {
   type GpuFinderFormState,
 } from "./GpuFinderForm";
 import { GpuFinderResult } from "./GpuFinderResult";
+import { GpuGroupCard } from "./GpuGroupCard";
 
 const ModelAdvisorSheet = dynamic(
   () => import("@/components/advisor/ModelAdvisorSheet").then((m) => m.ModelAdvisorSheet),
@@ -28,12 +29,21 @@ const ModelAdvisorSheet = dynamic(
 );
 
 type BucketChip = RankedBucket | null;
+type ViewMode = "grouped" | "list";
+
+const VIEW_MODE_KEY = "gpu-finder:view-mode:v1";
+
+function loadViewMode(): ViewMode {
+  if (typeof window === "undefined") return "grouped";
+  return localStorage.getItem(VIEW_MODE_KEY) === "list" ? "list" : "grouped";
+}
 
 export function GpuFinderPanel() {
   const { data: catalogue, isLoading: loadingCatalogue } = useCatalogue();
   const { data: offersData, isLoading: loadingOffers } = useCloreOffers();
   const refreshMutation = useRefreshCloreOffers();
   const offers = offersData?.offers;
+  const groups = offersData?.groups ?? [];
   const models = catalogue?.models ?? [];
 
   const [formState, setFormState] = useState<GpuFinderFormState>(() => ({
@@ -52,10 +62,17 @@ export function GpuFinderPanel() {
   const [bucketFilter, setBucketFilter] = useState<BucketChip>(null);
   const [showUnfit, setShowUnfit] = useState(false);
   const [visibleCount, setVisibleCount] = useState(20);
+  const [visibleGroupCount, setVisibleGroupCount] = useState(15);
   const [sortKey, setSortKey] = useState<"rank" | "price_asc" | "price_desc">("rank");
+  const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
   const [rentTarget, setRentTarget] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
+
+  function switchViewMode(mode: ViewMode) {
+    setViewMode(mode);
+    localStorage.setItem(VIEW_MODE_KEY, mode);
+  }
 
   // Initialise form once catalogue is available
   useEffect(() => {
@@ -114,8 +131,44 @@ export function GpuFinderPanel() {
   const displayedRanked = filteredRanked.slice(0, visibleCount);
   const hasMore = filteredRanked.length > visibleCount;
 
+  // Build offer-id → group-key map for fast lookup
+  const offerIdToGroupKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of groups) {
+      for (const id of g.offer_ids) {
+        map.set(id, g.key);
+      }
+    }
+    return map;
+  }, [groups]);
+
+  // Group the sorted ranked offers (preserves sort order for group ordering)
+  const groupedRanked = useMemo(() => {
+    if (!groups.length || !rankResult) return [];
+    const groupByKey = new Map<string, CloreOfferGroup>(groups.map((g) => [g.key, g]));
+    const byKey = new Map<string, RankedOffer[]>();
+    const order: string[] = [];
+
+    for (const ro of filteredRanked) {
+      const groupKey = offerIdToGroupKey.get(ro.offer.id);
+      if (!groupKey) continue; // mixed / unrecognised rigs — list mode only
+      if (!byKey.has(groupKey)) {
+        byKey.set(groupKey, []);
+        order.push(groupKey);
+      }
+      byKey.get(groupKey)!.push(ro);
+    }
+
+    return order
+      .map((key) => ({ group: groupByKey.get(key)!, offers: byKey.get(key)! }))
+      .filter(({ group }) => !!group);
+  }, [groups, filteredRanked, offerIdToGroupKey, rankResult]);
+
+  const displayedGroups = groupedRanked.slice(0, visibleGroupCount);
+  const hasMoreGroups = groupedRanked.length > visibleGroupCount;
+
   // Reset pagination when the result set changes (new model/quant/filter)
-  useEffect(() => { setVisibleCount(20); }, [rankResult, bucketFilter]);
+  useEffect(() => { setVisibleCount(20); setVisibleGroupCount(15); }, [rankResult, bucketFilter]);
 
   function openRent(offer: CloreOffer) {
     setRentTarget(offer);
@@ -213,11 +266,27 @@ export function GpuFinderPanel() {
                 {offersData.meta.total_filtered}/{offersData.meta.total_raw} passed quality bar
               </span>
             )}
+            {viewMode === "grouped" && groupedRanked.length > 0 && (
+              <span className="text-[10px] text-muted-foreground/50">
+                {groupedRanked.length} types / {filteredRanked.length} offers
+              </span>
+            )}
             <div className="flex items-center gap-1 border-l border-border pl-2">
               {(["rank", "price_asc", "price_desc"] as const).map((k) => (
                 <button key={k} onClick={() => setSortKey(k)}
                   className={`rounded px-2 py-1 text-xs transition-colors ${sortKey === k ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                   {k === "rank" ? "Rank" : k === "price_asc" ? "Price ↑" : "Price ↓"}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 border-l border-border pl-2">
+              {(["grouped", "list"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => switchViewMode(mode)}
+                  className={`rounded px-2 py-1 text-xs transition-colors ${viewMode === mode ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {mode === "grouped" ? "Grouped" : "List"}
                 </button>
               ))}
             </div>
@@ -275,8 +344,44 @@ export function GpuFinderPanel() {
           />
         )}
 
-        {/* ── Ranked results ── */}
-        {displayedRanked.length > 0 && (
+        {/* ── Grouped results ── */}
+        {viewMode === "grouped" && groupedRanked.length > 0 && (
+          <div className="space-y-2">
+            {displayedGroups.map(({ group, offers: groupOffers }) => (
+              <GpuGroupCard
+                key={group.key}
+                group={group}
+                offers={groupOffers}
+                modelKey={selectedModel?.id ?? ""}
+                quant={selectedQuant?.name ?? ""}
+                onRent={openRent}
+                onAdvise={openAdvisor}
+              />
+            ))}
+            {hasMoreGroups && (
+              <button
+                onClick={() => setVisibleGroupCount((c) => c + 15)}
+                className="w-full rounded-xl border border-border py-3 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                Show {Math.min(15, groupedRanked.length - visibleGroupCount)} more GPU types
+                <span className="ml-1 text-muted-foreground/50">
+                  ({groupedRanked.length - visibleGroupCount} remaining)
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── Grouped empty: offers exist but none could be grouped (all mixed/unrecognised) ── */}
+        {viewMode === "grouped" && rankResult && displayedRanked.length > 0 && groupedRanked.length === 0 && (
+          <EmptyState
+            title="No GPU groups to show"
+            body="GPU names could not be parsed. Switch to List view to see all offers."
+          />
+        )}
+
+        {/* ── List results ── */}
+        {viewMode === "list" && displayedRanked.length > 0 && (
           <div className="space-y-3">
             {displayedRanked.map((r) => (
               <GpuFinderResult

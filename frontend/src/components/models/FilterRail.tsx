@@ -7,6 +7,7 @@ import { RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
 import { GPU_PROFILES } from "@/lib/gpu-profiles";
 import { Button } from "@/components/ui/button";
+import { useSettings } from "@/lib/queries";
 
 const PARAM_BUCKETS = [
   { label: "≤ 4B",    param_min: undefined, param_max: 4   },
@@ -47,6 +48,12 @@ export function FilterRail({ className = "" }: FilterRailProps) {
     queryFn:  () => api.models.tagVocabulary(),
     staleTime: 5 * 60 * 1000,
   });
+
+  const { data: settingsData } = useSettings();
+  const rawExcluded = settingsData?.settings.find((s) => s.key === "excluded_quant_formats")?.value ?? "";
+  const globallyExcluded = new Set(
+    rawExcluded.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean),
+  );
 
   const setParam = useCallback(
     (key: string, value: string | null) => {
@@ -149,6 +156,7 @@ export function FilterRail({ className = "" }: FilterRailProps) {
               key={fmt}
               label={fmt.toUpperCase()}
               active={currentFormat === fmt}
+              excluded={globallyExcluded.has(fmt)}
               onClick={() => toggleParam("quant_format", fmt)}
             />
           ))}
@@ -259,16 +267,28 @@ function RowChip({ label, active, onClick }: { label: string; active: boolean; o
   );
 }
 
-function PillChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function PillChip({
+  label,
+  active,
+  excluded,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  excluded?: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
+      title={excluded ? `${label} is globally excluded in Settings` : undefined}
       className={[
         "rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors",
         active
           ? "border-primary bg-primary text-primary-foreground"
           : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
-      ].join(" ")}
+        excluded ? "line-through opacity-40" : "",
+      ].filter(Boolean).join(" ")}
     >
       {label}
     </button>
