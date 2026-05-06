@@ -84,7 +84,9 @@ export function GpuFinderForm({ models, state, onChange }: Props) {
   const [quantsExpanded, setQuantsExpanded] = useState(false);
 
   const selectedModel = models.find((m) => m.id === state.modelId) ?? models[0];
-  const availableEngines = selectedModel?.recommended_engines.map((e) => e.engine) ?? [];
+  const availableEngines: string[] = selectedModel?.recommended_engines.length
+    ? selectedModel.recommended_engines.map((e) => e.engine)
+    : ["vllm", "sglang", "ollama"];
   const quants = selectedModel?.quants.slice().sort((a, b) => b.quality_score - a.quality_score) ?? [];
   const selectedQuant = quants.find((q) => q.name === state.quantName);
 

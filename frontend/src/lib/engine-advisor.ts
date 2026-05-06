@@ -18,6 +18,12 @@ export interface EngineRecommendation {
   meetsVramMin: boolean;
 }
 
+const DEFAULT_ENGINE_SPECS = (minVramGb: number) => [
+  { engine: "vllm"   as const, score: 0.80, min_vram_gb: minVramGb },
+  { engine: "sglang" as const, score: 0.75, min_vram_gb: minVramGb },
+  { engine: "ollama" as const, score: 0.60, min_vram_gb: minVramGb },
+];
+
 export function recommendEngines(
   model: Model,
   gpuVramGb: number,
@@ -28,7 +34,14 @@ export function recommendEngines(
   const availableGb = gpuVramGb * gpuCount;
   const results: EngineRecommendation[] = [];
 
-  for (const spec of model.recommended_engines) {
+  const minVram = model.quants.length
+    ? Math.min(...model.quants.map((q) => q.vram_weights_gb).filter((v) => v > 0))
+    : gpuVramGb;
+  const specs = model.recommended_engines.length
+    ? model.recommended_engines
+    : DEFAULT_ENGINE_SPECS(minVram || gpuVramGb);
+
+  for (const spec of specs) {
     const meetsVramMin = availableGb >= spec.min_vram_gb;
     let score = spec.score;
 

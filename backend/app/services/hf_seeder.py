@@ -356,6 +356,18 @@ def _compute_tp_sizes(num_heads: int | None, num_kv: int | None) -> list[int] | 
     return sorted(divs) or None
 
 
+_TORCH_DTYPE_MAP: dict[str, str] = {
+    "bfloat16": "bf16",
+    "float16": "fp16",
+    "float32": "fp16",   # treat fp32 as fp16 for KV cache purposes
+    "float8_e4m3fn": "fp8",
+    "float8_e5m2": "fp8",
+    "fp16": "fp16",
+    "bf16": "bf16",
+    "fp8": "fp8",
+}
+
+
 def _build_kv_cache(config: dict[str, Any] | None) -> dict[str, Any]:
     if not config:
         return {}
@@ -364,11 +376,13 @@ def _build_kv_cache(config: dict[str, Any] | None) -> dict[str, Any]:
     head_dim = config.get("head_dim")
     if not head_dim and hidden and num_heads:
         head_dim = hidden // num_heads
+    raw_dtype = config.get("torch_dtype") or ""
+    kv_dtype = _TORCH_DTYPE_MAP.get(str(raw_dtype).lower(), "fp16")
     return {
         "num_layers": config.get("num_hidden_layers"),
         "num_kv_heads": config.get("num_key_value_heads") or num_heads,
         "head_dim": head_dim,
-        "kv_dtype_default": config.get("torch_dtype"),
+        "kv_dtype_default": kv_dtype,
     }
 
 
@@ -485,6 +499,59 @@ def _sglang_supports(fmt: str) -> bool:
     return fmt in {"fp16", "awq", "gptq", "fp8", "int8"}
 
 
+# Maps GGUF bpw → quality score (higher bpw = better quality)
+_GGUF_BPW_QUALITY: dict[float, float] = {
+    2.0: 0.20, 2.5: 0.25, 3.0: 0.32, 3.5: 0.38,
+    4.0: 0.48, 4.5: 0.55, 5.0: 0.63, 5.5: 0.68,
+    6.0: 0.75, 6.5: 0.78, 7.0: 0.82, 8.0: 0.88,
+}
+
+_FMT_QUALITY: dict[str, float] = {
+    "fp16": 1.00, "bf16": 1.00,
+    "fp8": 0.90,
+    "int8": 0.80,
+    "awq": 0.72, "gptq": 0.70,
+    "int4": 0.60, "fp4": 0.55,
+    "bnb": 0.50,
+    "mlx": 0.65,
+    "gguf": 0.55,   # fallback when bpw unknown
+}
+
+
+def _quality_score_for(fmt: str, bpw: float | None) -> float:
+    if fmt == "gguf" and bpw:
+        # find closest key
+        closest = min(_GGUF_BPW_QUALITY, key=lambda k: abs(k - bpw))
+        return _GGUF_BPW_QUALITY[closest]
+    return _FMT_QUALITY.get(fmt, 0.5)
+
+
+def _derive_recommended_engines(quants: list[Any], param_count_b: float) -> list[dict[str, Any]]:
+    """Derive model-level engine recommendations from seeded quant data."""
+    has_vllm   = any(getattr(q, "arch_vllm", False)   for q in quants)
+    has_sglang = any(getattr(q, "arch_sglang", False)  for q in quants)
+    has_gguf   = any(getattr(q, "quant_format", "") == "gguf" for q in quants)
+
+    vrams = [q.vram_weights_gb for q in quants if getattr(q, "vram_weights_gb", 0) > 0]
+    min_vram = min(vrams) if vrams else round(param_count_b * 2 / 8, 1)
+
+    engines: list[dict[str, Any]] = []
+    if has_vllm:
+        engines.append({"engine": "vllm",   "score": 0.90, "min_vram_gb": min_vram})
+    if has_sglang:
+        engines.append({"engine": "sglang", "score": 0.85, "min_vram_gb": min_vram})
+    if has_gguf:
+        engines.append({"engine": "ollama", "score": 0.70, "min_vram_gb": min_vram})
+
+    if not engines:
+        engines = [
+            {"engine": "vllm",   "score": 0.80, "min_vram_gb": min_vram},
+            {"engine": "sglang", "score": 0.75, "min_vram_gb": min_vram},
+            {"engine": "ollama", "score": 0.60, "min_vram_gb": min_vram},
+        ]
+    return engines
+
+
 # ── Build field dicts ─────────────────────────────────────────────────────────
 
 def _build_model_fields(
@@ -593,6 +660,7 @@ def _build_quant_dicts(
         "cc_min": _cc_min_for(fmt),
         "arch_vllm": _vllm_supports(fmt),
         "arch_sglang": _sglang_supports(fmt),
+        "quality_score": _quality_score_for(fmt, bpw),
     }
 
     if fmt == "gguf":
@@ -632,6 +700,7 @@ def _build_quant_dicts(
                 "cc_min": None,
                 "arch_vllm": False,
                 "arch_sglang": False,
+                "quality_score": _quality_score_for("gguf", file_bpw),
                 "notes": note,
             })
         return rows
@@ -714,5 +783,12 @@ def seed_one_repo(
 
     db.commit()
     db.refresh(model)
-    logger.info("hf_seeder: %s — %d quants written", repo_id, len(model.quants))
+
+    # Derive recommended_engines from the actual quant data now that they're written
+    model.recommended_engines = _derive_recommended_engines(model.quants, param_count_b)
+    db.commit()
+
+    logger.info("hf_seeder: %s — %d quants written, engines=%s",
+                repo_id, len(model.quants),
+                [e["engine"] for e in model.recommended_engines])
     return model
