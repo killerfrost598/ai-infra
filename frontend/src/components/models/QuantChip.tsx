@@ -1,12 +1,15 @@
 "use client";
 
 import { toast } from "sonner";
-import { Copy, ExternalLink } from "lucide-react";
+import { Copy, ExternalLink, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import type { ModelQuant } from "@/lib/types";
 import type { GpuProfile } from "@/lib/gpu-profiles";
 import { quantFitsGpu } from "@/lib/gpu-profiles";
 import { quantStyle } from "@/lib/quant-styles";
+
+const FINDER_LS_KEY = "gpu-finder:config:v1";
 
 function fmtGb(n: number): string {
   return n >= 10 ? `${n.toFixed(0)} GB` : `${n.toFixed(1)} GB`;
@@ -22,9 +25,11 @@ function fmtNum(n: number | null | undefined): string {
 interface QuantChipProps {
   quant: ModelQuant;
   targetGpu?: GpuProfile;
+  modelKey?: string;
 }
 
-export function QuantChip({ quant, targetGpu }: QuantChipProps) {
+export function QuantChip({ quant, targetGpu, modelKey }: QuantChipProps) {
+  const router = useRouter();
   const style = quantStyle(quant.quant_format);
   const fits = targetGpu ? quantFitsGpu(quant, targetGpu) : null;
 
@@ -35,6 +40,15 @@ export function QuantChip({ quant, targetGpu }: QuantChipProps) {
     navigator.clipboard.writeText(cmd)
       .then(() => toast.success("Copied!"))
       .catch(() => toast.error("Copy failed"));
+  }
+
+  function findGpus() {
+    if (!modelKey) return;
+    try {
+      const existing = JSON.parse(localStorage.getItem(FINDER_LS_KEY) ?? "{}");
+      localStorage.setItem(FINDER_LS_KEY, JSON.stringify({ ...existing, modelId: modelKey, quantName: quant.name }));
+    } catch {}
+    router.push("/find");
   }
 
   return (
@@ -158,22 +172,32 @@ export function QuantChip({ quant, targetGpu }: QuantChipProps) {
           )}
 
           {/* Actions */}
-          <div className="flex items-center gap-2 border-t border-border/40 pt-2">
-            <button
-              onClick={copyCmd}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <Copy className="size-3" /> Copy download cmd
-            </button>
-            {quant.hf_url && (
-              <a
-                href={quant.hf_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          <div className="flex flex-col gap-1.5 border-t border-border/40 pt-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={copyCmd}
+                className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
               >
-                HF <ExternalLink className="size-3" />
-              </a>
+                <Copy className="size-3" /> Copy download cmd
+              </button>
+              {quant.hf_url && (
+                <a
+                  href={quant.hf_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  HF <ExternalLink className="size-3" />
+                </a>
+              )}
+            </div>
+            {modelKey && (
+              <button
+                onClick={findGpus}
+                className="flex items-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 transition-colors hover:text-indigo-500 dark:hover:text-indigo-300"
+              >
+                <Search className="size-3" /> Find GPUs for this quant
+              </button>
             )}
           </div>
         </div>

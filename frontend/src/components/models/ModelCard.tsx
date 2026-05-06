@@ -163,7 +163,7 @@ export function ModelCard({
           {!expanded && sortedQuants.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {visibleChips.map((q) => (
-                <QuantChip key={q.id} quant={q} targetGpu={targetGpu} />
+                <QuantChip key={q.id} quant={q} targetGpu={targetGpu} modelKey={model.model_key} />
               ))}
               {!showAllChips && hiddenCount > 0 && (
                 <button
@@ -246,6 +246,7 @@ export function ModelCard({
               key={q.id}
               quant={q}
               targetGpu={targetGpu}
+              modelKey={model.model_key}
               onEdit={() => onEditQuant(q)}
               onDelete={() => onDeleteQuant(q)}
             />
@@ -270,17 +271,19 @@ export function ModelCard({
 function ExpandedQuantRow({
   quant,
   targetGpu,
+  modelKey,
   onEdit,
   onDelete,
 }: {
   quant: ModelQuant;
   targetGpu?: GpuProfile;
+  modelKey?: string;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 w-full py-0.5">
-      <QuantChip quant={quant} targetGpu={targetGpu} />
+      <QuantChip quant={quant} targetGpu={targetGpu} modelKey={modelKey} />
       {/* Phase 6: disk_size_gb cleanup */}
       <span className="text-[10px] text-muted-foreground/60 min-w-0 truncate">
         {quant.bits_per_weight}bpw
