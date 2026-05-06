@@ -100,8 +100,8 @@ export function AppSidebar() {
           </div>
           {isExpanded && (
             <div className="flex flex-col leading-none">
-              <span className="text-sm font-bold text-sidebar-foreground">AIP</span>
-              <span className="text-[10px] text-sidebar-foreground/50">Inference Platform</span>
+              <span className="text-sm font-bold text-sidebar-foreground">Inferix</span>
+              <span className="text-[10px] text-sidebar-foreground/50">Built on Clore.ai</span>
             </div>
           )}
         </div>

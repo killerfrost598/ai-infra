@@ -9,8 +9,8 @@ import { MainContent } from "@/components/layouts/main-content";
 import { PrefetchOffers } from "@/components/PrefetchOffers";
 
 export const metadata: Metadata = {
-  title: "AI Inference Platform",
-  description: "Management suite for GPU rentals, model deployments, and unified inference gateway.",
+  title: "Inferix",
+  description: "Your inference control plane, built on Clore.ai.",
   manifest: "/manifest.json",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],

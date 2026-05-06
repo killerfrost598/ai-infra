@@ -119,10 +119,9 @@ export default function OverviewPage() {
             System online
           </span>
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">Operator Overview</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Inferix</h1>
         <p className="max-w-xl text-muted-foreground">
-          Single-operator GPU ops platform. Rent Clore.ai servers, provision them over SSH,
-          deploy vLLM models, and track inference benchmarks.
+          Your inference control plane, built on Clore.ai. Rent GPUs, deploy models, track benchmarks.
         </p>
       </div>
 
