@@ -19,6 +19,7 @@ export const keys = {
   sessions: (serverId?: string, status?: string) => ["sessions", serverId ?? "", status ?? ""] as const,
   benchmarks: (gpu?: string, model?: string) => ["benchmarks", gpu ?? "", model ?? ""] as const,
   settings: () => ["settings"] as const,
+  modelSyncStatus: () => ["models", "sync-status"] as const,
 }
 
 // ─── Query Hooks ─────────────────────────────────────────────────────────────
@@ -230,6 +231,23 @@ export function useCreateSession() {
   return useMutation({
     mutationFn: (data: import("./types").SessionCreate) => api.sessions.create(data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export function useModelSyncStatus(pollWhileRunning = false) {
+  return useQuery({
+    queryKey: keys.modelSyncStatus(),
+    queryFn: () => api.models.syncStatus(),
+    refetchInterval: pollWhileRunning ? 2000 : false,
+  })
+}
+
+export function useRefreshAllModels() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.models.refreshAll(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.modelSyncStatus() }),
     onError: (e: Error) => toast.error(e.message),
   })
 }

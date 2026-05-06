@@ -244,6 +244,25 @@ export interface CloreOffer {
   allowed_coins: string[];
   score: number | null;
   mrl: number | null;
+  gpu_vendor: string | null;
+  gpu_family: string | null;
+  gpu_variant: string | null;
+}
+
+export interface CloreOfferGroup {
+  key: string;
+  vendor: string | null;
+  family: string;
+  variant: string | null;
+  display_name: string;
+  offer_count: number;
+  total_gpu_count: number;
+  vram_min_gb: number;
+  vram_max_gb: number;
+  price_min_per_day: number;
+  price_max_per_day: number;
+  offer_ids: string[];
+  sample_raw_names: string[];
 }
 
 export interface CloreOffersMeta {
@@ -256,6 +275,7 @@ export interface CloreOffersMeta {
 
 export interface CloreOffersResponse {
   offers: CloreOffer[];
+  groups: CloreOfferGroup[];
   meta: CloreOffersMeta;
 }
 
@@ -424,6 +444,15 @@ export interface ModelQuant {
   arch_vllm: boolean;
   arch_sglang: boolean;
   notes: string | null;
+  // Extended HF fields
+  quant_format: string;
+  quant_variant: string | null;
+  safetensors_dtypes: Record<string, number> | null;
+  tags: string[];
+  library_name: string | null;
+  gated: string | null;
+  hf_downloads: number | null;
+  hf_likes: number | null;
   created_at: string;
 }
 
@@ -454,6 +483,35 @@ export interface ModelEntry {
   updated_at: string;
   created_at: string;
   quants: ModelQuant[];
+  // Extended HF metadata
+  org: string | null;
+  architecture: string | null;
+  pipeline_tag: string | null;
+  library_name: string | null;
+  license: string | null;
+  languages: string[] | null;
+  gated: string | null;
+  base_model: string | null;
+  hf_downloads: number | null;
+  hf_likes: number | null;
+  hf_trending_score: number | null;
+  hf_last_modified: string | null;
+  hf_created_at: string | null;
+}
+
+export interface SyncStatus {
+  task_type: string | null;
+  status: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  error_summary: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface SeedResponse {
+  celery_task_id: string;
+  repo_id: string;
 }
 
 export interface ModelCreate {

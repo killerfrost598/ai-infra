@@ -24,6 +24,7 @@ import type {
   Playbook,
   RentRequest,
   ScrapeRun,
+  SeedResponse,
   Server,
   ServerCreate,
   Session,
@@ -33,6 +34,7 @@ import type {
   SettingEntry,
   SettingsResponse,
   SSHTestResult,
+  SyncStatus,
   TaskRun,
   ToPlaybookResult,
   RecommendedPlaybook,
@@ -311,5 +313,17 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ hf_url }),
       }),
+
+    seed: (repo_id: string) =>
+      apiFetch<SeedResponse>("/api/v1/models/seed", {
+        method: "POST",
+        body: JSON.stringify({ repo_id }),
+      }),
+    refreshAll: () =>
+      apiFetch<{ celery_task_id: string; queued: number }>("/api/v1/models/refresh-all", {
+        method: "POST",
+      }),
+    syncStatus: () => apiFetch<SyncStatus>("/api/v1/models/sync-status"),
+    tagVocabulary: () => apiFetch<string[]>("/api/v1/models/tag-vocabulary"),
   },
 };

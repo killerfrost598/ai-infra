@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useSettings, useSaveSetting, useDeleteSetting, useCloreBalance } from "@/lib/queries";
+import { useEffect, useState } from "react";
+import { useSettings, useSaveSetting, useDeleteSetting, useCloreBalance, useModelSyncStatus, useRefreshAllModels } from "@/lib/queries";
 import type { SettingEntry } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -22,6 +22,13 @@ const SETTING_META: Record<string, SettingMeta> = {
     label: "Clore.ai API Key",
     description: "Required to browse the GPU marketplace, rent servers, and manage rentals.",
     placeholder: "Paste your Clore.ai API key…",
+    inputType: "password",
+  },
+  hf_token: {
+    label: "HuggingFace Token",
+    description:
+      "Used when seeding model metadata from HuggingFace. Doubles the API rate limit (1000 req/5min vs 500 anonymous). Required for gated models such as Llama and Gemma.",
+    placeholder: "hf_…",
     inputType: "password",
   },
   anthropic_api_key: {
@@ -80,6 +87,7 @@ const SETTING_META: Record<string, SettingMeta> = {
 };
 
 const API_KEY_KEYS = ["clore_api_key", "anthropic_api_key"];
+const HF_KEY_KEYS = ["hf_token"];
 const SSH_KEY_KEYS = ["ssh_private_key"];
 const CLORE_FILTER_KEYS = [
   "clore_min_pcie_gen",
@@ -254,6 +262,80 @@ function BalanceCard({ cloreConfigured }: { cloreConfigured: boolean }) {
   );
 }
 
+function RefreshModelsCard() {
+  const [isRunning, setIsRunning] = useState(false);
+  const { data: syncStatus, refetch } = useModelSyncStatus(isRunning);
+  const refreshAll = useRefreshAllModels();
+
+  const status = syncStatus?.status ?? null;
+  const isActive = status === "RUNNING" || refreshAll.isPending;
+
+  useEffect(() => {
+    if (isRunning && status && status !== "RUNNING") {
+      setIsRunning(false);
+    }
+  }, [isRunning, status]);
+
+  async function handleRefresh() {
+    setIsRunning(true);
+    refreshAll.mutate(undefined, {
+      onSuccess: () => refetch(),
+      onError: () => setIsRunning(false),
+    });
+  }
+
+  const meta = syncStatus?.metadata as Record<string, number> | null;
+  const lastRanAt = syncStatus?.finished_at
+    ? new Date(syncStatus.finished_at).toLocaleString()
+    : null;
+
+  return (
+    <Card className="px-6 py-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold">Refresh All Models</p>
+          <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+            Re-fetches metadata and community quants from HuggingFace for every model with{" "}
+            <code className="text-foreground/70">source=hf</code>. Uses a 24-hour Redis cache per
+            repo — clear the cache manually if you need a forced refresh.
+          </p>
+          {lastRanAt && !isActive && (
+            <p className="mt-1 text-xs text-muted-foreground/60">
+              Last run {lastRanAt}
+              {meta && typeof meta.succeeded === "number" && (
+                <> · {meta.succeeded}/{meta.total} succeeded</>
+              )}
+            </p>
+          )}
+          {isActive && (
+            <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-primary" />
+              Syncing models…
+            </div>
+          )}
+          {status === "FAILED" && !isActive && (
+            <p className="mt-1 text-xs text-destructive">{syncStatus?.error_summary ?? "Sync failed"}</p>
+          )}
+          {status === "PARTIAL" && !isActive && (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              Partial sync — {meta?.failed ?? "some"} repo(s) failed
+            </p>
+          )}
+        </div>
+        <Button
+          onClick={handleRefresh}
+          loading={isActive}
+          disabled={isActive}
+          variant="outline"
+          size="sm"
+        >
+          Refresh all models
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const { data, isLoading, error } = useSettings();
   const settings: SettingEntry[] = data?.settings ?? [];
@@ -284,6 +366,12 @@ export default function SettingsPage() {
 
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">API Keys</p>
           <div className="space-y-4">{renderSection(API_KEY_KEYS)}</div>
+
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">HuggingFace</p>
+          <div className="space-y-4">
+            {renderSection(HF_KEY_KEYS)}
+            <RefreshModelsCard />
+          </div>
 
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Clore Global Filters</p>
           <Card className="px-6 py-4 text-sm text-muted-foreground">
