@@ -340,6 +340,11 @@ export const api = {
       apiFetch<{ celery_task_id: string; queued: number }>("/api/v1/models/refresh-all", {
         method: "POST",
       }),
+    seedDefaults: () =>
+      apiFetch<{ queued: number; repo_ids: string[]; celery_task_ids: string[] }>(
+        "/api/v1/models/seed-defaults",
+        { method: "POST" }
+      ),
     syncStatus: () => apiFetch<SyncStatus>("/api/v1/models/sync-status"),
     tagVocabulary: () => apiFetch<string[]>("/api/v1/models/tag-vocabulary"),
   },

@@ -453,6 +453,10 @@ export interface ModelQuant {
   gated: string | null;
   hf_downloads: number | null;
   hf_likes: number | null;
+  author: string | null;
+  author_class: "standard" | "community" | "private" | null;
+  author_label: string | null;
+  author_url: string | null;
   created_at: string;
 }
 
@@ -497,6 +501,10 @@ export interface ModelEntry {
   hf_trending_score: number | null;
   hf_last_modified: string | null;
   hf_created_at: string | null;
+  author: string | null;
+  author_class: "standard" | "community" | "private" | null;
+  author_label: string | null;
+  author_url: string | null;
 }
 
 export interface SyncStatus {

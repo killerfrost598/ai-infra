@@ -208,6 +208,18 @@ export function useDeleteBenchmark() {
   })
 }
 
+export function useSeedDefaultModels() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.models.seedDefaults(),
+    onSuccess: (data) => {
+      toast.success(`Seeding ${data.queued} model${data.queued === 1 ? "" : "s"} in background`)
+      qc.invalidateQueries({ queryKey: keys.modelSyncStatus() })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
 export function useSaveSetting() {
   const qc = useQueryClient()
   return useMutation({
