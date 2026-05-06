@@ -29,6 +29,10 @@ export type ContextStepK = (typeof CONTEXT_STEPS_K)[number];
 
 export type KvDtype = "fp16" | "bf16" | "fp8";
 
+export function estimateWeightsGb(paramCountB: number, bpw: number): number {
+  return (paramCountB * bpw) / 8;
+}
+
 export function estimateVramNeed(
   model: Model,
   quant: Quant,
@@ -36,7 +40,9 @@ export function estimateVramNeed(
   batchSize: number,
   kvDtype: KvDtype = "fp16"
 ): VramEstimate {
-  const weightsGb = quant.vram_weights_gb;
+  const weightsGb = quant.vram_weights_gb > 0
+    ? quant.vram_weights_gb
+    : estimateWeightsGb(model.param_count_b, quant.bits_per_weight);
 
   // KV-cache: 2 (K+V) × layers × kv_heads × head_dim × context_tokens × batch × bytes_per_elem
   const bytesPerElem = kvDtype === "fp8" ? 1 : 2;

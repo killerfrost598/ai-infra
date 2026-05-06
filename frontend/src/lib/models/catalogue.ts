@@ -35,6 +35,7 @@ function entryToModel(e: ModelEntry): Model {
       cc_min: q.cc_min ?? undefined,
       arch_vllm: q.arch_vllm,
       arch_sglang: q.arch_sglang,
+      quant_format: q.quant_format,
     })),
   };
 }

@@ -25,11 +25,15 @@ export function findGpuProfile(key: string): GpuProfile | undefined {
 }
 
 export function quantFitsGpu(
-  quant: { cc_min: string | null; vram_weights_gb: number },
+  quant: { cc_min: string | null; vram_weights_gb: number; bits_per_weight?: number },
   gpu: GpuProfile,
+  paramCountB?: number,
 ): boolean {
-  // 0 means unknown — skip the VRAM check
-  if (quant.vram_weights_gb > 0 && quant.vram_weights_gb > gpu.vram_gb) return false;
+  let vram = quant.vram_weights_gb;
+  if (vram <= 0 && paramCountB != null && quant.bits_per_weight) {
+    vram = (paramCountB * quant.bits_per_weight) / 8;
+  }
+  if (vram > 0 && vram > gpu.vram_gb) return false;
   if (quant.cc_min) {
     const ccMin = parseFloat(quant.cc_min);
     if (!isNaN(ccMin) && ccMin > gpu.cc) return false;

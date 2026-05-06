@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import type { ModelEntry, ModelQuant } from "@/lib/types";
 import { findGpuProfile, quantFitsGpu } from "@/lib/gpu-profiles";
 import type { GpuProfile } from "@/lib/gpu-profiles";
+import { useSettings } from "@/lib/queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layouts/page-header";
@@ -45,6 +46,12 @@ function ModelsPageContent() {
 
   const [dialog, setDialog]               = useState<DialogState>({ kind: "none" });
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>({ kind: "none" });
+
+  const { data: settingsData } = useSettings();
+  const rawExcluded = settingsData?.settings.find((s) => s.key === "excluded_quant_formats")?.value ?? "";
+  const excludedFormats = new Set(
+    rawExcluded.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean),
+  );
 
   // ── Read filters from URL ──────────────────────────────────────────────────
   const family      = searchParams.get("family")       ?? undefined;
@@ -88,7 +95,7 @@ function ModelsPageContent() {
   // Client-side GPU compat filter (target_gpu not yet in backend)
   const filteredModels = useMemo<ModelEntry[]>(() => {
     if (!targetGpu) return models;
-    return models.filter((m) => m.quants.some((q) => quantFitsGpu(q, targetGpu)));
+    return models.filter((m) => m.quants.some((q) => quantFitsGpu(q, targetGpu, m.param_count_b)));
   }, [models, targetGpu]);
 
   const totalQuants = filteredModels.reduce((s, m) => s + m.quants.length, 0);
@@ -198,6 +205,8 @@ function ModelsPageContent() {
                   quantName: q.name,
                 })
               }
+              excludedFormats={excludedFormats}
+              activeFormatFilter={quantFormat ?? ""}
             />
           ))}
         </div>

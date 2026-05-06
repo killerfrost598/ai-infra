@@ -25,6 +25,7 @@ const quantSchema = z.object({
   cc_min: z.string().optional(),
   arch_vllm: z.boolean().optional(),
   arch_sglang: z.boolean().optional(),
+  quant_format: z.string().optional(),
 });
 export type Quant = z.infer<typeof quantSchema>;
 

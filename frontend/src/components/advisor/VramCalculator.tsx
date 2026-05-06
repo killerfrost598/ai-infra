@@ -9,6 +9,7 @@ import {
   CONTEXT_STEPS_K,
   type KvDtype,
 } from "@/lib/vram";
+import { quantStyle } from "@/lib/quant-styles";
 
 interface Props {
   model: Model;
@@ -47,19 +48,26 @@ export function VramCalculator({ model, gpuVramGb, gpuCount = 1 }: Props) {
       <div className="space-y-2">
         <SectionLabel>Quantization</SectionLabel>
         <div className="flex flex-wrap gap-1.5">
-          {model.quants.map((q, i) => (
-            <button
-              key={q.name}
-              onClick={() => setQuantIdx(i)}
-              className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                quantIdx === i
-                  ? "border-indigo-600 bg-indigo-600 text-white"
-                  : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
-              }`}
-            >
-              {q.name}
-            </button>
-          ))}
+          {model.quants.map((q, i) => {
+            const fmt = (q as { quant_format?: string }).quant_format;
+            const colorCls = fmt ? quantStyle(fmt) : "";
+            return (
+              <button
+                key={q.name}
+                onClick={() => setQuantIdx(i)}
+                className={[
+                  "rounded border px-2.5 py-1 text-xs transition-colors",
+                  colorCls,
+                  quantIdx === i ? "ring-2 ring-offset-1 ring-indigo-500" : "opacity-70 hover:opacity-100",
+                ].filter(Boolean).join(" ")}
+              >
+                {q.name}
+                {q.vram_weights_gb > 0
+                  ? <span className="ml-1 text-[9px] opacity-70">{q.vram_weights_gb.toFixed(1)}GB</span>
+                  : null}
+              </button>
+            );
+          })}
         </div>
         {quant.notes && (
           <p className="text-[10px] text-amber-600 dark:text-amber-400">{quant.notes}</p>

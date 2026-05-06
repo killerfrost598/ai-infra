@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { ReactNode } from "react";
 import {
   ExternalLink,
@@ -24,6 +24,8 @@ import { QuantChip } from "./QuantChip";
 
 const MAX_CHIPS_COLLAPSED = 8;
 
+type QuantSort = "none" | "size_desc" | "downloads_desc" | "likes_desc";
+
 function fmtNum(n: number | null | undefined): string {
   if (n == null) return "";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -39,6 +41,8 @@ interface ModelCardProps {
   onAddQuant: () => void;
   onEditQuant: (q: ModelQuant) => void;
   onDeleteQuant: (q: ModelQuant) => void;
+  excludedFormats?: Set<string>;
+  activeFormatFilter?: string;
 }
 
 export function ModelCard({
@@ -49,17 +53,43 @@ export function ModelCard({
   onAddQuant,
   onEditQuant,
   onDeleteQuant,
+  excludedFormats,
+  activeFormatFilter,
 }: ModelCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showAllChips, setShowAllChips] = useState(false);
+  const [quantSort, setQuantSort] = useState<QuantSort>("none");
 
   const { quants } = model;
-  const compatQuants = targetGpu ? quants.filter((q) => quantFitsGpu(q, targetGpu)) : null;
+
+  // Phase 3: client-side filtering
+  const visibleQuants = useMemo(() => {
+    let result = quants;
+    if (activeFormatFilter) {
+      result = result.filter((q) => q.quant_format === activeFormatFilter);
+    }
+    if (excludedFormats && excludedFormats.size > 0) {
+      result = result.filter((q) => !excludedFormats.has(q.quant_format));
+    }
+    return result;
+  }, [quants, activeFormatFilter, excludedFormats]);
+
+  const hiddenByFilter = quants.length - visibleQuants.length;
+
+  // Phase 4: sort
+  const sortedQuants = useMemo(() => {
+    if (quantSort === "size_desc") return [...visibleQuants].sort((a, b) => b.vram_weights_gb - a.vram_weights_gb);
+    if (quantSort === "downloads_desc") return [...visibleQuants].sort((a, b) => (b.hf_downloads ?? 0) - (a.hf_downloads ?? 0));
+    if (quantSort === "likes_desc") return [...visibleQuants].sort((a, b) => (b.hf_likes ?? 0) - (a.hf_likes ?? 0));
+    return visibleQuants;
+  }, [visibleQuants, quantSort]);
+
+  const compatQuants = targetGpu ? sortedQuants.filter((q) => quantFitsGpu(q, targetGpu, model.param_count_b)) : null;
   const hasCompat = compatQuants !== null && compatQuants.length > 0;
   const isIncompat = !!targetGpu && !hasCompat;
 
-  const visibleChips = showAllChips ? quants : quants.slice(0, MAX_CHIPS_COLLAPSED);
-  const hiddenCount = quants.length - MAX_CHIPS_COLLAPSED;
+  const visibleChips = showAllChips ? sortedQuants : sortedQuants.slice(0, MAX_CHIPS_COLLAPSED);
+  const hiddenCount = sortedQuants.length - MAX_CHIPS_COLLAPSED;
 
   const capTags = [
     model.is_reasoning && "reasoning",
@@ -67,6 +97,9 @@ export function ModelCard({
     model.is_moe && "MoE",
     model.supports_tools && "tools",
   ].filter(Boolean) as string[];
+
+  // Phase 5: kv_cache info
+  const kvCache = model.kv_cache as { num_layers?: number; num_kv_heads?: number; head_dim?: number } | null;
 
   return (
     <Card className={["overflow-hidden transition-opacity", isIncompat ? "opacity-35" : ""].join(" ")}>
@@ -92,6 +125,7 @@ export function ModelCard({
               <Badge>{model.max_context_k}k ctx</Badge>
             )}
             {capTags.map((t) => <Badge key={t}>{t}</Badge>)}
+            <Badge>{quants.length} quants</Badge>
             {targetGpu && hasCompat && (
               <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
                 fits {targetGpu.name}
@@ -126,7 +160,7 @@ export function ModelCard({
           </div>
 
           {/* Quant chips (collapsed view) */}
-          {!expanded && quants.length > 0 && (
+          {!expanded && sortedQuants.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {visibleChips.map((q) => (
                 <QuantChip key={q.id} quant={q} targetGpu={targetGpu} />
@@ -140,6 +174,11 @@ export function ModelCard({
                 </button>
               )}
             </div>
+          )}
+          {!expanded && hiddenByFilter > 0 && (
+            <p className="mt-1 text-[9px] text-muted-foreground/40">
+              {hiddenByFilter} quant{hiddenByFilter !== 1 ? "s" : ""} hidden by filters
+            </p>
           )}
         </div>
 
@@ -164,7 +203,45 @@ export function ModelCard({
       {/* ── Expanded quant list ──────────────────────────────────────────────── */}
       {expanded && (
         <div className="border-t border-border/30 bg-muted/20 px-4 pb-3 pt-2 space-y-1.5">
-          {quants.map((q) => (
+          {/* Phase 4: Sort controls */}
+          <div className="flex items-center gap-1 mb-2">
+            <span className="text-[9px] text-muted-foreground/50 uppercase tracking-wider">Sort:</span>
+            {(["none", "size_desc", "downloads_desc", "likes_desc"] as QuantSort[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setQuantSort(s)}
+                className={[
+                  "rounded px-1.5 py-0.5 text-[9px] transition-colors",
+                  quantSort === s
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground/50 hover:text-muted-foreground",
+                ].join(" ")}
+              >
+                {s === "none" ? "Default" : s === "size_desc" ? "Size" : s === "downloads_desc" ? "Downloads" : "Likes"}
+              </button>
+            ))}
+          </div>
+
+          {/* Phase 5: Model info panel */}
+          <div className="mb-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-muted-foreground/60">
+            {kvCache && kvCache.num_layers != null && kvCache.num_layers > 0 && (
+              <span>{kvCache.num_layers} layers · {kvCache.num_kv_heads} KV heads · {kvCache.head_dim} head dim</span>
+            )}
+            {model.max_context_k > 0 && (
+              <span>up to {model.max_context_k}K context</span>
+            )}
+            {model.family && (
+              <span className="capitalize">{model.family} family</span>
+            )}
+          </div>
+
+          {hiddenByFilter > 0 && (
+            <p className="text-[9px] text-muted-foreground/40 mb-1">
+              {hiddenByFilter} quant{hiddenByFilter !== 1 ? "s" : ""} hidden by filters
+            </p>
+          )}
+
+          {sortedQuants.map((q) => (
             <ExpandedQuantRow
               key={q.id}
               quant={q}
@@ -173,8 +250,10 @@ export function ModelCard({
               onDelete={() => onDeleteQuant(q)}
             />
           ))}
-          {quants.length === 0 && (
-            <p className="text-xs text-muted-foreground/60">No quants yet.</p>
+          {sortedQuants.length === 0 && (
+            <p className="text-xs text-muted-foreground/60">
+              {quants.length > 0 ? "All quants hidden by filters." : "No quants yet."}
+            </p>
           )}
           <button
             onClick={onAddQuant}
@@ -202,9 +281,11 @@ function ExpandedQuantRow({
   return (
     <div className="flex items-center gap-2 w-full py-0.5">
       <QuantChip quant={quant} targetGpu={targetGpu} />
+      {/* Phase 6: disk_size_gb cleanup */}
       <span className="text-[10px] text-muted-foreground/60 min-w-0 truncate">
-        {quant.bits_per_weight}bpw · {quant.disk_size_gb.toFixed(1)} GB disk ·{" "}
-        {quant.vram_weights_gb.toFixed(1)} GB size
+        {quant.bits_per_weight}bpw
+        {quant.vram_weights_gb > 0 && ` · ${quant.vram_weights_gb.toFixed(1)} GB size`}
+        {quant.disk_size_gb > 0 && ` · ${quant.disk_size_gb.toFixed(1)} GB disk`}
         {quant.cc_min ? ` · CC≥${quant.cc_min}` : ""}
         {quant.arch_vllm ? " · vLLM" : ""}
         {quant.arch_sglang ? " · SGLang" : ""}
