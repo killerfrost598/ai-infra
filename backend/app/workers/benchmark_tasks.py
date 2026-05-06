@@ -16,7 +16,7 @@ from app.models.entities import (
     TaskStatus,
 )
 from app.workers.celery_app import celery_app
-from app.workers.tasks import _finish_task_run, _log_path, _make_logger, _utcnow
+from app.workers.utils import _finish_task_run, _log_path, _make_logger, _utcnow
 
 logger = logging.getLogger(__name__)
 
