@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,24 +39,10 @@ class EngineKind(str, enum.Enum):
     OLLAMA = "OLLAMA"
 
 
-class ProviderAccount(Base):
-    __tablename__ = "provider_accounts"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    provider_name: Mapped[str] = mapped_column(String(64), nullable=False)
-    account_label: Mapped[str] = mapped_column(String(255), nullable=False)
-    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
 class Server(Base):
     __tablename__ = "servers"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    provider_account_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("provider_accounts.id", ondelete="SET NULL"), nullable=True
-    )
     external_server_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
     ssh_port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)
@@ -259,13 +245,14 @@ class GpuProfile(Base):
     aliases: Mapped[list | None] = mapped_column(JSON, nullable=True)
     arch: Mapped[str] = mapped_column(String(32), nullable=False)
     cc: Mapped[str] = mapped_column(String(8), nullable=False)
-    vram_gb: Mapped[int] = mapped_column(Integer, nullable=False)
+    vram_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fp8_native: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    bf16: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    bf16: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     marlin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     fa2: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     fa3: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_full_profile: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class StackMatrix(Base):
@@ -387,6 +374,25 @@ class ModelQuant(Base):
     model: Mapped["Model"] = relationship("Model", back_populates="quants")
 
 
+class RunStatus(str, enum.Enum):
+    PLANNED = "PLANNED"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    ABANDONED = "ABANDONED"
+
+
+class FailureStage(str, enum.Enum):
+    PLAN = "PLAN"
+    IMAGE_PULL = "IMAGE_PULL"
+    OOM = "OOM"
+    CC_MISMATCH = "CC_MISMATCH"
+    CUDA_MISMATCH = "CUDA_MISMATCH"
+    TIMEOUT = "TIMEOUT"
+    HEALTH_CHECK = "HEALTH_CHECK"
+    OTHER = "OTHER"
+
+
 class HostCapabilitySnapshot(Base):
     __tablename__ = "host_capability_snapshots"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -403,3 +409,67 @@ class HostCapabilitySnapshot(Base):
     docker_present: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     nvidia_container_toolkit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     raw_outputs: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class ModelRunAttempt(Base):
+    __tablename__ = "model_run_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    model_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("models.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    quant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_quants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    host_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("host_capability_snapshots.id", ondelete="SET NULL"), nullable=True
+    )
+    task_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True
+    )
+
+    engine: Mapped[EngineKind] = mapped_column(Enum(EngineKind), nullable=False)
+    engine_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="container")
+    container_image: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    container_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    launch_command: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    launch_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    feasibility_verdict: Mapped[str] = mapped_column(String(16), nullable=False, default="UNKNOWN")
+    forced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.PLANNED, nullable=False)
+    succeeded: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    failure_stage: Mapped[FailureStage | None] = mapped_column(Enum(FailureStage), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    ttft_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tps_steady: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vram_used_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    health_check_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    health_check_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    operator_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    published_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    published_sha: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_runs_server_started", "server_id", "started_at"),
+        Index("ix_runs_model_quant_succeeded", "model_id", "quant_id", "succeeded"),
+    )

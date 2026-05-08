@@ -14,6 +14,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PerformanceTab } from "@/components/benchmarks/PerformanceTab";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
+import { ErrorState, LoadingState } from "@/components/layouts/page-states";
 
 export default function ServerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -122,17 +123,14 @@ export default function ServerDetailPage() {
   if (serverError) return (
     <div className="space-y-3">
       <Link href="/servers" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Servers</Link>
-      <p className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">{serverError}</p>
+      <ErrorState message={serverError} />
     </div>
   );
 
   if (!server) return (
     <div className="space-y-3">
       <Link href="/servers" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Servers</Link>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-        Loading…
-      </div>
+      <LoadingState />
     </div>
   );
 
@@ -249,12 +247,7 @@ export default function ServerDetailPage() {
           </Button>
         </div>
 
-        {sessionsLoading && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-            Loading…
-          </div>
-        )}
+        {sessionsLoading && <LoadingState className="text-xs" />}
         {!sessionsLoading && sessions.length === 0 && (
           <p className="text-xs text-muted-foreground/60">No sessions for this server yet.</p>
         )}
@@ -284,12 +277,7 @@ export default function ServerDetailPage() {
       {/* Task history */}
       <div className="space-y-3">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Task History</h2>
-        {historyLoading && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-            Loading…
-          </div>
-        )}
+        {historyLoading && <LoadingState className="text-xs" />}
         {!historyLoading && history.length === 0 && (
           <p className="text-xs text-muted-foreground/60">No task runs for this server yet.</p>
         )}
@@ -395,10 +383,7 @@ export default function ServerDetailPage() {
 
               <div className="max-h-[50vh] overflow-auto">
                 {taskRunLogsLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-                    Loading logs…
-                  </div>
+                  <LoadingState text="Loading logs…" className="justify-center py-10" />
                 ) : taskRunLogs ? (
                   <pre className="terminal whitespace-pre-wrap p-4 text-xs leading-relaxed">
                     {taskRunLogs}

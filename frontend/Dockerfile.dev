@@ -1,0 +1,27 @@
+# Frontend dev image — full deps + source mount.
+# Used by the `dev` profile in docker-compose.yml for:
+#   - hot-reloading `next dev`
+#   - one-shot `tsc --noEmit` typechecks
+#   - `next lint` runs
+# Production builds still use the multi-stage `Dockerfile`.
+
+FROM node:20-alpine AS dev
+WORKDIR /app
+
+# tini gives us proper signal handling so Ctrl-C works through compose
+RUN apk add --no-cache tini
+
+# Install full deps once, baked into the image so node_modules survives
+# even when the source is bind-mounted on top of /app at runtime.
+COPY package.json package-lock.json* ./
+RUN --mount=type=cache,target=/root/.npm npm ci --include=dev
+
+# Source is overlaid via volume in compose; the COPY is a fallback so
+# `docker compose run` works without a mount (one-shot typecheck etc.).
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+EXPOSE 3000
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["npm", "run", "dev"]

@@ -1,14 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import {
-  useCloreOffers, useRefreshCloreOffers, useRentals, useServers, useBenchmarks,
+  useCloreOffers, useRefreshCloreOffers, useRentals, useServers,
   useTerminateRental, useCreateSession,
 } from "@/lib/queries";
-import type { CloreOffer, CloreRental, InferenceBenchmark, Server } from "@/lib/types";
+import type { CloreOffer, CloreOfferGroup, CloreRental, Server } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -18,6 +18,7 @@ import { OfferCard, fmtSpeed } from "@/components/clore/OfferCard";
 import { RentDialog } from "@/components/clore/RentDialog";
 import { RegisterRentalForm } from "@/components/clore/RegisterRentalForm";
 import { PageHeader } from "@/components/layouts/page-header";
+import { ErrorState, LoadingState } from "@/components/layouts/page-states";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
 const ModelAdvisorSheet = dynamic(
@@ -74,8 +75,6 @@ export default function ClorePage() {
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────
-// These are session-level refinements applied client-side on top of the
-// globally-filtered data returned by the backend cache.
 
 interface Filters {
   gpu: string;
@@ -94,7 +93,7 @@ const DEFAULT_FILTERS: Filters = {
 function applyFilters(offers: CloreOffer[], f: Filters): CloreOffer[] {
   return offers.filter((o) => {
     if (f.gpu && !o.gpu_name.toLowerCase().includes(f.gpu.toLowerCase())) return false;
-    if (f.minVram > 0 && o.vram_gb < f.minVram) return false;
+    if (f.minVram > 0 && (o.gpu_count * o.vram_gb) < f.minVram) return false;
     if (f.minDisk > 0 && (o.disk_gb ?? 0) < f.minDisk) return false;
     if (f.minUpload > 0 && (o.upload_mbps ?? 0) < f.minUpload) return false;
     if (f.minDownload > 0 && (o.download_mbps ?? 0) < f.minDownload) return false;
@@ -108,22 +107,22 @@ function applyFilters(offers: CloreOffer[], f: Filters): CloreOffer[] {
 
 // ── Marketplace tab ───────────────────────────────────────────────────────────
 
-type BenchmarkMap = Record<string, InferenceBenchmark[]>;
-type MarketplaceSortKey = "price" | "vram" | "upload" | "disk";
+type MarketplaceSortKey = "price" | "vram" | "upload" | "download" | "disk";
 
 const SORT_LABELS: Record<MarketplaceSortKey, string> = {
-  price: "Price", vram: "VRAM", upload: "Upload", disk: "Disk",
+  price: "Price", vram: "VRAM", upload: "Upload", download: "Download", disk: "Disk",
 };
 const SORT_DEFAULT_ASC: Record<MarketplaceSortKey, boolean> = {
-  price: true, vram: false, upload: false, disk: false,
+  price: true, vram: false, upload: false, download: false, disk: false,
 };
 
 function sortOffers(offers: CloreOffer[], key: MarketplaceSortKey, asc: boolean): CloreOffer[] {
   return [...offers].sort((a, b) => {
     let diff = 0;
     if (key === "price") diff = a.price_per_day - b.price_per_day;
-    else if (key === "vram") diff = b.vram_gb - a.vram_gb;
+    else if (key === "vram") diff = (b.gpu_count * b.vram_gb) - (a.gpu_count * a.vram_gb);
     else if (key === "upload") diff = (b.upload_mbps ?? 0) - (a.upload_mbps ?? 0);
+    else if (key === "download") diff = (b.download_mbps ?? 0) - (a.download_mbps ?? 0);
     else if (key === "disk") diff = (b.disk_gb ?? 0) - (a.disk_gb ?? 0);
     return asc ? diff : -diff;
   });
@@ -138,17 +137,8 @@ function MarketplaceTab() {
 
   const { data: offersData, isLoading, error } = useCloreOffers();
   const refreshMutation = useRefreshCloreOffers();
-  const { data: benchData } = useBenchmarks(undefined, undefined, 200);
 
   const offers: CloreOffer[] = offersData?.offers ?? [];
-
-  const benchmarkMap = useMemo<BenchmarkMap>(() => {
-    const map: BenchmarkMap = {};
-    for (const b of benchData?.items ?? []) {
-      (map[b.gpu_model] ??= []).push(b);
-    }
-    return map;
-  }, [benchData]);
 
   const filtered = useMemo(
     () => sortOffers(applyFilters(offers, filters), sortKey, sortAsc),
@@ -183,7 +173,7 @@ function MarketplaceTab() {
             <Input className="text-sm" placeholder="e.g. RTX 4090" value={filters.gpu}
               onChange={(e) => setFilter("gpu", e.target.value)} />
           </FilterField>
-          <FilterField label="Min VRAM (GB)">
+          <FilterField label="Min total VRAM (GB)">
             <NumInput value={filters.minVram} onChange={(v) => setFilter("minVram", v)} min={0} step={8} />
           </FilterField>
           <FilterField label="Min disk (GB)">
@@ -231,12 +221,8 @@ function MarketplaceTab() {
         />
       )}
 
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
-      {isLoading && <Spinner text="Loading offers…" />}
+      {error && <ErrorState message={error.message} />}
+      {isLoading && <LoadingState text="Loading offers…" />}
       {!isLoading && !error && offers.length === 0 && (
         <Card className="px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">No offers found.</p>
@@ -256,12 +242,11 @@ function MarketplaceTab() {
         </p>
       )}
 
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {filtered.map((offer) => (
           <OfferCard
             key={offer.id}
             offer={offer}
-            benchmarks={benchmarkMap[offer.gpu_name] ?? []}
             onRent={() => setDialogOffer(offer)}
             onAdvise={() => setAdvisorOffer(offer)}
           />
@@ -282,47 +267,35 @@ function MarketplaceTab() {
 
 // ── GPU Groups tab ────────────────────────────────────────────────────────────
 
-interface GpuGroup {
-  key: string; gpu_name: string; vram_gb: number;
-  count: number; min_price: number; max_price: number; offers: CloreOffer[];
-}
-
-type GroupSortKey = "price" | "count" | "vram" | "upload";
-
-function buildGroups(offers: CloreOffer[]): GpuGroup[] {
-  const map = new Map<string, GpuGroup>();
-  for (const o of offers) {
-    const key = `${o.gpu_name}__${o.vram_gb}`;
-    const g = map.get(key);
-    if (g) {
-      g.count++; g.offers.push(o);
-      if (o.price_per_day < g.min_price) g.min_price = o.price_per_day;
-      if (o.price_per_day > g.max_price) g.max_price = o.price_per_day;
-    } else {
-      map.set(key, { key, gpu_name: o.gpu_name, vram_gb: o.vram_gb, count: 1, min_price: o.price_per_day, max_price: o.price_per_day, offers: [o] });
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => b.vram_gb - a.vram_gb || a.min_price - b.min_price);
-}
+type GroupSortKey = "price" | "count" | "upload" | "download";
 
 function GpuGroupsTab() {
   const { data, isLoading, error } = useCloreOffers();
   const refreshMutation = useRefreshCloreOffers();
   const offers: CloreOffer[] = data?.offers ?? [];
-  const groups = useMemo(() => buildGroups(offers), [offers]);
+  const groups: CloreOfferGroup[] = data?.groups ?? [];
+
+  const offerMap = useMemo(() => new Map(offers.map((o) => [o.id, o])), [offers]);
 
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [archFilter, setArchFilter] = useState<string | null>(null);
   const [rentDialogOffer, setRentDialogOffer] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
 
+  const archOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const g of groups) {
+      if (g.arch) seen.add(g.arch);
+    }
+    return [...seen].sort();
+  }, [groups]);
+
+  const filteredGroups = archFilter ? groups.filter((g) => g.arch === archFilter) : groups;
+
   return (
     <>
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
-      {isLoading && <Spinner text="Loading offers…" />}
+      {error && <ErrorState message={error.message} />}
+      {isLoading && <LoadingState text="Loading offers…" />}
       {data?.meta && (
         <CacheStatusBar
           fetchedAt={data.meta.fetched_at}
@@ -333,20 +306,60 @@ function GpuGroupsTab() {
           onRefresh={() => refreshMutation.mutate()}
         />
       )}
-      {!isLoading && !error && (
-        <p className="text-xs text-muted-foreground/60">{groups.length} GPU models across {offers.length} offers</p>
+
+      {/* Arch filter chip rail */}
+      {archOptions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide mr-0.5">Architecture</span>
+          <button
+            onClick={() => setArchFilter(null)}
+            className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+              archFilter === null
+                ? "border-indigo-600 bg-indigo-600 text-white"
+                : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            All
+          </button>
+          {archOptions.map((arch) => (
+            <button
+              key={arch}
+              onClick={() => setArchFilter(archFilter === arch ? null : arch)}
+              className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                archFilter === arch
+                  ? "border-indigo-600 bg-indigo-600 text-white"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {arch}
+            </button>
+          ))}
+          {!isLoading && !error && (
+            <span className="ml-auto text-[10px] text-muted-foreground/50">
+              {filteredGroups.length} GPU type{filteredGroups.length !== 1 ? "s" : ""} · {offers.length} offers
+            </span>
+          )}
+        </div>
       )}
 
-      <div className="space-y-2">
-        {groups.map((g) => (
-          <GpuGroupCard
-            key={g.key}
-            group={g}
-            expanded={expandedKey === g.key}
-            onToggle={() => setExpandedKey(expandedKey === g.key ? null : g.key)}
-            onRent={(o) => setRentDialogOffer(o)}
-            onAdvise={(o) => setAdvisorOffer(o)}
-          />
+      {/* Grid with full-width drawer expand */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {filteredGroups.map((g) => (
+          <Fragment key={g.key}>
+            <GpuGroupCard
+              group={g}
+              expanded={expandedKey === g.key}
+              onToggle={() => setExpandedKey(expandedKey === g.key ? null : g.key)}
+            />
+            {expandedKey === g.key && (
+              <GroupDrawer
+                group={g}
+                offerMap={offerMap}
+                onRent={(o) => setRentDialogOffer(o)}
+                onAdvise={(o) => setAdvisorOffer(o)}
+              />
+            )}
+          </Fragment>
         ))}
       </div>
 
@@ -362,43 +375,76 @@ function GpuGroupsTab() {
   );
 }
 
-function GpuGroupCard({ group, expanded, onToggle, onRent, onAdvise }: {
-  group: GpuGroup; expanded: boolean; onToggle: () => void;
-  onRent: (o: CloreOffer) => void; onAdvise: (o: CloreOffer) => void;
+function GpuGroupCard({ group, expanded, onToggle }: {
+  group: CloreOfferGroup;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const vramLabel =
+    group.vram_min_gb === group.vram_max_gb
+      ? `${group.vram_min_gb} GB`
+      : `${group.vram_min_gb}–${group.vram_max_gb} GB`;
+  const priceMin = group.price_min_per_day.toFixed(2);
+  const priceMax = group.price_max_per_day.toFixed(2);
+  const priceLabel = priceMin === priceMax ? `$${priceMin}/day` : `$${priceMin}–$${priceMax}/day`;
+
+  return (
+    <Card className={`overflow-hidden transition-colors ${expanded ? "border-indigo-500/40 bg-indigo-50/5" : ""}`}>
+      <button
+        onClick={onToggle}
+        className="w-full px-4 py-3 text-left hover:bg-muted/10 transition-colors flex items-center gap-2"
+        aria-expanded={expanded}
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-semibold">{group.display_name}</span>
+            {group.arch && (
+              <span className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[10px] text-indigo-500 dark:text-indigo-400">
+                {group.arch}
+              </span>
+            )}
+            {group.vendor && group.vendor !== "Unknown" && (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{group.vendor}</span>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {group.offer_count} offer{group.offer_count !== 1 ? "s" : ""} · {vramLabel} VRAM · {priceLabel}
+          </p>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round"
+          className={`shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+    </Card>
+  );
+}
+
+function GroupDrawer({ group, offerMap, onRent, onAdvise }: {
+  group: CloreOfferGroup;
+  offerMap: Map<string, CloreOffer>;
+  onRent: (o: CloreOffer) => void;
+  onAdvise: (o: CloreOffer) => void;
 }) {
   const [sortKey, setSortKey] = useState<GroupSortKey>("price");
   const [sortAsc, setSortAsc] = useState(true);
-  const [filterCuda, setFilterCuda] = useState("");
-  const [filterMinGpuCount, setFilterMinGpuCount] = useState(0);
-  const [filterMinPcie, setFilterMinPcie] = useState(3);
-  const [filterMinPcieWidth, setFilterMinPcieWidth] = useState(8);
 
-  const cudaOptions = useMemo(() => {
-    const set = new Set(group.offers.map((o) => o.cuda_version).filter(Boolean) as string[]);
-    return Array.from(set).sort();
-  }, [group.offers]);
+  const offers = useMemo(
+    () => group.offer_ids.map((id) => offerMap.get(id)).filter(Boolean) as CloreOffer[],
+    [group.offer_ids, offerMap],
+  );
 
   const sorted = useMemo(() => {
-    let list = group.offers.filter((o) => {
-      if (filterCuda && o.cuda_version !== filterCuda) return false;
-      if (filterMinGpuCount > 0 && o.gpu_count < filterMinGpuCount) return false;
-      if (filterMinPcie > 0) {
-        const ver = o.pcie_version ? parseFloat(o.pcie_version) : 0;
-        if (ver < filterMinPcie) return false;
-      }
-      if (filterMinPcieWidth > 0 && (o.pcie_width ?? 0) < filterMinPcieWidth) return false;
-      return true;
-    });
-    list = [...list].sort((a, b) => {
+    return [...offers].sort((a, b) => {
       let diff = 0;
       if (sortKey === "price") diff = a.price_per_day - b.price_per_day;
       else if (sortKey === "count") diff = b.gpu_count - a.gpu_count;
-      else if (sortKey === "vram") diff = b.vram_gb - a.vram_gb;
       else if (sortKey === "upload") diff = (b.upload_mbps ?? 0) - (a.upload_mbps ?? 0);
+      else if (sortKey === "download") diff = (b.download_mbps ?? 0) - (a.download_mbps ?? 0);
       return sortAsc ? diff : -diff;
     });
-    return list;
-  }, [group.offers, sortKey, sortAsc, filterCuda, filterMinGpuCount, filterMinPcie, filterMinPcieWidth]);
+  }, [offers, sortKey, sortAsc]);
 
   function toggleSort(key: GroupSortKey) {
     if (sortKey === key) setSortAsc((v) => !v);
@@ -408,109 +454,51 @@ function GpuGroupCard({ group, expanded, onToggle, onRent, onAdvise }: {
   const sortArrow = (key: GroupSortKey) => sortKey === key ? (sortAsc ? " ↑" : " ↓") : "";
 
   return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 hover:bg-muted/10 transition-colors">
-        <button
-          onClick={() => onAdvise(group.offers[0])}
-          className="flex flex-1 min-w-0 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={`Open model advisor for ${group.gpu_name}`}
-        >
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="font-medium">{group.gpu_name}</p>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-indigo-400">{group.vram_gb} GB VRAM</span>
-              <span className="text-[10px] text-indigo-400/60">Model Advisor →</span>
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {group.count} offer{group.count !== 1 ? "s" : ""} · ${group.min_price.toFixed(2)}
-              {group.max_price !== group.min_price && `–$${group.max_price.toFixed(2)}`}/day
-            </p>
-          </div>
-        </button>
-        <button
-          onClick={onToggle}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          title="Show offers"
-          aria-label={`${expanded ? "Hide" : "Show"} offers for ${group.gpu_name}`}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            strokeLinecap="round" strokeLinejoin="round"
-            className={`transition-transform ${expanded ? "rotate-180" : ""}`}>
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
+    <div style={{ gridColumn: "1 / -1" }}
+      className="rounded-xl border border-indigo-500/20 bg-card px-4 pb-4 pt-3 space-y-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium text-foreground/70">{group.display_name} — {sorted.length} offers</span>
+        <div className="flex items-center gap-1">
+          <span className="text-[9px] text-muted-foreground/50 uppercase tracking-wider mr-1">Sort:</span>
+          {(["price", "count", "upload", "download"] as GroupSortKey[]).map((k) => (
+            <button key={k} onClick={() => toggleSort(k)}
+              className={`rounded px-1.5 py-0.5 text-[9px] transition-colors ${
+                sortKey === k ? "bg-muted text-foreground" : "text-muted-foreground/50 hover:text-muted-foreground"
+              }`}>
+              {k === "price" ? "Price" : k === "count" ? "GPUs" : k === "upload" ? "Upload" : "Download"}{sortArrow(k)}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {expanded && (
-        <div className="border-t border-border px-5 pb-4 pt-3 space-y-3">
-          <div className="flex flex-wrap items-end gap-3">
-            {cudaOptions.length > 0 && (
-              <div className="space-y-1">
-                <label className="block text-[10px] text-muted-foreground/60 uppercase tracking-wide">CUDA</label>
-                <select className="input text-xs py-1 px-2" value={filterCuda} onChange={(e) => setFilterCuda(e.target.value)}>
-                  <option value="">Any</option>
-                  {cudaOptions.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </div>
-            )}
-            <div className="space-y-1">
-              <label className="block text-[10px] text-muted-foreground/60 uppercase tracking-wide">Min GPUs</label>
-              <select className="input text-xs py-1 px-2" value={filterMinGpuCount} onChange={(e) => setFilterMinGpuCount(Number(e.target.value))}>
-                <option value={0}>Any</option><option value={2}>2+</option><option value={4}>4+</option><option value={8}>8+</option>
-              </select>
+      {sorted.length === 0 && <p className="text-xs text-muted-foreground/60">No offers available.</p>}
+      <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-3">
+        {sorted.map((o) => (
+          <div key={o.id}
+            className="flex items-center gap-3 rounded-lg bg-muted/30 px-4 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer"
+            onClick={() => onAdvise(o)}
+          >
+            <div className="flex-1 min-w-0 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+              {o.gpu_count > 1 && <span className="text-muted-foreground">×{o.gpu_count}</span>}
+              {o.cuda_version && <span className="text-muted-foreground/60">CUDA {o.cuda_version}</span>}
+              {o.pcie_version && (
+                <span className={parseFloat(o.pcie_version) >= 4 ? "text-emerald-600 dark:text-emerald-500" : "text-yellow-600 dark:text-yellow-500"}>
+                  PCIe {o.pcie_version}{o.pcie_width ? ` x${o.pcie_width}` : ""}
+                </span>
+              )}
+              {(o.upload_mbps != null || o.download_mbps != null) && (
+                <span className="text-muted-foreground/60">↑{fmtSpeed(o.upload_mbps)} ↓{fmtSpeed(o.download_mbps)}</span>
+              )}
+              {o.disk_gb != null && <span className="text-muted-foreground/60">{o.disk_gb} GB</span>}
             </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] text-muted-foreground/60 uppercase tracking-wide">Min PCIe ver</label>
-              <select className="input text-xs py-1 px-2" value={filterMinPcie} onChange={(e) => setFilterMinPcie(Number(e.target.value))}>
-                <option value={0}>Any</option><option value={3}>3.0+</option><option value={4}>4.0+</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] text-muted-foreground/60 uppercase tracking-wide">Min PCIe width</label>
-              <select className="input text-xs py-1 px-2" value={filterMinPcieWidth} onChange={(e) => setFilterMinPcieWidth(Number(e.target.value))}>
-                <option value={0}>Any</option><option value={8}>x8+</option><option value={16}>x16</option>
-              </select>
-            </div>
-            <div className="flex gap-1 ml-auto">
-              {(["price", "count", "upload"] as GroupSortKey[]).map((k) => (
-                <button key={k} onClick={() => toggleSort(k)}
-                  className={`rounded px-2 py-1 text-xs transition-colors ${sortKey === k ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-                  {k === "price" ? "Price" : k === "count" ? "GPUs" : "Upload"}{sortArrow(k)}
-                </button>
-              ))}
-            </div>
+            <p className="text-sm font-semibold shrink-0">
+              ${o.price_per_day.toFixed(2)}<span className="text-xs text-muted-foreground">/day</span>
+            </p>
+            <Button size="sm" className="shrink-0" onClick={(e) => { e.stopPropagation(); onRent(o); }}>Rent</Button>
           </div>
-
-          {sorted.length === 0 && <p className="text-xs text-muted-foreground/60">No offers match the current filters.</p>}
-          <div className="space-y-1.5">
-            {sorted.map((o) => (
-              <div key={o.id}
-                className="flex items-center gap-3 rounded-lg bg-muted/30 px-4 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer"
-                onClick={() => onAdvise(o)}
-              >
-                <div className="flex-1 min-w-0 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-                  {o.gpu_count > 1 && <span className="text-muted-foreground">×{o.gpu_count}</span>}
-                  {o.cuda_version && <span className="text-muted-foreground/60">CUDA {o.cuda_version}</span>}
-                  {o.pcie_version && (
-                    <span className={parseFloat(o.pcie_version) >= 4 ? "text-emerald-600 dark:text-emerald-500" : "text-yellow-600 dark:text-yellow-500"}>
-                      PCIe {o.pcie_version}{o.pcie_width ? ` x${o.pcie_width}` : ""}
-                    </span>
-                  )}
-                  {(o.upload_mbps != null || o.download_mbps != null) && (
-                    <span className="text-muted-foreground/60">↑{fmtSpeed(o.upload_mbps)} ↓{fmtSpeed(o.download_mbps)}</span>
-                  )}
-                  {o.disk_gb != null && <span className="text-muted-foreground/60">{o.disk_gb} GB</span>}
-                </div>
-                <p className="text-sm font-semibold shrink-0">
-                  ${o.price_per_day.toFixed(2)}<span className="text-xs text-muted-foreground">/day</span>
-                </p>
-                <Button size="sm" className="shrink-0" onClick={(e) => { e.stopPropagation(); onRent(o); }}>Rent</Button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </Card>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -554,12 +542,8 @@ function RentalsTab() {
 
   return (
     <>
-      {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error.message}
-        </div>
-      )}
-      {isLoading && <Spinner text="Loading rentals…" />}
+      {error && <ErrorState message={error.message} />}
+      {isLoading && <LoadingState text="Loading rentals…" />}
       {!isLoading && !error && rentals.length === 0 && (
         <Card className="px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">No active rentals.</p>
@@ -658,11 +642,3 @@ function NumInput({ value, onChange, min = 0, step = 1, placeholder }: {
   );
 }
 
-function Spinner({ text }: { text: string }) {
-  return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-      {text}
-    </div>
-  );
-}

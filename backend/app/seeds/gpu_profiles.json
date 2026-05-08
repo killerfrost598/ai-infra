@@ -90,9 +90,32 @@
   {
     "model_key": "b200",
     "display_name": "NVIDIA B200",
-    "aliases": ["B200", "NVIDIA B200", "B100", "NVIDIA B100"],
+    "aliases": ["B200", "NVIDIA B200", "B100", "NVIDIA B100", "HGX B200", "NVIDIA HGX B200"],
     "arch": "blackwell", "cc": "10.0", "vram_gb": 192,
     "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": true,
-    "notes": "Blackwell. Requires CUDA 12.8+."
+    "notes": "Blackwell datacenter (GB100/GB200). Requires CUDA 12.8+, driver >= 570."
+  },
+  {
+    "model_key": "rtx_5090",
+    "display_name": "NVIDIA GeForce RTX 5090",
+    "aliases": ["RTX 5090", "GeForce RTX 5090", "5090", "NVIDIA RTX 5090", "NVIDIA GeForce RTX 5090", "RTX 5090 32GB"],
+    "arch": "blackwell", "cc": "12.0", "vram_gb": 32,
+    "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": true,
+    "notes": "Blackwell consumer (GB202). Requires CUDA 12.8+, driver >= 570."
+  },
+  {
+    "model_key": "rtx_pro_6000_blackwell",
+    "display_name": "NVIDIA RTX PRO 6000 Blackwell Workstation",
+    "aliases": [
+      "RTX PRO 6000 Blackwell Workstation",
+      "NVIDIA RTX PRO 6000 Blackwell Workstation",
+      "RTX PRO 6000 Blackwell Workstation Edition",
+      "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+      "RTX PRO 6000",
+      "NVIDIA RTX PRO 6000"
+    ],
+    "arch": "blackwell", "cc": "12.0", "vram_gb": 96,
+    "fp8_native": true, "bf16": true, "marlin": true, "fa2": true, "fa3": true,
+    "notes": "Blackwell workstation (GB202). 96 GB GDDR7. Requires CUDA 12.8+, driver >= 570."
   }
 ]

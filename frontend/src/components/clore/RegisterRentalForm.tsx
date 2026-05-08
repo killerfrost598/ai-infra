@@ -33,6 +33,7 @@ export function RegisterRentalForm({ rental, onSuccess, onCancel }: Props) {
         ssh_username: rental.ssh_username,
         gpu_model: rental.gpu_name || undefined,
         vram_gb: rental.vram_gb || undefined,
+        cuda_version: rental.cuda_version || undefined,
         ...(authMode === "password" ? { ssh_password: password } : { ssh_private_key: privateKey.trim() }),
       },
       { onSuccess, onError: (err) => setError(err.message) },

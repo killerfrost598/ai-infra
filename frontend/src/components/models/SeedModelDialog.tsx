@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 
 interface Props {
   open: boolean;
@@ -148,7 +149,7 @@ export function SeedModelDialog({ open, onOpenChange }: Props) {
           <div className="py-4 space-y-4">
             {(status === "RUNNING" || status === null) && (
               <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary shrink-0" />
+                <Spinner size="md" className="border-t-primary shrink-0" />
                 Fetching metadata and community quants from HuggingFace…
               </div>
             )}

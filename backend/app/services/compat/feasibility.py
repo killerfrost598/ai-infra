@@ -1,11 +1,46 @@
 from __future__ import annotations
 
+import json
+import threading
 from dataclasses import dataclass
 from typing import Literal
 
 from sqlalchemy.orm import Session
 
+from app.core.cache import get_redis_client
 from app.models.entities import GpuProfile, HostCapabilitySnapshot, ModelVariant, StackMatrix
+from app.services.compat.cc_utils import cc_gte as _cc_gte
+
+# Module-level profile cache — populated on first feasibility call, lives for
+# the process lifetime. GPU profiles are static (seeded at startup), so a
+# one-time load is safe. Falls back to Redis, then DB.
+_profile_cache: list[GpuProfile] | None = None
+_profile_cache_lock = threading.Lock()
+
+
+def _get_profiles(db: Session) -> list[GpuProfile]:
+    global _profile_cache
+    if _profile_cache is not None:
+        return _profile_cache
+    with _profile_cache_lock:
+        if _profile_cache is not None:
+            return _profile_cache
+        # Try Redis first (written by seeder)
+        try:
+            r = get_redis_client()
+            raw = r.get("gpu:profiles:v1")
+            if raw:
+                rows = json.loads(raw)
+                # Reconstruct lightweight proxy objects as SimpleNamespace so
+                # attribute access matches the SQLAlchemy model interface
+                from types import SimpleNamespace
+                _profile_cache = [SimpleNamespace(**row) for row in rows]  # type: ignore[assignment]
+                return _profile_cache
+        except Exception:
+            pass
+        # DB fallback
+        _profile_cache = db.query(GpuProfile).all()
+    return _profile_cache
 
 CheckStatus = Literal["PASS", "FAIL", "UNKNOWN"]
 Source = Literal["predicted", "snapshot"]
@@ -28,14 +63,6 @@ class FeasibilityReport:
     gpu_profile_key: str | None
     stack_matrix_id: int | None
     checks: list[CheckResult]
-
-
-def _cc_gte(cc_a: str, cc_b: str) -> bool:
-    """Return True if cc_a >= cc_b (e.g. '8.9' >= '8.0')."""
-    try:
-        return tuple(int(x) for x in cc_a.split(".")) >= tuple(int(x) for x in cc_b.split("."))
-    except (ValueError, AttributeError):
-        return False
 
 
 def _driver_gte(driver_a: str | None, driver_min: str) -> bool:
@@ -67,7 +94,7 @@ def run_feasibility(
     # -- 1. gpu_arch_known --
     gpu_profile: GpuProfile | None = None
     if gpu_name:
-        all_profiles = db.query(GpuProfile).all()
+        all_profiles = _get_profiles(db)
         for p in all_profiles:
             aliases = p.aliases or []
             if gpu_name.lower() == p.display_name.lower() or any(
@@ -244,4 +271,37 @@ def run_feasibility(
         gpu_profile_key=gpu_profile.model_key if gpu_profile else None,
         stack_matrix_id=best_stack.id if best_stack else None,
         checks=checks,
+    )
+
+
+def run_feasibility_for_quant(
+    *,
+    db: Session,
+    model,
+    quant,
+    gpu_name: str | None,
+    vram_gb_total: int | None,
+    gpu_count: int,
+    driver_version: str | None,
+    snapshot: HostCapabilitySnapshot | None,
+    engine: str,
+    tp_size: int,
+) -> FeasibilityReport:
+    """Adapter: call run_feasibility using Model + ModelQuant objects instead of raw string keys.
+
+    Keeps run_feasibility untouched; just maps the structured ORM objects to the
+    (model_key, quant) strings it expects. ModelVariant rows bridged by hf_seeder
+    are queried internally by run_feasibility.
+    """
+    return run_feasibility(
+        db=db,
+        gpu_name=gpu_name,
+        vram_gb_total=vram_gb_total,
+        gpu_count=gpu_count,
+        driver_version=driver_version,
+        snapshot=snapshot,
+        model_key=model.model_key,
+        quant=quant.name,
+        engine=engine,
+        tp_size=tp_size,
     )

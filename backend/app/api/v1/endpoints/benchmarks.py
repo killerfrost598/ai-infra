@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from app.core.cache import get_redis_client
 from app.db.session import get_db
 from app.models.entities import InferenceBenchmark
 from app.schemas.benchmarks import (
@@ -78,9 +79,8 @@ def get_leaderboard(
     price_map: dict[str, float] = {}
     try:
         import json
-        import redis as _redis
-        r = _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=2)
-        cached = r.get("clore:offers:raw")
+        r = get_redis_client()
+        cached = r.get("clore:offers:raw:v2")
         if cached:
             offers = json.loads(cached)
             gpu_prices: dict[str, list[float]] = {}

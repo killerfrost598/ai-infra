@@ -7,6 +7,7 @@ from typing import Literal
 from sqlalchemy.orm import Session
 
 from app.models.entities import EngineKind, HostCapabilitySnapshot, ModelVariant, StackMatrix
+from app.services.compat.cc_utils import cc_gte as _cc_gte
 
 
 @dataclass(frozen=True)
@@ -24,13 +25,6 @@ class InstallPlan:
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
-
-
-def _cc_gte(cc_a: str, cc_b: str) -> bool:
-    try:
-        return tuple(int(x) for x in cc_a.split(".")) >= tuple(int(x) for x in cc_b.split("."))
-    except (ValueError, AttributeError):
-        return False
 
 
 def select_stack(

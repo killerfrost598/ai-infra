@@ -7,6 +7,8 @@ import { api } from "@/lib/api";
 import type { TaskRun } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Card } from "@/components/ui/card";
+import { ErrorState, LoadingState } from "@/components/layouts/page-states";
+import { Spinner } from "@/components/ui/spinner";
 
 const TERMINAL = new Set(["SUCCESS", "FAILED", "PARTIAL"]);
 
@@ -92,17 +94,14 @@ export default function TaskRunDetailPage() {
   if (error) return (
     <div className="space-y-3">
       <Link href="/task-runs" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Task Runs</Link>
-      <p className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p>
+      <ErrorState message={error} />
     </div>
   );
 
   if (!run) return (
     <div className="space-y-3">
       <Link href="/task-runs" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Task Runs</Link>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-        Loading…
-      </div>
+      <LoadingState />
     </div>
   );
 
@@ -189,7 +188,7 @@ export default function TaskRunDetailPage() {
             </pre>
           ) : (
             <div className="terminal flex items-center gap-2 p-5 text-muted-foreground">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
+              <Spinner />
               Waiting for task output…
             </div>
           )}

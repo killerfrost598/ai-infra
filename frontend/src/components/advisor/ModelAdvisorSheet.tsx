@@ -18,6 +18,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ErrorState } from "@/components/layouts/page-states";
+import { Spinner } from "@/components/ui/spinner";
 import { ModelFitCard } from "./ModelFitCard";
 import { VramCalculator } from "./VramCalculator";
 import { EngineComparison } from "./EngineComparison";
@@ -157,16 +159,12 @@ export function ModelAdvisorSheet({ offer, open, onOpenChange, onDeployRequested
         {/* ── Body ───────────────────────────────────────────────────────── */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* Error state */}
-          {error && (
-            <div className="m-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              Failed to load model catalogue. Check console for details.
-            </div>
-          )}
+          {error && <ErrorState message="Failed to load model catalogue. Check console for details." className="m-4" />}
 
           {/* Loading state */}
           {isLoading && (
             <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
+              <Spinner size="md" />
               Loading catalogue…
             </div>
           )}

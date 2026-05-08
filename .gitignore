@@ -20,6 +20,8 @@ node_modules/
 frontend/.next/
 frontend/node_modules/
 *.tsbuildinfo
+frontend/.tsc-out.txt
+frontend/.eslintcache
 
 # Environment files
 .env
@@ -47,6 +49,8 @@ Thumbs.db
 
 # Test
 .pytest_cache/
+frontend/test-results/
+frontend/playwright-report/
 htmlcov/
 .coverage
 

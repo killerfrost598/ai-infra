@@ -1,10 +1,14 @@
-"""Unit tests for hf_seeder.classify_author() — no DB required."""
+"""Unit tests for the HF seeder modules — no DB required."""
+import math
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-from app.services.hf_seeder import (
+from app.services.hf_constants import (
     KNOWN_COMMUNITY_AUTHORS,
     STANDARD_AUTHORS,
     classify_author,
 )
+from app.services.hf_seeder import _upsert_model_variant
 
 
 # ── classify_author ───────────────────────────────────────────────────────────
@@ -90,3 +94,130 @@ def test_all_community_authors_have_non_empty_labels():
 def test_standard_and_community_keys_do_not_overlap():
     overlap = set(STANDARD_AUTHORS) & set(KNOWN_COMMUNITY_AUTHORS)
     assert not overlap, f"Keys in both dicts: {overlap}"
+
+
+# ── _upsert_model_variant — field mapping ─────────────────────────────────────
+
+def _make_model(
+    model_key="meta-llama/Llama-3.1-8B-Instruct",
+    max_context_k=128,
+    num_attention_heads=32,
+    tp_allowed_sizes=None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        model_key=model_key,
+        max_context_k=max_context_k,
+        num_attention_heads=num_attention_heads,
+        tp_allowed_sizes=tp_allowed_sizes or [1, 2, 4, 8],
+    )
+
+
+def _make_quant(
+    name="FP8",
+    vram_weights_gb=10.5,
+    cc_min="8.9",
+    arch_vllm=True,
+    arch_sglang=False,
+    hf_repo="nm-testing/Llama-3.1-8B-FP8",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name,
+        vram_weights_gb=vram_weights_gb,
+        cc_min=cc_min,
+        arch_vllm=arch_vllm,
+        arch_sglang=arch_sglang,
+        hf_repo=hf_repo,
+    )
+
+
+def _make_db(existing_variant=None):
+    db = MagicMock()
+    db.query.return_value.filter_by.return_value.first.return_value = existing_variant
+    return db
+
+
+def test_upsert_creates_variant_when_none_exists():
+    db = _make_db(existing_variant=None)
+    model = _make_model()
+    mq = _make_quant(vram_weights_gb=10.5, cc_min="8.9")
+
+    _upsert_model_variant(db, model, mq)
+
+    db.add.assert_called_once()
+    added = db.add.call_args[0][0]
+    assert added.model_key == model.model_key
+    assert added.quant == "FP8"
+    assert added.vram_min_gb == math.ceil(10.5)  # 11
+    assert added.cc_min == "8.9"
+    assert added.arch_supported_vllm is True
+    assert added.arch_supported_sglang is False
+    assert added.num_attention_heads == 32
+    assert added.tp_allowed_sizes == [1, 2, 4, 8]
+    assert added.context_default == 128 * 1024
+    assert added.hf_repo == "nm-testing/Llama-3.1-8B-FP8"
+
+
+def test_upsert_updates_existing_variant():
+    existing = MagicMock()
+    db = _make_db(existing_variant=existing)
+    model = _make_model()
+    mq = _make_quant(vram_weights_gb=10.5)
+
+    _upsert_model_variant(db, model, mq)
+
+    db.add.assert_not_called()
+    # setattr was called on the existing object
+    assert existing.vram_min_gb == math.ceil(10.5)
+    assert existing.model_key == model.model_key
+
+
+def test_upsert_defaults_cc_min_when_none():
+    db = _make_db(existing_variant=None)
+    mq = _make_quant(cc_min=None)
+
+    _upsert_model_variant(db, _make_model(), mq)
+
+    added = db.add.call_args[0][0]
+    assert added.cc_min == "7.5"
+
+
+def test_upsert_defaults_vram_when_zero():
+    db = _make_db(existing_variant=None)
+    mq = _make_quant(vram_weights_gb=0.0)
+
+    _upsert_model_variant(db, _make_model(), mq)
+
+    added = db.add.call_args[0][0]
+    assert added.vram_min_gb == 1
+
+
+def test_upsert_defaults_context_when_max_context_k_zero():
+    db = _make_db(existing_variant=None)
+    model = _make_model(max_context_k=0)
+
+    _upsert_model_variant(db, model, _make_quant())
+
+    added = db.add.call_args[0][0]
+    assert added.context_default == 8192
+
+
+def test_upsert_truncates_quant_name_to_32_chars():
+    db = _make_db(existing_variant=None)
+    long_name = "Q" * 50
+    mq = _make_quant(name=long_name)
+
+    _upsert_model_variant(db, _make_model(), mq)
+
+    added = db.add.call_args[0][0]
+    assert len(added.quant) == 32
+    assert added.quant == long_name[:32]
+
+
+def test_upsert_vram_ceil_rounds_up():
+    db = _make_db(existing_variant=None)
+    mq = _make_quant(vram_weights_gb=7.1)
+
+    _upsert_model_variant(db, _make_model(), mq)
+
+    added = db.add.call_args[0][0]
+    assert added.vram_min_gb == 8  # ceil(7.1)

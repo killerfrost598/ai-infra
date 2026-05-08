@@ -1,10 +1,10 @@
 "use client";
 
 import { toast } from "sonner";
-import { Copy, ExternalLink, Search } from "lucide-react";
+import { Copy, ExternalLink, Search, Play } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import type { ModelQuant } from "@/lib/types";
+import type { ModelQuant, ModelRunAggregate } from "@/lib/types";
 import type { GpuProfile } from "@/lib/gpu-profiles";
 import { quantFitsGpu } from "@/lib/gpu-profiles";
 import { quantStyle } from "@/lib/quant-styles";
@@ -26,12 +26,31 @@ interface QuantChipProps {
   quant: ModelQuant;
   targetGpu?: GpuProfile;
   modelKey?: string;
+  modelId?: string;
+  runAggregate?: ModelRunAggregate;
+  selected?: boolean;
+  onSelect?: () => void;
+  showActions?: boolean;
 }
 
-export function QuantChip({ quant, targetGpu, modelKey }: QuantChipProps) {
+export function QuantChip({
+  quant,
+  targetGpu,
+  modelKey,
+  modelId,
+  runAggregate,
+  selected = false,
+  onSelect,
+  showActions = true,
+}: QuantChipProps) {
   const router = useRouter();
   const style = quantStyle(quant.quant_format);
   const fits = targetGpu ? quantFitsGpu(quant, targetGpu) : null;
+
+  function tryOnServer() {
+    if (!modelId) return;
+    router.push(`/lab?model_id=${modelId}&quant_id=${quant.id}`);
+  }
 
   function copyCmd() {
     const cmd = quant.hf_repo
@@ -55,14 +74,30 @@ export function QuantChip({ quant, targetGpu, modelKey }: QuantChipProps) {
     <Popover>
       <PopoverTrigger asChild>
         <button
+          onClick={onSelect}
           className={[
-            "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium transition-all hover:opacity-80",
+            "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-all hover:opacity-80",
             style,
             fits === false ? "opacity-30" : "",
             fits === true ? "ring-1 ring-emerald-500/50" : "",
+            selected ? "ring-2 ring-primary/60" : "",
           ].filter(Boolean).join(" ")}
         >
           {quant.name}
+          {runAggregate && runAggregate.total > 0 && (
+            <span
+              className={`rounded-full px-1 text-[9px] font-semibold leading-tight ${
+                runAggregate.success_rate >= 0.8
+                  ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                  : runAggregate.success_rate >= 0.5
+                  ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                  : "bg-red-500/20 text-red-600 dark:text-red-400"
+              }`}
+              title={`${runAggregate.total} run${runAggregate.total !== 1 ? "s" : ""} · ${Math.round(runAggregate.success_rate * 100)}% success`}
+            >
+              {Math.round(runAggregate.success_rate * 100)}%
+            </span>
+          )}
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-3" side="top">
@@ -172,6 +207,7 @@ export function QuantChip({ quant, targetGpu, modelKey }: QuantChipProps) {
           )}
 
           {/* Actions */}
+          {showActions && (
           <div className="flex flex-col gap-1.5 border-t border-border/40 pt-2">
             <div className="flex items-center gap-2">
               <button
@@ -199,7 +235,23 @@ export function QuantChip({ quant, targetGpu, modelKey }: QuantChipProps) {
                 <Search className="size-3" /> Find GPUs for this quant
               </button>
             )}
+            {modelId && (
+              <button
+                onClick={tryOnServer}
+                className="flex items-center gap-1 text-[11px] font-medium text-primary transition-colors hover:opacity-80"
+              >
+                <Play className="size-3" /> Try on server
+              </button>
+            )}
+            {runAggregate && runAggregate.total > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                {runAggregate.total} run{runAggregate.total !== 1 ? "s" : ""} ·{" "}
+                {runAggregate.successful} succeeded ({Math.round(runAggregate.success_rate * 100)}%)
+                {runAggregate.avg_tps != null && ` · avg ${runAggregate.avg_tps.toFixed(1)} tok/s`}
+              </p>
+            )}
           </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

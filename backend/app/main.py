@@ -9,15 +9,36 @@ from app.core.config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from datetime import datetime, timezone
+
     from app.db.session import SessionLocal
+    from app.models.entities import Session as SessionModel, SessionStatus
+    from app.services import session_store
     from app.services.compat.seeder import load_seeds
+
     db = SessionLocal()
     try:
         load_seeds(db)
     except Exception:
         pass  # don't crash startup if seeds fail
+
+    # B8: reconcile sessions stuck in ACTIVE state after a restart.
+    # Any ACTIVE row with no corresponding in-memory handle is unreachable — terminate it.
+    try:
+        stuck = db.query(SessionModel).filter(SessionModel.status == SessionStatus.ACTIVE).all()
+        now = datetime.now(timezone.utc)
+        for s in stuck:
+            if session_store.get(str(s.id)) is None:
+                s.status = SessionStatus.TERMINATED
+                s.terminated_at = now
+                s.metadata_json = {**(s.metadata_json or {}), "reconciled": True}
+        if stuck:
+            db.commit()
+    except Exception:
+        pass  # non-fatal; log if needed
     finally:
         db.close()
+
     yield
 
 

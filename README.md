@@ -54,8 +54,9 @@ DB migrations run automatically on backend startup (`alembic upgrade head`).
 
 - **Clore.ai marketplace** — browse ~2,300 GPU servers, filter by GPU model, VRAM, PCIe, price; rent with SSH key or password; currency auto-filtered to what each server accepts
 - **GPU Finder** — pick a model + quantization + engine, see ranked servers with VRAM fit, compat chips, and predicted throughput
-- **Interactive SSH terminal** — xterm.js PTY sessions with command history, exit codes, and duration tracking
-- **Lab page** — live terminal + parsed command history + one-click "convert session to playbook" via Claude Haiku
+- **Interactive SSH terminal** — xterm.js PTY sessions with command history, exit codes, duration tracking, and persistent Lab workspace restoration
+- **Lab page** — technical operator surface with server cards, auto machine snapshot on session start, model/quant selection from the model KB, AI-assisted deployment guidance, executable deployment plans, parsed command history, and "convert session to playbook"
+- **Model knowledge base** — editable models/quants, Hugging Face metadata sync, quant color coding, and Lab/Finder integration
 - **Playbooks** — register a git repo + script, run it on any server via SSH, stream live logs
 - **Task runs** — all async operations logged with SSE live streaming
 - **Inference benchmarks** — tokens/s leaderboard by GPU model, integrated into marketplace offer cards
@@ -79,8 +80,14 @@ DB migrations run automatically on backend startup (`alembic upgrade head`).
 | `/clore/balance` | wallet balances |
 | `/sessions` | list + create + get + terminate |
 | `WS /sessions/{id}/pty` | interactive PTY terminal |
+| `/sessions/{id}/commands` | recorded command execution |
+| `/sessions/{id}/commands/async` | noninteractive background command execution |
 | `/sessions/{id}/commands/summary` | parsed command history |
 | `/sessions/{id}/to-playbook` | convert session to playbook via Claude Haiku |
+| `/lab/recommend` | feasibility-checked model launch recommendation |
+| `/lab/deployments/plan` | deployment plan steps for operator-assisted vLLM setup |
+| `/lab/assist` | optional Anthropic/OpenAI deployment guidance using platform context |
+| `/model-runs` | model run attempt records and aggregate success metrics |
 | `/benchmarks` | CRUD + `GET /gpu/{model}` + `GET /leaderboard` |
 | `POST /feasibility` | 12-check compat report (predicted or verified) |
 | `/compat/candidates` | list scrape runs + approve candidate |

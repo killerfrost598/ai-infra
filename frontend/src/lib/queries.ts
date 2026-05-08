@@ -20,6 +20,9 @@ export const keys = {
   benchmarks: (gpu?: string, model?: string) => ["benchmarks", gpu ?? "", model ?? ""] as const,
   settings: () => ["settings"] as const,
   modelSyncStatus: () => ["models", "sync-status"] as const,
+  gpuProfiles: () => ["gpu-profiles"] as const,
+  modelRuns: (serverId?: string) => ["model-runs", serverId ?? ""] as const,
+  labSession: (id: string) => ["lab-session", id] as const,
 }
 
 // ─── Query Hooks ─────────────────────────────────────────────────────────────
@@ -261,5 +264,59 @@ export function useRefreshAllModels() {
     mutationFn: () => api.models.refreshAll(),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.modelSyncStatus() }),
     onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export function useGpuProfiles() {
+  return useQuery({
+    queryKey: keys.gpuProfiles(),
+    queryFn: () => api.gpuProfiles.list(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  })
+}
+
+export function useModelRuns(serverId?: string, limit = 20) {
+  return useQuery({
+    queryKey: keys.modelRuns(serverId),
+    queryFn: () => api.modelRuns.list({ server_id: serverId, limit }),
+    enabled: !!serverId,
+  })
+}
+
+export function useCreateModelRun() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: import("./types").ModelRunAttemptCreate) => api.modelRuns.create(data),
+    onSuccess: (run) => qc.invalidateQueries({ queryKey: keys.modelRuns(run.server_id) }),
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export function useUpdateModelRun() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: import("./types").ModelRunAttemptUpdate }) =>
+      api.modelRuns.update(id, data),
+    onSuccess: (run) => qc.invalidateQueries({ queryKey: keys.modelRuns(run.server_id) }),
+    onError: (e: Error) => toast.error(e.message),
+  })
+}
+
+export function useModelRunsAggregate(enabled = true) {
+  return useQuery({
+    queryKey: ["model-runs", "aggregate"],
+    queryFn: () => api.modelRuns.aggregate(),
+    enabled,
+    staleTime: 60_000,
+  })
+}
+
+export function useActiveRuns(serverId?: string) {
+  return useQuery({
+    queryKey: ["model-runs", "active", serverId ?? ""],
+    queryFn: () => api.modelRuns.list({ server_id: serverId, status: "RUNNING", limit: 3 }),
+    enabled: !!serverId,
+    refetchInterval: 10_000,
   })
 }

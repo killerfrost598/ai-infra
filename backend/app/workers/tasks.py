@@ -99,6 +99,10 @@ def provision_server(self, server_id: str) -> dict:
                             server.vram_gb = first["vram_mb"] // 1024
                     if result.cuda_runtime_host:
                         server.cuda_version = result.cuda_runtime_host
+                    if result.mem_total_gb:
+                        server.ram_gb = result.mem_total_gb
+                    if result.os_pretty_name:
+                        server.os_image = result.os_pretty_name
 
                 server.status = ServerStatus.READY
                 task_run.status = TaskStatus.SUCCESS
@@ -170,6 +174,10 @@ def reprobe_server(self, server_id: str) -> dict:
                             server.vram_gb = first["vram_mb"] // 1024
                     if result.cuda_runtime_host:
                         server.cuda_version = result.cuda_runtime_host
+                    if result.mem_total_gb:
+                        server.ram_gb = result.mem_total_gb
+                    if result.os_pretty_name:
+                        server.os_image = result.os_pretty_name
 
                 task_run.status = TaskStatus.SUCCESS
                 _log("\n[reprobe complete]\n")

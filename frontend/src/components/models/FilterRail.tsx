@@ -5,9 +5,8 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
-import { GPU_PROFILES } from "@/lib/gpu-profiles";
 import { Button } from "@/components/ui/button";
-import { useSettings } from "@/lib/queries";
+import { useSettings, useGpuProfiles } from "@/lib/queries";
 
 const PARAM_BUCKETS = [
   { label: "≤ 4B",    param_min: undefined, param_max: 4   },
@@ -50,6 +49,8 @@ export function FilterRail({ className = "" }: FilterRailProps) {
   });
 
   const { data: settingsData } = useSettings();
+  const { data: gpuProfilesApi = [] } = useGpuProfiles();
+  const fullGpuProfiles = gpuProfilesApi.filter((g) => g.is_full_profile);
   const rawExcluded = settingsData?.settings.find((s) => s.key === "excluded_quant_formats")?.value ?? "";
   const globallyExcluded = new Set(
     rawExcluded.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean),
@@ -215,9 +216,9 @@ export function FilterRail({ className = "" }: FilterRailProps) {
           className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         >
           <option value="">Any GPU</option>
-          {GPU_PROFILES.map((g) => (
-            <option key={g.key} value={g.key}>
-              {g.name}
+          {fullGpuProfiles.map((g) => (
+            <option key={g.model_key} value={g.model_key}>
+              {g.display_name}
             </option>
           ))}
         </select>

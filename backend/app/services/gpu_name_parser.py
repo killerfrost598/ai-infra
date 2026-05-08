@@ -152,13 +152,25 @@ _CC_SEED_PATH = Path(__file__).parent.parent / "seeds" / "cuda_capability_seed.j
 
 @lru_cache(maxsize=1)
 def _cc_lookup_map() -> dict[str, str]:
-    """Build lowercase alias → CC string from cuda_capability_seed.json + gpu_profiles.json.
+    """Build lowercase alias → CC string.
 
-    gpu_profiles entries override the CC seed so our validated rent targets take precedence.
+    Priority order (highest to lowest):
+    1. Redis hash "gpu:cc_map:v1" — written by seeder, covers all DB profiles
+    2. gpu_profiles.json — validated rent-target fallback
+    3. cuda_capability_seed.json — broad NVIDIA coverage fallback
     """
-    result: dict[str, str] = {}
+    # 1. Redis — single HGETALL, then cached in-process for process lifetime
+    try:
+        import redis as _redis
+        r = _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=1)
+        mapping = r.hgetall("gpu:cc_map:v1")
+        if mapping:
+            return mapping
+    except Exception:
+        pass
 
-    # CC seed: broad NVIDIA coverage (lower priority)
+    # 2 & 3. JSON file fallback (Redis unavailable or not yet seeded)
+    result: dict[str, str] = {}
     try:
         for entry in json.loads(_CC_SEED_PATH.read_text(encoding="utf-8")):
             cc = entry.get("cc")
@@ -170,7 +182,6 @@ def _cc_lookup_map() -> dict[str, str]:
     except Exception:
         pass
 
-    # gpu_profiles: validated rent targets override (higher priority)
     try:
         for p in json.loads(_PROFILES_PATH.read_text(encoding="utf-8")):
             cc = p.get("cc")

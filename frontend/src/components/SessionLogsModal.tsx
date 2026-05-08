@@ -286,7 +286,7 @@ function CommandsTab({
             <div className="flex items-center gap-2">
               <span
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                  cmd.exit_code === 0 ? "bg-emerald-500" : "bg-red-500"
+                  cmd.exit_code == null ? "bg-amber-500" : cmd.exit_code === 0 ? "bg-emerald-500" : "bg-red-500"
                 }`}
               />
               <code className="flex-1 truncate text-xs font-mono text-foreground">
@@ -326,10 +326,12 @@ function OutputTab({ cmd }: { cmd: ParsedCommand | null }) {
             className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium ${
               cmd.exit_code === 0
                 ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                : cmd.exit_code == null
+                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
                 : "bg-red-500/15 text-red-600 dark:text-red-400"
             }`}
           >
-            exit {cmd.exit_code}
+            {cmd.exit_code == null ? "running" : `exit ${cmd.exit_code}`}
           </span>
           <span className="text-[10px] text-muted-foreground/60">{formatDuration(cmd.duration_ms)}</span>
           <span className="text-[10px] text-muted-foreground/60">{formatTime(cmd.started_ms)}</span>

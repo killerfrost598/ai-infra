@@ -268,6 +268,79 @@ def parse_pty_commands(pty_log: str) -> list[dict]:
     return commands
 
 
+def capture_host_snapshot(client: paramiko.SSHClient) -> dict:
+    """Run comprehensive host probes using isolated exec channels.
+
+    Uses client.exec_command() — each probe opens its own SSH channel, leaving
+    the active PTY channel completely untouched. This prevents the race condition
+    where both the WebSocket reader and the probe compete for the same channel.
+
+    Returns a structured dict suitable for metadata_json["host_snapshot"],
+    including a captured_at ISO timestamp. All probes are wrapped — failures
+    set None rather than raising.
+    """
+    from datetime import datetime, timezone
+
+    def _run(cmd: str, timeout: float = 8.0) -> tuple[str | None, int]:
+        try:
+            _, stdout, _ = client.exec_command(cmd, timeout=timeout)
+            stdout.channel.settimeout(timeout)
+            output = stdout.read().decode(errors="replace").strip()
+            rc = stdout.channel.recv_exit_status()
+            stdout.channel.close()
+            return output or None, rc
+        except Exception:
+            return None, 1
+
+    result: dict = {}
+
+    # GPU array (name, cc, vram, driver per device)
+    out, rc = _run(
+        "nvidia-smi --query-gpu=name,compute_cap,memory.total,driver_version "
+        "--format=csv,noheader,nounits"
+    )
+    gpus: list[dict] = []
+    if rc == 0 and out:
+        for line in out.splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 4:
+                try:
+                    vram_gb = int(parts[2]) // 1024
+                except ValueError:
+                    vram_gb = 0
+                gpus.append({"name": parts[0], "cc": parts[1], "vram_gb": vram_gb, "driver_version": parts[3]})
+    result["gpus"] = gpus
+    result["gpu_count"] = len(gpus)
+    result["driver_version"] = gpus[0]["driver_version"] if gpus else None
+    result["homogeneous"] = len({g["name"] for g in gpus}) == 1 if gpus else True
+
+    # NVLink topology matrix
+    topo, rc = _run("nvidia-smi topo -m")
+    result["nvlink_topology"] = topo if rc == 0 else None
+
+    # CUDA host toolkit version via nvcc
+    cuda, rc = _run("nvcc --version 2>/dev/null | grep release | awk '{print $6}' | cut -c2-")
+    result["cuda_runtime_host"] = cuda if rc == 0 else None
+
+    # Docker presence (fast path: just check binary)
+    _, docker_rc = _run("which docker")
+    docker_present = docker_rc == 0
+    result["docker_present"] = docker_present
+
+    # NVIDIA Container Toolkit — check daemon.json, faster than docker info
+    if docker_present:
+        nct_out, _ = _run(
+            "grep -q nvidia /etc/docker/daemon.json 2>/dev/null && echo yes "
+            "|| (docker info --format '{{.Runtimes}}' 2>/dev/null | grep -q nvidia && echo yes || echo no)"
+        )
+        result["nvidia_container_toolkit"] = nct_out == "yes"
+    else:
+        result["nvidia_container_toolkit"] = False
+
+    result["captured_at"] = datetime.now(timezone.utc).isoformat()
+    return result
+
+
 def capture_env_snapshot(channel: paramiko.Channel) -> dict:
     """Run lightweight env probes on an open PTY channel and return a dict.
 

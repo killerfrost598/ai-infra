@@ -17,6 +17,7 @@ class CloreOfferGroup(BaseModel):
     vendor: str | None
     family: str
     variant: str | None
+    arch: str | None             # GPU architecture e.g. "Ampere", "Ada Lovelace"
     display_name: str            # "RTX 3090 Ti"
     offer_count: int
     total_gpu_count: int
@@ -30,6 +31,64 @@ class CloreOfferGroup(BaseModel):
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+
+# Maps first two digits of NVIDIA consumer GPU model number → architecture name
+_NVIDIA_CONSUMER_ARCH: dict[str, str] = {
+    "10": "Pascal",
+    "16": "Turing",
+    "20": "Turing",
+    "30": "Ampere",
+    "40": "Ada Lovelace",
+    "50": "Blackwell",
+}
+
+# Maps leading letter of NVIDIA datacenter GPU → architecture name
+_NVIDIA_DC_ARCH: dict[str, str] = {
+    "T": "Turing",
+    "A": "Ampere",
+    "L": "Ada Lovelace",
+    "H": "Hopper",
+    "B": "Blackwell",
+    "V": "Volta",
+    "P": "Pascal",
+}
+
+
+def _derive_arch(family: str, vendor: str | None) -> str | None:
+    """Infer GPU architecture from family name and vendor."""
+    vendor_lower = (vendor or "").lower()
+    fam = family.strip()
+
+    if "nvidia" in vendor_lower or vendor_lower == "":
+        # Datacenter: letter prefix like A100, H100, L40, V100, B200, T4
+        dc_match = re.match(r"^([TALBHVP])(\d)", fam, re.IGNORECASE)
+        if dc_match:
+            letter = dc_match.group(1).upper()
+            if letter in _NVIDIA_DC_ARCH:
+                return _NVIDIA_DC_ARCH[letter]
+
+        # Consumer: RTX/GTX NNxx — grab first two digits of the number
+        consumer_match = re.search(r"\b(\d{4,5})\b", fam)
+        if consumer_match:
+            num = consumer_match.group(1)
+            prefix = num[:2]
+            if prefix in _NVIDIA_CONSUMER_ARCH:
+                return _NVIDIA_CONSUMER_ARCH[prefix]
+
+    if "amd" in vendor_lower or "radeon" in vendor_lower:
+        mi_match = re.search(r"\bMI(\d+)", fam, re.IGNORECASE)
+        if mi_match:
+            return "CDNA"
+        rdna_match = re.search(r"\bRX\s*(\d{4})", fam, re.IGNORECASE)
+        if rdna_match:
+            first_digit = rdna_match.group(1)[0]
+            return {"7": "RDNA 3", "6": "RDNA 2", "5": "RDNA 1"}.get(first_digit)
+
+    if "intel" in vendor_lower:
+        return "Xe"
+
+    return None
 
 
 def _make_key(vendor: str | None, family: str, variant: str | None) -> str:
@@ -73,6 +132,7 @@ def group_offers(offers: list[CloreOffer]) -> list[CloreOfferGroup]:
             vendor=vendor,
             family=family,
             variant=variant,
+            arch=_derive_arch(family, vendor),
             display_name=display_name,
             offer_count=len(group_offers_list),
             total_gpu_count=sum(o.gpu_count for o in group_offers_list),

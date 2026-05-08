@@ -4,6 +4,19 @@ from uuid import UUID
 from app.schemas.base import BaseSchema, UUIDSchema
 
 
+class MachineSnapshotPayload(BaseSchema):
+    driver_version: str | None = None
+    cuda_runtime_host: str | None = None
+    gpu_count: int = 0
+    gpus: list[dict] = []
+    nvlink_topology: str | None = None
+    homogeneous: bool = True
+    docker_present: bool = False
+    nvidia_container_toolkit: bool = False
+    captured_at: datetime | None = None
+    is_stale: bool = False
+
+
 class SessionCommandResponse(BaseSchema):
     id: UUID
     session_id: UUID
@@ -38,6 +51,7 @@ class SessionResponse(UUIDSchema):
     terminated_at: datetime | None
     pty_log: str | None = None
     commands: list[SessionCommandResponse]
+    latest_snapshot: MachineSnapshotPayload | None = None
 
 
 class SessionCreate(BaseSchema):

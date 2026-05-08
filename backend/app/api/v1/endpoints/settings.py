@@ -9,7 +9,13 @@ from app.services.settings_service import CLORE_FILTER_KEYS, KNOWN_KEYS, get_set
 router = APIRouter()
 
 _FILTERED_CACHE_KEYS = ("clore:offers:filtered", "clore:offers:meta")
-_SECRET_KEYS: frozenset[str] = frozenset({"clore_api_key", "hf_token", "anthropic_api_key", "ssh_private_key"})
+_SECRET_KEYS: frozenset[str] = frozenset({
+    "clore_api_key",
+    "hf_token",
+    "anthropic_api_key",
+    "openai_api_key",
+    "ssh_private_key",
+})
 
 
 def _invalidate_filtered_cache() -> None:

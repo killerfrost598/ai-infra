@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy } from "lucide-react";
+import { ArrowRight, Copy, Cpu, Globe, Microchip, Zap } from "lucide-react";
 import { toast } from "sonner";
 import type { CloreOffer } from "@/lib/types";
 import {
@@ -10,138 +10,143 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { fmtSpeed, pcieBadgeColor } from "./OfferCard";
+import { fmtSpeed } from "./OfferCard";
 
 interface Props {
   offer: CloreOffer | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onRent?: () => void;
 }
 
-type HealthPill = { label: string; className: string };
+type Tone = "neutral" | "info" | "ok" | "warn" | "err";
 
-function Row({
-  label,
-  value,
-  valueClass,
-  className,
-}: {
-  label: string;
-  value: React.ReactNode;
-  valueClass?: string;
-  className?: string;
-}) {
+function valueToneClass(tone: Tone): string {
+  if (tone === "info") return "text-indigo-600 dark:text-indigo-300";
+  if (tone === "ok") return "text-emerald-600 dark:text-emerald-300";
+  if (tone === "warn") return "text-amber-600 dark:text-amber-300";
+  if (tone === "err") return "text-rose-600 dark:text-rose-300";
+  return "text-slate-800 dark:text-zinc-100";
+}
+
+function eyebrowClassName() {
+  return "text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-zinc-400";
+}
+
+function UnknownValue() {
   return (
-    <div className={className}>
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
-        {label}
-      </dt>
-      <dd className={`mt-1 text-sm ${valueClass ?? "text-foreground/90"}`}>
-        {value ?? (
-          <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-            Unknown
-          </span>
-        )}
-      </dd>
-    </div>
+    <span className="font-mono text-[12px] text-slate-500 dark:text-zinc-400">
+      unknown
+    </span>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function DashValue() {
   return (
-    <section className="space-y-2">
-      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/80">
-        {title}
-      </h4>
-      {children}
-    </section>
+    <span className="font-mono text-[13px] text-slate-400 dark:text-zinc-500">
+      —
+    </span>
   );
 }
 
-function fmtMrl(hours: number | null): string | null {
-  if (hours == null) return null;
-  if (hours < 24) return `${hours}h`;
-  if (hours < 168) return `${Math.round(hours / 24)} days`;
-  if (hours < 720) return `${Math.round(hours / 168)} weeks`;
-  return `${Math.round(hours / 720)} months`;
-}
-
-function SummaryPill({ label, className }: HealthPill) {
+function Badge({ label, tone = "neutral" }: { label: string; tone?: Tone }) {
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${className}`}>
+    <span
+      className={`inline-flex rounded-md border px-2 py-1 font-mono text-[11px] ${
+        tone === "info"
+          ? "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-300"
+          : "border-slate-300 bg-slate-100 text-slate-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+      }`}
+    >
       {label}
     </span>
   );
 }
 
-function diskHealth(diskGb: number | null): HealthPill {
-  if (diskGb == null) {
-    return {
-      label: "Disk unknown",
-      className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
-    };
-  }
-  if (diskGb < 100) {
-    return {
-      label: `Low disk (${diskGb} GB)`,
-      className: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
-    };
-  }
-  if (diskGb < 250) {
-    return {
-      label: `Disk ${diskGb} GB`,
-      className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
-    };
-  }
-  return {
-    label: `Disk ${diskGb} GB`,
-    className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
-  };
+function KeyValue({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: React.ReactNode | null;
+  tone?: Tone;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-1.5">
+      <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-zinc-400">
+        {label}
+      </dt>
+      <dd className={`font-mono text-[13px] ${valueToneClass(tone)}`}>
+        {value ?? <UnknownValue />}
+      </dd>
+    </div>
+  );
 }
 
-function networkHealth(upload: number | null, download: number | null): HealthPill {
-  if (upload == null || download == null) {
-    return {
-      label: "Network unknown",
-      className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
-    };
-  }
-  const slower = Math.min(upload, download);
-  if (slower >= 1000) {
-    return {
-      label: "High network",
-      className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
-    };
-  }
-  if (slower >= 300) {
-    return {
-      label: "Good network",
-      className: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300",
-    };
-  }
-  return {
-    label: "Limited network",
-    className: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
-  };
+function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-slate-500 dark:text-zinc-400">{icon}</span>
+      <h4 className={eyebrowClassName()}>{title}</h4>
+    </div>
+  );
 }
 
-export function ServerInfoModal({ offer, open, onOpenChange }: Props) {
+function diskTone(diskGb: number | null): Tone {
+  if (diskGb == null) return "neutral";
+  if (diskGb < 100) return "err";
+  if (diskGb < 250) return "warn";
+  return "ok";
+}
+
+function speedTone(value: number | null): Tone {
+  if (value == null) return "neutral";
+  if (value >= 300) return "ok";
+  if (value >= 100) return "warn";
+  return "err";
+}
+
+const dashedDivider = "border-t border-dashed border-slate-300 dark:border-zinc-800";
+
+function summarizeGpuArray(gpuArray: string[]): string {
+  const counts = new Map<string, number>();
+  const order: string[] = [];
+
+  for (const name of gpuArray) {
+    const count = counts.get(name);
+    if (count == null) {
+      counts.set(name, 1);
+      order.push(name);
+      continue;
+    }
+    counts.set(name, count + 1);
+  }
+
+  return order
+    .map((name) => {
+      const count = counts.get(name) ?? 0;
+      return count > 1 ? `${name} ×${count}` : name;
+    })
+    .join(" · ");
+}
+
+export function ServerInfoModal({ offer, open, onOpenChange, onRent }: Props) {
   if (!offer) return null;
 
-  const pcieColor = pcieBadgeColor(offer.pcie_version);
   const totalVram = offer.vram_gb * offer.gpu_count;
-  const minRental = fmtMrl(offer.mrl);
-  const diskStatus = diskHealth(offer.disk_gb);
-  const networkStatus = networkHealth(offer.upload_mbps, offer.download_mbps);
-  const diskValue =
-    offer.disk_gb == null ? null :
-    offer.disk_gb < 100 ? (
-      <span className="inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
-        {offer.disk_gb} GB (low)
-      </span>
-    ) : (
-      `${offer.disk_gb} GB`
-    );
+  const pcieVersion = offer.pcie_version ? parseFloat(offer.pcie_version) : null;
+  const pcieTone: Tone =
+    pcieVersion == null ? "neutral"
+    : pcieVersion >= 4 ? "ok"
+    : pcieVersion >= 3 ? "warn"
+    : "err";
+  const pcieValue = offer.pcie_version
+    ? `${offer.pcie_version} ×${offer.pcie_width ?? "?"}`
+    : null;
+  const coinValues = offer.allowed_coins.length > 0 ? offer.allowed_coins : ["CLORE", "USD", "bitcoin"];
+  const canShowMixedRig = offer.gpu_array.length > 1;
+  const mixedRigSummary = summarizeGpuArray(offer.gpu_array);
 
   const copyServerId = () => {
     if (typeof navigator === "undefined" || !navigator.clipboard) {
@@ -154,158 +159,189 @@ export function ServerInfoModal({ offer, open, onOpenChange }: Props) {
       .catch(() => toast.error("Copy failed. Try again."));
   };
 
+  const handleRent = () => {
+    onOpenChange(false);
+    onRent?.();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-        <DialogHeader className="space-y-3">
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <span className="min-w-0 truncate">{offer.gpu_name}</span>
-            {offer.gpu_count > 1 && (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
-                ×{offer.gpu_count}
-              </span>
-            )}
-            <span className="ml-auto text-sm font-medium text-muted-foreground">Server details</span>
-          </DialogTitle>
+      <DialogContent
+        overlayClassName="bg-black/70 backdrop-blur-[2px]"
+        className="max-h-[90vh] max-w-[760px] overflow-hidden rounded-xl border border-slate-300 p-0 dark:border-zinc-800"
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>{offer.gpu_name} server details</DialogTitle>
+        </DialogHeader>
 
-          <div className="rounded-lg border bg-muted/25 p-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                  Server ID
-                </p>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="font-mono text-sm text-foreground/90">#{offer.id}</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1 px-2 text-xs"
-                    onClick={copyServerId}
-                    aria-label={`Copy server ID ${offer.id}`}
-                  >
-                    <Copy className="size-3.5" />
-                    Copy
-                  </Button>
+        <div className="max-h-[90vh] overflow-y-auto bg-slate-100 text-slate-900 dark:bg-[#0d0d11] dark:text-zinc-100">
+          <div className="grid" style={{ gridTemplateColumns: "1.9fr 1fr" }}>
+
+            {/* ── Left: spec sheet ── */}
+            <div className="border-r border-slate-300 p-5 dark:border-zinc-800">
+
+              {/* Header */}
+              <div className="pb-4">
+                <h3 className="text-xl font-semibold leading-none">
+                  {offer.gpu_name}
+                  {offer.gpu_count > 1 && (
+                    <span className="ml-2 text-sm font-medium text-slate-500 dark:text-zinc-400">
+                      ×{offer.gpu_count}
+                    </span>
+                  )}
+                </h3>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge label={`${totalVram} GB VRAM`} tone="info" />
+                  <Badge label={offer.cuda_version ? `CUDA ${offer.cuda_version}` : "CUDA unknown"} />
+                  <Badge label={`#${offer.id}`} />
                 </div>
               </div>
 
-              <div className="text-right">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                  On-demand
-                </p>
-                <p className="text-lg font-semibold">
-                  ${offer.price_per_day.toFixed(2)}
-                  <span className="text-xs font-normal text-muted-foreground">/day</span>
-                </p>
-              </div>
+              {/* Compute */}
+              <section className="border-t border-slate-300 pt-4 dark:border-zinc-800">
+                <SectionHeader icon={<Microchip className="size-3.5" />} title="Compute" />
+                <div className="mt-2">
+                  <div className="grid grid-cols-2 gap-x-4">
+                    <KeyValue label="VRAM / GPU" value={`${offer.vram_gb} GB`} />
+                    <KeyValue label="GPU count" value={String(offer.gpu_count)} />
+                  </div>
+                  <div className={`grid grid-cols-2 gap-x-4 ${dashedDivider}`}>
+                    <KeyValue label="Total VRAM" value={`${totalVram} GB`} tone="info" />
+                    <KeyValue label="CUDA" value={offer.cuda_version} />
+                  </div>
+                  <div className={`grid grid-cols-2 gap-x-4 ${dashedDivider}`}>
+                    <KeyValue label="PCIe" value={pcieValue} tone={pcieTone} />
+                    <KeyValue label="Score" value={offer.score != null ? offer.score.toFixed(2) : null} />
+                  </div>
+                </div>
+                {canShowMixedRig && (
+                  <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-zinc-400">
+                    <Zap className="size-3 text-indigo-500 dark:text-indigo-300" />
+                    Mixed rig:{" "}
+                    <span className="font-mono text-[12px] text-slate-700 dark:text-zinc-300">
+                      {mixedRigSummary}
+                    </span>
+                  </p>
+                )}
+              </section>
+
+              {/* Host */}
+              <section className="mt-4 border-t border-slate-300 pt-4 dark:border-zinc-800">
+                <SectionHeader icon={<Cpu className="size-3.5" />} title="Host" />
+                <dl className="mt-2">
+                  <KeyValue label="CPU" value={offer.cpu_model} />
+                  <div className={`grid grid-cols-2 gap-x-4 ${dashedDivider}`}>
+                    <KeyValue
+                      label="RAM"
+                      value={offer.ram_gb != null ? `${offer.ram_gb} GB` : null}
+                    />
+                    <KeyValue
+                      label="Disk"
+                      value={offer.disk_gb != null ? `${offer.disk_gb} GB` : null}
+                      tone={diskTone(offer.disk_gb)}
+                    />
+                  </div>
+                </dl>
+              </section>
+
+              {/* Network */}
+              <section className="mt-4 border-t border-slate-300 pt-4 dark:border-zinc-800">
+                <SectionHeader icon={<Globe className="size-3.5" />} title="Network" />
+                <dl className={`mt-2 grid grid-cols-2 gap-x-4`}>
+                  <div className="flex items-center justify-between gap-4 py-1.5">
+                    <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-zinc-400">
+                      Upload
+                    </dt>
+                    <dd className={`font-mono text-[13px] ${valueToneClass(speedTone(offer.upload_mbps))}`}>
+                      {offer.upload_mbps != null ? fmtSpeed(offer.upload_mbps) : <DashValue />}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 py-1.5">
+                    <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-zinc-400">
+                      Download
+                    </dt>
+                    <dd className={`font-mono text-[13px] ${valueToneClass(speedTone(offer.download_mbps))}`}>
+                      {offer.download_mbps != null ? fmtSpeed(offer.download_mbps) : <DashValue />}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <SummaryPill
-                label={`${totalVram} GB total VRAM`}
-                className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-              />
-              <SummaryPill label={diskStatus.label} className={diskStatus.className} />
-              <SummaryPill label={networkStatus.label} className={networkStatus.className} />
-              {minRental && (
-                <SummaryPill
-                  label={`Min rental ${minRental}`}
-                  className="bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-                />
-              )}
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div className="space-y-5 py-1">
-          <Section title="GPU">
-            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Row label="VRAM / GPU" value={`${offer.vram_gb} GB`} />
-              <Row label="GPU count" value={String(offer.gpu_count)} />
-              <Row label="VRAM total" value={`${totalVram} GB`} valueClass="text-indigo-500 font-medium" />
-              <Row label="CUDA" value={offer.cuda_version} />
-            </dl>
-            {offer.gpu_array.length > 1 && (
-              <div className="mt-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                Mixed rig — {offer.gpu_array.join(" · ")}
-              </div>
-            )}
-          </Section>
-
-          <Section title="System">
-            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Row label="CPU" value={offer.cpu_model} className="col-span-2 sm:col-span-2" />
-              <Row
-                label="RAM"
-                value={offer.ram_gb != null ? `${offer.ram_gb} GB` : null}
-              />
-              <Row
-                label="SSD / Disk"
-                value={diskValue}
-              />
-              <Row
-                label="PCIe"
-                value={
-                  offer.pcie_version
-                    ? `${offer.pcie_version} x${offer.pcie_width ?? "?"}`
-                    : null
-                }
-                valueClass={pcieColor}
-              />
-              {offer.score != null && (
-                <Row label="Score" value={offer.score.toFixed(2)} />
-              )}
-            </dl>
-          </Section>
-
-          <Section title="Networking">
-            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Row
-                label="Upload"
-                value={offer.upload_mbps != null ? fmtSpeed(offer.upload_mbps) : null}
-              />
-              <Row
-                label="Download"
-                value={offer.download_mbps != null ? fmtSpeed(offer.download_mbps) : null}
-              />
-            </dl>
-          </Section>
-
-          <Section title="Pricing & Rental">
-            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Row
-                label="On-demand"
-                value={`$${offer.price_per_day.toFixed(2)}/day`}
-                valueClass="font-medium"
-              />
-              <Row
-                label="Spot"
-                value={
-                  offer.spot_price_per_day != null
-                    ? `$${offer.spot_price_per_day.toFixed(2)}/day`
-                    : null
-                }
-              />
-              <Row label="Min rental" value={minRental} />
-            </dl>
-            {offer.allowed_coins.length > 0 && (
-              <div className="mt-3">
-                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60">
-                  Accepted currencies
+            {/* ── Right: checkout rail ── */}
+            <aside className="flex flex-col bg-slate-50 p-5 dark:bg-zinc-900/70">
+              <div>
+                <p className={eyebrowClassName()}>On-demand</p>
+                <p className="mt-1 flex items-end gap-1 font-mono">
+                  <span className="text-4xl font-semibold tracking-tight">
+                    ${offer.price_per_day.toFixed(2)}
+                  </span>
+                  <span className="pb-1 text-xs text-slate-500 dark:text-zinc-400">/day</span>
                 </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {offer.allowed_coins.map((coin) => (
+                {offer.spot_price_per_day != null ? (
+                  <p className="mt-2 text-xs text-slate-500 dark:text-zinc-400">
+                    Spot from{" "}
+                    <span className="font-mono text-emerald-600 dark:text-emerald-300">
+                      ${offer.spot_price_per_day.toFixed(2)}/day
+                    </span>
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-500 dark:text-zinc-400">
+                    No spot pricing
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-6 border-t border-slate-300 pt-4 dark:border-zinc-800">
+                <p className={eyebrowClassName()}>Pays in</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {coinValues.map((coin) => (
                     <span
                       key={coin}
-                      className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground"
+                      className="rounded-md border border-slate-300 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
                     >
                       {coin}
                     </span>
                   ))}
                 </div>
               </div>
-            )}
-          </Section>
+
+              <div className="mt-6 border-t border-slate-300 pt-4 dark:border-zinc-800">
+                <p className={eyebrowClassName()}>Server</p>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <span className="font-mono text-[13px] text-slate-800 dark:text-zinc-200">
+                    #{offer.id}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-slate-500 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-zinc-100"
+                    onClick={copyServerId}
+                    aria-label={`Copy server ID ${offer.id}`}
+                  >
+                    <Copy className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-auto space-y-2 pt-8">
+                <Button
+                  className="h-10 w-full justify-center rounded-md bg-indigo-600 px-3 text-sm text-white hover:bg-indigo-500 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                  onClick={handleRent}
+                >
+                  Rent this server
+                  <ArrowRight className="size-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 w-full rounded-md border-slate-300 bg-transparent text-sm dark:border-zinc-700 dark:text-zinc-300"
+                  onClick={() => onOpenChange(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </aside>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

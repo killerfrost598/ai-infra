@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.cache import get_redis_client
 from app.db.session import get_db
-from app.models.entities import ProviderAccount, Server, ServerStatus
+from app.models.entities import Server, ServerStatus
 from app.schemas.servers import ServerResponse
 from app.services.clore_client import CloreClient, CloreOffer
 from app.services.clore_filters import apply_filters, load_clore_filters
@@ -22,62 +23,7 @@ _META_KEY = "clore:offers:meta:v2"
 _OLD_KEYS = ["clore:offers:raw", "clore:offers:filtered", "clore:offers:meta"]
 _CACHE_TTL = 600  # 10 minutes
 
-
-def _get_redis():
-    import redis as _redis
-    return _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=2)
-
 router = APIRouter()
-
-
-@router.get("/debug-sdk")
-def debug_sdk(db: Session = Depends(get_db)) -> dict:
-    """Dump raw attributes of the first marketplace server from the SDK.
-
-    Temporary endpoint — use this to verify field names and value types
-    from the live clore-ai SDK before finalising the _sdk_to_offer mapping.
-    Hit: GET /api/v1/clore/debug-sdk
-    """
-    api_key = _resolve_clore_key(db)
-    try:
-        from clore_ai import CloreAI  # type: ignore[import]
-        sdk = CloreAI(api_key=api_key)
-        servers = sdk.marketplace()
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    if not servers:
-        return {"count": 0, "message": "No servers returned by marketplace()"}
-
-    s = servers[0]
-
-    def _dump(obj: object, depth: int = 0) -> dict | str:
-        if obj is None:
-            return "None"
-        if depth > 2:
-            return f"<{type(obj).__name__}>"
-        result: dict = {"__type__": type(obj).__name__}
-        for attr in sorted(dir(obj)):
-            if attr.startswith("_"):
-                continue
-            try:
-                val = getattr(obj, attr)
-                if callable(val):
-                    continue
-                if isinstance(val, (int, float, str, bool)) or val is None:
-                    result[attr] = val
-                elif isinstance(val, list):
-                    result[attr] = [_dump(item, depth + 1) for item in val[:3]]
-                else:
-                    result[attr] = _dump(val, depth + 1)
-            except Exception as exc:
-                result[attr] = f"ERROR: {exc}"
-        return result
-
-    return {
-        "total_servers": len(servers),
-        "first_server": _dump(s),
-    }
 
 
 def _resolve_clore_key(db: Session) -> str:
@@ -121,7 +67,7 @@ def list_offers(
     # Serve from filtered cache when not forcing a refresh
     if not refresh:
         try:
-            r = _get_redis()
+            r = get_redis_client()
             filtered_raw = r.get(_FILTERED_KEY)
             groups_raw = r.get(_GROUPS_KEY)
             meta_raw = r.get(_META_KEY)
@@ -140,7 +86,7 @@ def list_offers(
     raw_offers: list[CloreOffer] | None = None
     if not refresh:
         try:
-            r = _get_redis()
+            r = get_redis_client()
             raw_data = r.get(_RAW_KEY)
             if raw_data:
                 raw_offers = [CloreOffer(**o) for o in json.loads(raw_data)]
@@ -155,7 +101,7 @@ def list_offers(
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         try:
-            r = _get_redis()
+            r = get_redis_client()
             r.setex(_RAW_KEY, _CACHE_TTL, json.dumps([o.model_dump() for o in raw_offers]))
         except Exception:
             pass
@@ -178,7 +124,7 @@ def list_offers(
 
     filtered_dicts = [o.model_dump() for o in filtered_offers]
     try:
-        r = _get_redis()
+        r = get_redis_client()
         # Nuke old-format keys before writing new ones
         r.delete(*_OLD_KEYS)
         r.setex(_FILTERED_KEY, _CACHE_TTL, json.dumps(filtered_dicts))
@@ -295,15 +241,6 @@ def rent_server(payload: RentRequest, db: Session = Depends(get_db)) -> Server:
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    provider_account = db.query(ProviderAccount).filter(
-        ProviderAccount.provider_name == "clore"
-    ).first()
-    if not provider_account:
-        provider_account = ProviderAccount(provider_name="clore", account_label="Clore.ai")
-        db.add(provider_account)
-        db.commit()
-        db.refresh(provider_account)
-
     # When the user authenticated with an SSH key, retrieve the platform's stored
     # private key so terminal sessions can connect without a password.
     platform_private_key: str | None = None
@@ -311,7 +248,6 @@ def rent_server(payload: RentRequest, db: Session = Depends(get_db)) -> Server:
         platform_private_key = get_setting("ssh_private_key", db)
 
     server = Server(
-        provider_account_id=provider_account.id,
         external_server_id=clore_server.id,
         hostname=clore_server.hostname,
         ssh_port=clore_server.ssh_port,

@@ -11,19 +11,13 @@ import { keys, useServers, useRentals, useCreateServer, useDeleteServer, useCrea
 import type { CloreRental, Server, ServerCreate, SSHTestResult } from "@/lib/types";
 import { serverSchema, type ServerFormValues } from "@/lib/schemas";
 import { StatusBadge } from "@/components/StatusBadge";
-import { PtyTerminal } from "@/components/PtyTerminal";
+import { TerminalModal } from "@/components/terminal/TerminalModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layouts/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/layouts/page-states";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 export default function ServersPage() {
   const { data: serversData, isLoading, error } = useServers();
@@ -40,7 +34,10 @@ export default function ServersPage() {
 
   const [registeringId, setRegisteringId] = useState<string | null>(null);
   const [startingSSH, setStartingSSH] = useState<string | null>(null);
-  const [terminalSession, setTerminalSession] = useState<{ id: string; serverName: string } | null>(null);
+  const [terminalSession, setTerminalSession] = useState<
+    | { id: string; sessionLabel: string; server: Server }
+    | null
+  >(null);
   const [showForm, setShowForm] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [sshTestResults, setSshTestResults] = useState<Record<string, SSHTestResult>>({});
@@ -109,11 +106,14 @@ export default function ServersPage() {
     setShowForm(true);
   }
 
-  async function handleStartSSH(serverId: string, serverName: string) {
+  async function handleStartSSH(serverId: string) {
+    const server = servers.find((s) => s.id === serverId);
+    if (!server) return;
     setStartingSSH(serverId);
     try {
       const session = await createSession.mutateAsync({ server_id: serverId });
-      setTerminalSession({ id: session.id, serverName });
+      const sessionLabel = `ses_${session.id.replace(/-/g, "").slice(0, 6)}`;
+      setTerminalSession({ id: session.id, sessionLabel, server });
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start SSH session");
     } finally {
@@ -301,7 +301,7 @@ export default function ServersPage() {
                   size="sm"
                   loading={startingSSH === s.id}
                   disabled={s.status === "TERMINATED"}
-                  onClick={() => handleStartSSH(s.id, s.hostname)}
+                  onClick={() => handleStartSSH(s.id)}
                 >
                   Open Terminal
                 </Button>
@@ -355,8 +355,8 @@ export default function ServersPage() {
         ))}
       </div>
 
-      {/* Terminal dialog — no logs, plain SSH terminal */}
-      <Dialog
+      {/* Terminal modal — designed shell, theme-aware terminal */}
+      <TerminalModal
         open={!!terminalSession}
         onOpenChange={(open) => {
           if (!open && terminalSession) {
@@ -364,24 +364,25 @@ export default function ServersPage() {
             setTerminalSession(null);
           }
         }}
-      >
-        <DialogContent size="xl" closeOnInteractionOutside className="p-0">
-          <DialogHeader className="px-4 py-3">
-            <DialogTitle className="text-sm font-medium">
-              Terminal — {terminalSession?.serverName}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-hidden">
-            {terminalSession && (
-              <PtyTerminal
-                key={terminalSession.id}
-                sessionId={terminalSession.id}
-                onDisconnect={() => setTerminalSession(null)}
-              />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+        sessionId={terminalSession?.id ?? null}
+        sessionLabel={terminalSession?.sessionLabel}
+        serverMeta={
+          terminalSession
+            ? {
+                gpu_model: terminalSession.server.gpu_model,
+                vram_gb: terminalSession.server.vram_gb,
+                hostname: terminalSession.server.hostname,
+                status: terminalSession.server.status,
+              }
+            : undefined
+        }
+        onDisconnect={() => {
+          if (terminalSession) {
+            api.sessions.terminate(terminalSession.id).catch(() => {});
+            setTerminalSession(null);
+          }
+        }}
+      />
 
       {unregisteredRentals.length > 0 && (
         <div className="space-y-2">

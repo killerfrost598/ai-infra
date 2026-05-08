@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { RefreshCw } from "lucide-react";
 import { useCloreOffers, useRefreshCloreOffers } from "@/lib/queries";
@@ -21,7 +21,7 @@ import {
   type GpuFinderFormState,
 } from "./GpuFinderForm";
 import { GpuFinderResult } from "./GpuFinderResult";
-import { GpuGroupCard } from "./GpuGroupCard";
+import { GpuGroupCard, GpuGroupDrawer } from "./GpuGroupCard";
 
 const ModelAdvisorSheet = dynamic(
   () => import("@/components/advisor/ModelAdvisorSheet").then((m) => m.ModelAdvisorSheet),
@@ -65,6 +65,7 @@ export function GpuFinderPanel() {
   const [visibleGroupCount, setVisibleGroupCount] = useState(15);
   const [sortKey, setSortKey] = useState<"rank" | "price_asc" | "price_desc">("rank");
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
+  const [expandedGroupKey, setExpandedGroupKey] = useState<string | null>(null);
   const [rentTarget, setRentTarget] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
@@ -167,8 +168,12 @@ export function GpuFinderPanel() {
   const displayedGroups = groupedRanked.slice(0, visibleGroupCount);
   const hasMoreGroups = groupedRanked.length > visibleGroupCount;
 
-  // Reset pagination when the result set changes (new model/quant/filter)
-  useEffect(() => { setVisibleCount(20); setVisibleGroupCount(15); }, [rankResult, bucketFilter]);
+  // Reset pagination + expand state when the result set changes (new model/quant/filter)
+  useEffect(() => {
+    setVisibleCount(20);
+    setVisibleGroupCount(15);
+    setExpandedGroupKey(null);
+  }, [rankResult, bucketFilter]);
 
   function openRent(offer: CloreOffer) {
     setRentTarget(offer);
@@ -346,18 +351,29 @@ export function GpuFinderPanel() {
 
         {/* ── Grouped results ── */}
         {viewMode === "grouped" && groupedRanked.length > 0 && (
-          <div className="space-y-2">
-            {displayedGroups.map(({ group, offers: groupOffers }) => (
-              <GpuGroupCard
-                key={group.key}
-                group={group}
-                offers={groupOffers}
-                modelKey={selectedModel?.id ?? ""}
-                quant={selectedQuant?.name ?? ""}
-                onRent={openRent}
-                onAdvise={openAdvisor}
-              />
-            ))}
+          <>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {displayedGroups.map(({ group, offers: groupOffers }) => (
+                <Fragment key={group.key}>
+                  <GpuGroupCard
+                    group={group}
+                    offers={groupOffers}
+                    expanded={expandedGroupKey === group.key}
+                    onToggle={() => setExpandedGroupKey(expandedGroupKey === group.key ? null : group.key)}
+                  />
+                  {expandedGroupKey === group.key && (
+                    <GpuGroupDrawer
+                      group={group}
+                      offers={groupOffers}
+                      modelKey={selectedModel?.id ?? ""}
+                      quant={selectedQuant?.name ?? ""}
+                      onRent={openRent}
+                      onAdvise={openAdvisor}
+                    />
+                  )}
+                </Fragment>
+              ))}
+            </div>
             {hasMoreGroups && (
               <button
                 onClick={() => setVisibleGroupCount((c) => c + 15)}
@@ -369,7 +385,7 @@ export function GpuFinderPanel() {
                 </span>
               </button>
             )}
-          </div>
+          </>
         )}
 
         {/* ── Grouped empty: offers exist but none could be grouped (all mixed/unrecognised) ── */}
@@ -382,7 +398,7 @@ export function GpuFinderPanel() {
 
         {/* ── List results ── */}
         {viewMode === "list" && displayedRanked.length > 0 && (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {displayedRanked.map((r) => (
               <GpuFinderResult
                 key={r.offer.id}
@@ -424,7 +440,7 @@ export function GpuFinderPanel() {
             </button>
 
             {showUnfit && (
-              <div className="mt-3 space-y-3 opacity-60">
+              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 opacity-60">
                 {rankResult.unfit.map((r) => (
                   <GpuFinderResult
                     key={r.offer.id}

@@ -1,27 +1,26 @@
 "use client";
 
-import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import type { CloreOffer, CloreOfferGroup } from "@/lib/types";
 import type { RankedBucket, RankedOffer } from "@/lib/gpu-finder";
 import { GpuFinderResult } from "./GpuFinderResult";
 
-const BUCKET_PRIORITY: Record<RankedBucket, number> = {
+export const BUCKET_PRIORITY: Record<RankedBucket, number> = {
   comfortable: 0,
   ok: 1,
   tight: 2,
   oom: 3,
 };
 
-const BEST_BUCKET_STYLE: Record<RankedBucket, string> = {
+export const BEST_BUCKET_STYLE: Record<RankedBucket, string> = {
   comfortable: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
   ok:          "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
   tight:       "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
   oom:         "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
 };
 
-const BEST_BUCKET_LABEL: Record<RankedBucket, string> = {
+export const BEST_BUCKET_LABEL: Record<RankedBucket, string> = {
   comfortable: "✓ Comfortable",
   ok:          "✓ OK",
   tight:       "≈ Tight",
@@ -31,15 +30,11 @@ const BEST_BUCKET_LABEL: Record<RankedBucket, string> = {
 interface GpuGroupCardProps {
   group: CloreOfferGroup;
   offers: RankedOffer[];
-  modelKey: string;
-  quant: string;
-  onRent: (offer: CloreOffer) => void;
-  onAdvise: (offer: CloreOffer) => void;
+  expanded: boolean;
+  onToggle: () => void;
 }
 
-export function GpuGroupCard({ group, offers, modelKey, quant, onRent, onAdvise }: GpuGroupCardProps) {
-  const [expanded, setExpanded] = useState(false);
-
+export function GpuGroupCard({ group, offers, expanded, onToggle }: GpuGroupCardProps) {
   const bestBucket = offers.reduce<RankedBucket | null>((best, ro) => {
     if (!best) return ro.bucket;
     return BUCKET_PRIORITY[ro.bucket] < BUCKET_PRIORITY[best] ? ro.bucket : best;
@@ -58,11 +53,10 @@ export function GpuGroupCard({ group, offers, modelKey, quant, onRent, onAdvise 
   const serverWord = offers.length === 1 ? "server" : "servers";
 
   return (
-    <Card className="overflow-hidden">
-      {/* Clickable header — expands/collapses the offer list */}
+    <Card className={`overflow-hidden transition-colors ${expanded ? "border-indigo-500/40" : ""}`}>
       <button
         className="w-full px-4 py-3.5 text-left transition-colors hover:bg-muted/50"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={onToggle}
         aria-expanded={expanded}
       >
         <div className="flex items-center justify-between gap-3">
@@ -93,22 +87,38 @@ export function GpuGroupCard({ group, offers, modelKey, quant, onRent, onAdvise 
           </div>
         </div>
       </button>
-
-      {/* Expanded offer list */}
-      {expanded && (
-        <div className="border-t border-border/40 space-y-2 px-2 py-2">
-          {offers.map((ro) => (
-            <GpuFinderResult
-              key={ro.offer.id}
-              rankedOffer={ro}
-              modelKey={modelKey}
-              quant={quant}
-              onRent={() => onRent(ro.offer)}
-              onAdvise={() => onAdvise(ro.offer)}
-            />
-          ))}
-        </div>
-      )}
     </Card>
+  );
+}
+
+interface GpuGroupDrawerProps {
+  group: CloreOfferGroup;
+  offers: RankedOffer[];
+  modelKey: string;
+  quant: string;
+  onRent: (offer: CloreOffer) => void;
+  onAdvise: (offer: CloreOffer) => void;
+}
+
+export function GpuGroupDrawer({ group, offers, modelKey, quant, onRent, onAdvise }: GpuGroupDrawerProps) {
+  return (
+    <div style={{ gridColumn: "1 / -1" }}
+      className="rounded-xl border border-indigo-500/20 bg-card px-3 py-3">
+      <p className="mb-2 text-xs font-medium text-foreground/60 px-1">
+        {group.display_name} — {offers.length} {offers.length === 1 ? "server" : "servers"}
+      </p>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {offers.map((ro) => (
+          <GpuFinderResult
+            key={ro.offer.id}
+            rankedOffer={ro}
+            modelKey={modelKey}
+            quant={quant}
+            onRent={() => onRent(ro.offer)}
+            onAdvise={() => onAdvise(ro.offer)}
+          />
+        ))}
+      </div>
+    </div>
   );
 }

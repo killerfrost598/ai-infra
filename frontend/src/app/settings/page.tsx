@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layouts/page-header";
 import { ErrorState, LoadingState } from "@/components/layouts/page-states";
+import { Spinner } from "@/components/ui/spinner";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 import { DefaultModelsCard } from "@/components/settings/DefaultModelsCard";
 import { GlobalFiltersCard } from "@/components/settings/GlobalFiltersCard";
@@ -35,9 +36,20 @@ const SETTING_META: Record<string, SettingMeta> = {
   },
   anthropic_api_key: {
     label: "Anthropic API Key",
-    description: "Used by the Lab page to convert command history into Ansible playbooks via Claude Haiku.",
+    description: "Used by Lab for playbook conversion and optional AI-assisted deployment guidance.",
     placeholder: "sk-ant-…",
     inputType: "password",
+  },
+  openai_api_key: {
+    label: "OpenAI API Key",
+    description: "Used by Lab for optional ChatGPT/OpenAI-assisted deployment guidance.",
+    placeholder: "sk-…",
+    inputType: "password",
+  },
+  openai_model: {
+    label: "OpenAI Model",
+    description: "Optional model override for OpenAI-assisted deployment guidance. Default: gpt-4.1-mini.",
+    placeholder: "gpt-4.1-mini",
   },
   ssh_private_key: {
     label: "Platform SSH Private Key",
@@ -86,11 +98,30 @@ const SETTING_META: Record<string, SettingMeta> = {
       "Exclude servers whose total VRAM (gpu_count × per_gpu_vram) is below this. Useful for filtering out single-GPU rigs that can't load your target models.",
     placeholder: "e.g. 24",
   },
+  github_token: {
+    label: "GitHub Token",
+    description:
+      "Personal access token (classic) with repo:write scope. Used by the Lab's Publish Run Report feature to push sanitized run reports to your GitHub repository.",
+    placeholder: "ghp_…",
+    inputType: "password",
+  },
+  github_repo: {
+    label: "GitHub Repo",
+    description:
+      "Target repository for published run reports, in owner/repo format. Create it as a private repo first; flip to public once sanitization is battle-tested.",
+    placeholder: "yourname/inferix-runs",
+  },
+  github_publish_mode: {
+    label: "Publish Mode",
+    description:
+      "How reports are pushed: commit = direct commit to main branch (simpler); pr = opens a pull request (adds a review step).",
+    placeholder: "commit",
+  },
 };
 
-const API_KEY_KEYS = ["clore_api_key", "anthropic_api_key"];
+const API_KEY_KEYS = ["clore_api_key", "anthropic_api_key", "openai_api_key", "openai_model"];
 const HF_KEY_KEYS = ["hf_token"];
-const SSH_KEY_KEYS = ["ssh_private_key"];
+const GITHUB_KEYS = ["github_token", "github_repo", "github_publish_mode"];
 
 function ConfiguredBadge({ configured }: { configured: boolean }) {
   if (configured) {
@@ -245,12 +276,7 @@ function BalanceCard({ cloreConfigured }: { cloreConfigured: boolean }) {
           ))}
         </div>
       )}
-      {isLoading && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading balance…
-        </div>
-      )}
+      {isLoading && <LoadingState text="Loading balance…" className="mt-3" />}
     </Card>
   );
 }
@@ -302,7 +328,7 @@ function RefreshModelsCard() {
           )}
           {isActive && (
             <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-primary" />
+              <Spinner className="border-t-primary" />
               Syncing models…
             </div>
           )}
@@ -370,17 +396,8 @@ export default function SettingsPage() {
           <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Global Filters</p>
           <GlobalFiltersCard />
 
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">SSH</p>
-          <Card className="px-6 py-4 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground mb-1">How SSH key auth works with Clore rentals</p>
-            <ul className="list-disc list-inside space-y-1 text-xs text-muted-foreground">
-              <li>You generate a key pair: <code className="text-foreground/70">ssh-keygen -t ed25519</code></li>
-              <li>The <strong>public key</strong> (e.g. <code className="text-foreground/70">~/.ssh/id_ed25519.pub</code>) is sent to Clore and injected into the container&apos;s <code className="text-foreground/70">authorized_keys</code></li>
-              <li>The <strong>private key</strong> stored here is automatically saved on new Server records so the platform can open terminal sessions without a password</li>
-              <li>If you use password auth instead, the password is stored on the Server record directly</li>
-            </ul>
-          </Card>
-          <div className="space-y-4">{renderSection(SSH_KEY_KEYS)}</div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Diagnostic Publication</p>
+          <div className="space-y-4">{renderSection(GITHUB_KEYS)}</div>
         </>
       )}
     </div>

@@ -7,9 +7,10 @@ import { toast } from "sonner";
 import { Plus, Pencil } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ModelEntry, ModelQuant } from "@/lib/types";
-import { findGpuProfile, quantFitsGpu } from "@/lib/gpu-profiles";
+import { fromApiEntry, quantFitsGpu } from "@/lib/gpu-profiles";
 import type { GpuProfile } from "@/lib/gpu-profiles";
-import { useSettings } from "@/lib/queries";
+import { useSettings, useGpuProfiles, useModelRunsAggregate } from "@/lib/queries";
+import type { ModelRunAggregate } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/layouts/page-header";
@@ -48,6 +49,13 @@ function ModelsPageContent() {
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>({ kind: "none" });
 
   const { data: settingsData } = useSettings();
+  const { data: aggregateData } = useModelRunsAggregate();
+  const runAggregatesMap = useMemo<Map<string, ModelRunAggregate>>(() => {
+    const map = new Map<string, ModelRunAggregate>();
+    (aggregateData ?? []).forEach((a) => map.set(a.quant_id, a));
+    return map;
+  }, [aggregateData]);
+  const { data: gpuProfilesApi = [] } = useGpuProfiles();
   const rawExcluded = settingsData?.settings.find((s) => s.key === "excluded_quant_formats")?.value ?? "";
   const excludedFormats = new Set(
     rawExcluded.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean),
@@ -68,9 +76,11 @@ function ModelsPageContent() {
   const isMoe       = searchParams.get("is_moe")       === "true" ? true : undefined;
   const targetGpuKey = searchParams.get("target_gpu") ?? "";
 
-  const targetGpu: GpuProfile | undefined = targetGpuKey
-    ? findGpuProfile(targetGpuKey)
-    : undefined;
+  const targetGpu: GpuProfile | undefined = useMemo(() => {
+    if (!targetGpuKey) return undefined;
+    const api = gpuProfilesApi.find((g) => g.model_key === targetGpuKey);
+    return api ? fromApiEntry(api) : undefined;
+  }, [targetGpuKey, gpuProfilesApi]);
 
   // ── Fetch models ───────────────────────────────────────────────────────────
   const { data: models = [], isLoading } = useQuery({
@@ -159,7 +169,7 @@ function ModelsPageContent() {
         <FilterRail className="w-48 shrink-0 sticky top-4 self-start max-h-[calc(100vh-6rem)] overflow-y-auto pb-6" />
 
         {/* ── Result list ─────────────────────────────────────────────────── */}
-        <div className="min-w-0 flex-1 space-y-3">
+        <div className="min-w-0 flex-1">
           {/* Search + count bar */}
           <div className="flex items-center gap-3">
             <Input
@@ -188,27 +198,30 @@ function ModelsPageContent() {
             />
           )}
 
-          {filteredModels.map((model) => (
-            <ModelCard
-              key={model.id}
-              model={model}
-              targetGpu={targetGpu}
-              onEdit={() => setDialog({ kind: "edit-model", model })}
-              onDelete={() => setPendingDelete({ kind: "model", id: model.id, name: model.name })}
-              onAddQuant={() => setDialog({ kind: "add-quant", model })}
-              onEditQuant={(q) => setDialog({ kind: "edit-quant", model, quant: q })}
-              onDeleteQuant={(q) =>
-                setPendingDelete({
-                  kind: "quant",
-                  modelId: model.id,
-                  quantId: q.id,
-                  quantName: q.name,
-                })
-              }
-              excludedFormats={excludedFormats}
-              activeFormatFilter={quantFormat ?? ""}
-            />
-          ))}
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 items-start">
+            {filteredModels.map((model) => (
+              <ModelCard
+                key={model.id}
+                model={model}
+                targetGpu={targetGpu}
+                onEdit={() => setDialog({ kind: "edit-model", model })}
+                onDelete={() => setPendingDelete({ kind: "model", id: model.id, name: model.name })}
+                onAddQuant={() => setDialog({ kind: "add-quant", model })}
+                onEditQuant={(q) => setDialog({ kind: "edit-quant", model, quant: q })}
+                onDeleteQuant={(q) =>
+                  setPendingDelete({
+                    kind: "quant",
+                    modelId: model.id,
+                    quantId: q.id,
+                    quantName: q.name,
+                  })
+                }
+                excludedFormats={excludedFormats}
+                activeFormatFilter={quantFormat ?? ""}
+                runAggregatesMap={runAggregatesMap}
+              />
+            ))}
+          </div>
         </div>
       </div>
 

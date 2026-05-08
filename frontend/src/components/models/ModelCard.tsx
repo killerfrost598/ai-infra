@@ -16,7 +16,7 @@ import {
   Users,
   User,
 } from "lucide-react";
-import type { ModelEntry, ModelQuant } from "@/lib/types";
+import type { ModelEntry, ModelQuant, ModelRunAggregate } from "@/lib/types";
 import type { GpuProfile } from "@/lib/gpu-profiles";
 import { quantFitsGpu } from "@/lib/gpu-profiles";
 import { Card } from "@/components/ui/card";
@@ -43,6 +43,7 @@ interface ModelCardProps {
   onDeleteQuant: (q: ModelQuant) => void;
   excludedFormats?: Set<string>;
   activeFormatFilter?: string;
+  runAggregatesMap?: Map<string, ModelRunAggregate>;
 }
 
 export function ModelCard({
@@ -55,6 +56,7 @@ export function ModelCard({
   onDeleteQuant,
   excludedFormats,
   activeFormatFilter,
+  runAggregatesMap,
 }: ModelCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showAllChips, setShowAllChips] = useState(false);
@@ -163,7 +165,7 @@ export function ModelCard({
           {!expanded && sortedQuants.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {visibleChips.map((q) => (
-                <QuantChip key={q.id} quant={q} targetGpu={targetGpu} modelKey={model.model_key} />
+                <QuantChip key={q.id} quant={q} targetGpu={targetGpu} modelKey={model.model_key} modelId={model.id} runAggregate={runAggregatesMap?.get(q.id)} />
               ))}
               {!showAllChips && hiddenCount > 0 && (
                 <button
@@ -247,6 +249,8 @@ export function ModelCard({
               quant={q}
               targetGpu={targetGpu}
               modelKey={model.model_key}
+              modelId={model.id}
+              runAggregate={runAggregatesMap?.get(q.id)}
               onEdit={() => onEditQuant(q)}
               onDelete={() => onDeleteQuant(q)}
             />
@@ -272,18 +276,22 @@ function ExpandedQuantRow({
   quant,
   targetGpu,
   modelKey,
+  modelId,
+  runAggregate,
   onEdit,
   onDelete,
 }: {
   quant: ModelQuant;
   targetGpu?: GpuProfile;
   modelKey?: string;
+  modelId?: string;
+  runAggregate?: ModelRunAggregate;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 w-full py-0.5">
-      <QuantChip quant={quant} targetGpu={targetGpu} modelKey={modelKey} />
+      <QuantChip quant={quant} targetGpu={targetGpu} modelKey={modelKey} modelId={modelId} runAggregate={runAggregate} />
       {/* Phase 6: disk_size_gb cleanup */}
       <span className="text-[10px] text-muted-foreground/60 min-w-0 truncate">
         {quant.bits_per_weight}bpw

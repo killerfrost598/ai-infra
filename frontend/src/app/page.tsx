@@ -113,13 +113,13 @@ export default function OverviewPage() {
   return (
     <div className="space-y-8">
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950/60 px-2.5 py-0.5 text-xs text-emerald-400">
-            <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-3xl font-bold tracking-tight">Inferix</h1>
+          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-0.5 text-xs text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400">
+            <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-400" />
             System online
           </span>
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">Inferix</h1>
         <p className="max-w-xl text-muted-foreground">
           Your inference control plane, built on Clore.ai. Rent GPUs, deploy models, track benchmarks.
         </p>
@@ -180,24 +180,6 @@ export default function OverviewPage() {
         </div>
       </Card>
 
-      <Card className="px-5 py-4">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Architecture decisions</p>
-        <div className="space-y-2 text-sm text-muted-foreground">
-          {[
-            ["ADR-001", "Single-user app — internal ops tool, no auth middleware"],
-            ["ADR-002", "Celery for async tasks; sync handlers for interactive SSH sessions"],
-            ["ADR-003", "Sentinel pattern for SSH output capture (PROMPT_COMMAND injection)"],
-            ["ADR-006", "Partial clore-ai SDK bypass — my_orders/create_order via raw httpx"],
-            ["ADR-007", "LiteLLM removed — vLLM speaks OpenAI natively; saved ~400 MB RAM"],
-            ["ADR-010", "shadcn/ui + Tailwind v4 rewrite with TanStack Query"],
-          ].map(([id, desc]) => (
-            <div key={id} className="flex gap-3">
-              <span className="shrink-0 font-mono text-xs text-muted-foreground/50 mt-0.5">{id}</span>
-              <span>{desc}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
     </div>
   );
 }

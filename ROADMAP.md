@@ -7,15 +7,16 @@
 | Phase 1 — Compat data + `/feasibility` | ✅ shipped |
 | Phase 2 — Inference benchmarks + leaderboard | ✅ shipped |
 | Phase 3 — `nvidia-smi` probe + B3 fix | ✅ shipped |
-| Phase 4 — `select_stack()` + container-first deploy gate | ✅ shipped (reference-only — not yet exercised end-to-end) |
-| Phase 5 — Lab → Playbook pipeline | ✅ shipped (reference-only) |
+| Phase 4 — `select_stack()` + container-first deploy gate | ✅ shipped, now used by Lab recommendations for vLLM |
+| Phase 5 — Lab → Playbook / model-run pipeline | ✅ shipped, operator-assisted |
 | Phase 6 — Compat drift + multi-GPU TP | ✅ shipped |
 | Phase 7 — Doc cleanup | ✅ shipped |
 | Phase 8 — `/find` feasibility pagination | ✅ shipped |
 | Phase 10 — Reusable `ServerInfoModal` | ✅ shipped |
 | Phase 9 — Model knowledge base + CRUD + HF auto-import | ✅ shipped |
+| Phase 11 — Lab operator-assisted deployment planning | ✅ shipped first slice |
 
-> **Scoping note (2026-05-04):** Deploy / infer / playbook execution paths shipped in phases 4–5 are kept as reference implementations only. Active focus is the **GPU + model knowledge base**: capturing what each diverse GPU can run, which models work where, and how to operate them.
+> **Current scoping note (2026-05-08):** The platform is targeting **operator-assisted deployment first**. Lab is now the technical/tester surface for visible PTY execution, AI-assisted guidance, and deployment plans. Easy Deploy and plugin marketplace work should build on successful `model_run_attempts` and published working-system reports before becoming one-click.
 
 ---
 
@@ -33,11 +34,11 @@ Extended `inference_benchmarks` with TTFT, prefill TPS, concurrency curve, knee.
 
 `probe.py` runs `nvidia-smi`, topology, nvcc, Docker checks over SSH — each wrapped in try/except. `HostCapabilitySnapshot` stores per-GPU detail, NVLink topology, homogeneity, Docker/nvidia-ct status. `provision_server` rewritten: snapshot created on every provision, B3 fixed (gpu_model/vram_gb only updated when probe returns values). `POST /servers/{id}/reprobe` + `GET /servers/{id}/snapshot` added. Feasibility upgrades from predicted → verified when snapshot is < 24h old.
 
-### Phase 4 — `select_stack()` + container-first deploy gate (reference-only)
+### Phase 4 — `select_stack()` + container-first deploy gate
 
 `selector.py`: picks highest-priority active `stack_matrix` row for the host CC + engine, chooses container vs venv mode. `launchers/vllm.py`: builds `docker run` or `nohup vllm` command. `deploy_model` task: feasibility gate → `select_stack` → docker pull / pip install → launch → 120s health-poll → sets `inference_base_url` (closes B2). `POST /model-deployments` returns 422 on FAIL feasibility; `?force=true` overrides with audit log.
 
-### Phase 5 — Lab → Playbook pipeline (reference-only)
+### Phase 5 — Lab → Playbook / model-run pipeline
 
 Env snapshot captured at session open (nvidia-smi, nvcc, docker) and stored in `Session.metadata_json`. Per-command ★ keep toggle in `SessionLogsModal`; promote-to-playbook filters by kept indices before Haiku call, writes `setup.sh` + `playbook.yml` to local git repo, creates real `Playbook` row tagged with `model_variant_id` + `engine` + `source_session_id`. `PlaybookRunOutcome` table tracks success/failure per run. `GET /playbooks/recommended` ranks by success rate. `/find` cards show verified-playbook chip when ≥ 3 outcomes exist. B6 fixed: Run button added to `/playbooks` page.
 
@@ -45,11 +46,19 @@ Env snapshot captured at session open (nvidia-smi, nvcc, docker) and stored in `
 
 `parallel.py`: `recommend_parallel(variant, snapshot)` → `ParallelPlan` — blocks heterogeneous GPU hosts, prefers highest TP on NVLink, lowest TP > 1 on PCIe. `selector.py` delegates tp_size to recommender for multi-GPU hosts. `feasibility.py` adds `tp_plan_valid` check (#11). `compat.scrape_versions` Celery beat task (weekly, Mondays 02:00 UTC) hits PyPI for vLLM/SGLang, stores candidates in `TaskRun.metadata_json` — never auto-inserts. `/compat/scrape-runs` + `/compat/candidates/approve` endpoints let operator promote a candidate to a new `stack_matrix` row. `/find` multi-GPU cards show TP chip (sky = OK, red = blocked). `/compat/candidates` page lists scrape history with inline approve form.
 
+### Phase 11 — Lab operator-assisted deployment planning
+
+Lab now restores workspace state across navigation, starts from available server cards, captures host snapshots automatically on session start, and exposes Run Model as a side panel. Model selection comes from the model knowledge base; quant selection reuses the same mini `QuantChip` view as `/models`.
+
+`/lab/recommend` remains deterministic and DB/rules based. `/lab/deployments/plan` returns explicit vLLM deployment steps covering preflight, runtime setup, model download, launch, health check, smoke test, and evidence capture. `/lab/assist` optionally calls Anthropic or OpenAI using platform context for operator guidance. Plan/AI command Run buttons inject into the visible PTY so output and prompts are live and interruptible.
+
+The first slice is still operator-assisted, not unattended. First-class step execution, streaming events, resumability, and Easy Deploy remain future work.
+
 ---
 
-## Upcoming phases (7–10)
+## Historical plan notes (7–10)
 
-Execution order: **7 → 8 → 10 → 9**.
+These notes are retained as implementation history. They are not the current next-work queue.
 
 ### Phase 7 — Doc cleanup *(1–2 h, no risk)*
 
@@ -246,7 +255,8 @@ Frontend file changes:
 
 ## Out of scope (revisit later)
 
-- Reviving deploy / infer / playbook execution paths (phases 4–5 currently reference-only).
+- Fully unattended one-click deployment.
+- First-class deployment step executor with SSE events, cancellation, retries, and persisted step status.
 - Server-side feasibility batch endpoint (8b).
 - Auto-benchmark trigger after deploy.
 - B4 (SSE byte/char offset) and B5 (WebSocket PTY DB session) fixes.

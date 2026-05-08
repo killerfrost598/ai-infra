@@ -1,8 +1,20 @@
+import type { GpuProfileEntry } from "@/lib/types";
+
 export interface GpuProfile {
   key: string;
   name: string;
   cc: number;
   vram_gb: number;
+}
+
+export function fromApiEntry(e: GpuProfileEntry): GpuProfile {
+  return {
+    key: e.model_key,
+    name: e.display_name,
+    cc: parseFloat(e.cc),
+    // Unknown VRAM → Infinity so VRAM check is skipped (CC-only entries)
+    vram_gb: e.vram_gb ?? Infinity,
+  };
 }
 
 export const GPU_PROFILES: GpuProfile[] = [

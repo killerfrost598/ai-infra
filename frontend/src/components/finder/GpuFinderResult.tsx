@@ -224,8 +224,11 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
   return (
     <Card className="overflow-hidden" ref={cardRef}>
       <div className="px-4 py-3.5 space-y-2.5">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
+        {/* Header — click to open advisor */}
+        <button
+          onClick={onAdvise}
+          className="w-full flex items-start justify-between gap-3 text-left hover:opacity-80 transition-opacity"
+        >
           <div className="min-w-0 flex-1 space-y-0.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-sm font-medium">{offer.gpu_name}</span>
@@ -244,7 +247,7 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
             </p>
             <p className="text-[10px] text-muted-foreground/60">{compositePercent}% match</p>
           </div>
-        </div>
+        </button>
 
         {/* Fit badge + headroom */}
         <div className="flex flex-wrap items-center gap-2">
@@ -329,19 +332,16 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
 
         {/* Actions */}
         <div className="flex items-center gap-2 border-t border-border/40 pt-2">
-          <Button variant="ghost" size="sm" className="text-xs" onClick={onAdvise}>
-            Advisor →
-          </Button>
           <Button
             variant="outline"
             size="sm"
             className="gap-1.5 text-xs"
             onClick={() => setDetailsOpen(true)}
-            title={`View details for ${offer.gpu_name}`}
-            aria-label={`View details for ${offer.gpu_name}`}
+            title={`View specs for ${offer.gpu_name}`}
+            aria-label={`View specs for ${offer.gpu_name}`}
           >
             <Info className="size-3.5" />
-            View details
+            Specs
           </Button>
           <div className="ml-auto">
             <Button size="sm" className="text-xs" onClick={onRent}>
@@ -351,7 +351,7 @@ export function GpuFinderResult({ rankedOffer, modelKey, quant, onRent, onAdvise
         </div>
       </div>
 
-      <ServerInfoModal offer={offer} open={detailsOpen} onOpenChange={setDetailsOpen} />
+      <ServerInfoModal offer={offer} open={detailsOpen} onOpenChange={setDetailsOpen} onRent={onRent} />
     </Card>
   );
 }

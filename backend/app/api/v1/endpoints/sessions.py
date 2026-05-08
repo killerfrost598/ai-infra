@@ -3,19 +3,21 @@
 import asyncio
 import json
 import logging
+import shlex
 import time
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.entities import Server, Session as SessionModel, SessionCommand, SessionStatus
 from app.schemas.sessions import (
     CommandRequest,
+    MachineSnapshotPayload,
     SessionCommandResponse,
     SessionCreate,
     SessionListItem,
@@ -23,11 +25,41 @@ from app.schemas.sessions import (
     SessionResponse,
 )
 from app.services import session_runner, session_store
-from app.services.session_runner import strip_ansi
+from app.services.session_runner import capture_host_snapshot, strip_ansi
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_SNAPSHOT_STALE_SECONDS = 86400  # 24 h
+
+
+def _build_snapshot(session: SessionModel) -> MachineSnapshotPayload | None:
+    """Extract and enrich host_snapshot from session metadata_json."""
+    snap = (session.metadata_json or {}).get("host_snapshot")
+    if not snap:
+        return None
+    captured_at = None
+    is_stale = False
+    raw_ts = snap.get("captured_at")
+    if raw_ts:
+        try:
+            captured_at = datetime.fromisoformat(raw_ts)
+            is_stale = (datetime.now(timezone.utc) - captured_at).total_seconds() > _SNAPSHOT_STALE_SECONDS
+        except (ValueError, TypeError):
+            pass
+    return MachineSnapshotPayload(
+        driver_version=snap.get("driver_version"),
+        cuda_runtime_host=snap.get("cuda_runtime_host"),
+        gpu_count=snap.get("gpu_count", 0),
+        gpus=snap.get("gpus", []),
+        nvlink_topology=snap.get("nvlink_topology"),
+        homogeneous=snap.get("homogeneous", True),
+        docker_present=snap.get("docker_present", False),
+        nvidia_container_toolkit=snap.get("nvidia_container_toolkit", False),
+        captured_at=captured_at,
+        is_stale=is_stale,
+    )
 
 
 @router.post("", response_model=SessionResponse, status_code=201)
@@ -43,12 +75,20 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> Ses
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     env_snapshot = session_runner.capture_env_snapshot(handle.channel)
+    try:
+        host_snapshot = capture_host_snapshot(handle.client)
+    except Exception as exc:
+        logger.warning("Initial host snapshot failed for server %s: %s", server.id, exc)
+        host_snapshot = None
 
     session = SessionModel(
         server_id=server.id,
         label=payload.label,
         status=SessionStatus.ACTIVE,
-        metadata_json={"env": env_snapshot} if env_snapshot else None,
+        metadata_json={
+            **({"env": env_snapshot} if env_snapshot else {}),
+            **({"host_snapshot": host_snapshot} if host_snapshot else {}),
+        } or None,
     )
     db.add(session)
     db.commit()
@@ -66,6 +106,7 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)) -> Ses
         pty_log=None,
         commands=[],
         created_at=session.created_at,
+        latest_snapshot=_build_snapshot(session),
     )
 
 
@@ -142,7 +183,7 @@ def list_sessions(
 
 @router.get("/{session_id}", response_model=SessionResponse)
 def get_session(session_id: UUID, db: Session = Depends(get_db)) -> SessionResponse:
-    """Retrieve a session with its full command history."""
+    """Retrieve a session with its full command history and latest host snapshot."""
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -156,7 +197,34 @@ def get_session(session_id: UUID, db: Session = Depends(get_db)) -> SessionRespo
         pty_log=strip_ansi(session.pty_log) if session.pty_log else None,
         commands=[SessionCommandResponse.model_validate(cmd) for cmd in session.commands],
         created_at=session.created_at,
+        latest_snapshot=_build_snapshot(session),
     )
+
+
+@router.post("/{session_id}/refresh-snapshot", response_model=MachineSnapshotPayload)
+def refresh_snapshot(session_id: UUID, db: Session = Depends(get_db)) -> MachineSnapshotPayload:
+    """Re-probe the live SSH channel and update the session's host snapshot."""
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status == SessionStatus.TERMINATED:
+        raise HTTPException(status_code=409, detail="Session is terminated")
+
+    handle = session_store.get(str(session_id))
+    if handle is None:
+        raise HTTPException(status_code=409, detail="No active SSH handle for this session")
+
+    try:
+        snapshot_data = capture_host_snapshot(handle.client)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Snapshot capture failed: {exc}") from exc
+
+    metadata = dict(session.metadata_json or {})
+    metadata["host_snapshot"] = snapshot_data
+    session.metadata_json = metadata
+    db.commit()
+
+    return _build_snapshot(session)  # type: ignore[return-value]
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -181,19 +249,23 @@ def terminate_session(session_id: UUID, db: Session = Depends(get_db)) -> None:
 # ── WebSocket PTY ─────────────────────────────────────────────────────────────
 
 @router.websocket("/{session_id}/pty")
-async def pty_websocket(session_id: UUID, websocket: WebSocket, db: Session = Depends(get_db)) -> None:
+async def pty_websocket(session_id: UUID, websocket: WebSocket) -> None:
     """Bi-directional PTY stream over WebSocket.
 
     Binary frames carry raw PTY bytes in both directions.
     Text frames carry JSON control messages: {"type":"resize","cols":N,"rows":N}
+
+    B5: no long-lived DB session is held for the WebSocket lifetime.
+    Each flush opens its own SessionLocal() and closes it immediately.
     """
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
-    if not session:
-        await websocket.close(code=1008, reason="Session not found")
-        return
-    if session.status == SessionStatus.TERMINATED:
-        await websocket.close(code=1008, reason="Session is terminated")
-        return
+    with SessionLocal() as _db:
+        _session = _db.query(SessionModel).filter(SessionModel.id == session_id).first()
+        if not _session:
+            await websocket.close(code=1008, reason="Session not found")
+            return
+        if _session.status == SessionStatus.TERMINATED:
+            await websocket.close(code=1008, reason="Session is terminated")
+            return
 
     handle = session_store.get(str(session_id))
     if handle is None:
@@ -219,17 +291,22 @@ async def pty_websocket(session_id: UUID, websocket: WebSocket, db: Session = De
     stop_event = asyncio.Event()
 
     def _flush_to_db() -> None:
-        """Write any unflushed PTY bytes to the session's pty_log column."""
+        """Write any unflushed PTY bytes to the session's pty_log column.
+
+        Opens a fresh DB session per flush so the connection is not held open
+        for the full WebSocket lifetime (B5 fix).
+        """
         all_data = b"".join(pty_chunks)
         new_data = all_data[flushed_len[0]:]
         if not new_data:
             return
         text = new_data.decode(errors="replace")
         flushed_len[0] = len(all_data)
-        session_obj = db.query(SessionModel).filter(SessionModel.id == session_id).first()
-        if session_obj:
-            session_obj.pty_log = (session_obj.pty_log or "") + text
-            db.commit()
+        with SessionLocal() as _db:
+            session_obj = _db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session_obj:
+                session_obj.pty_log = (session_obj.pty_log or "") + text
+                _db.commit()
 
     async def _send_output() -> None:
         """Relay PTY bytes from the SSH channel to the WebSocket."""
@@ -370,6 +447,100 @@ def run_command(
     )
 
 
+def _run_async_session_command(command_id: str, session_id: str, command: str, timeout: int) -> None:
+    """Run a recorded command on an isolated SSH exec channel and patch its row."""
+    handle = session_store.get(session_id)
+    stdout_text = ""
+    stderr_text = ""
+    exit_code = 1
+    started = time.monotonic()
+    try:
+        if handle is None:
+            raise RuntimeError("No active SSH handle for this session")
+        wrapped = f"bash -lc {shlex.quote(command)}"
+        stdin, stdout, stderr = handle.client.exec_command(wrapped, timeout=timeout)
+        stdin.close()
+        exit_code = stdout.channel.recv_exit_status()
+        stdout_text = stdout.read().decode(errors="replace")
+        stderr_text = stderr.read().decode(errors="replace")
+    except Exception as exc:
+        stderr_text = str(exc)
+        exit_code = 1
+    duration_ms = int((time.monotonic() - started) * 1000)
+    with SessionLocal() as bg_db:
+        row = bg_db.query(SessionCommand).filter(SessionCommand.id == command_id).first()
+        if row:
+            row.stdout = stdout_text
+            row.stderr = stderr_text
+            row.exit_code = exit_code
+            row.duration_ms = duration_ms
+            bg_db.commit()
+
+
+@router.post("/{session_id}/commands/async", response_model=SessionCommandResponse, status_code=202)
+def queue_command(
+    session_id: UUID,
+    body: CommandRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Record a command immediately and execute it in the background.
+
+    This avoids long browser/proxy requests for Docker pulls and model downloads.
+    The command is run on an isolated SSH exec channel, not the interactive PTY.
+    """
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status == SessionStatus.TERMINATED:
+        raise HTTPException(status_code=409, detail="Session is already terminated")
+
+    handle = session_store.get(str(session_id))
+    if handle is None:
+        raise HTTPException(status_code=409, detail="No active SSH handle for this session")
+
+    seq_num = (
+        db.query(func.count(SessionCommand.id))
+        .filter(SessionCommand.session_id == session_id)
+        .scalar()
+        or 0
+    ) + 1
+
+    cmd_row = SessionCommand(
+        session_id=session.id,
+        sequence_num=seq_num,
+        command=body.command,
+        stdout="",
+        stderr="",
+        exit_code=None,
+        duration_ms=None,
+    )
+    db.add(cmd_row)
+    db.commit()
+    db.refresh(cmd_row)
+
+    background_tasks.add_task(
+        _run_async_session_command,
+        str(cmd_row.id),
+        str(session_id),
+        body.command,
+        min(max(body.timeout, 30), 7200),
+    )
+
+    return SessionCommandResponse(
+        id=cmd_row.id,
+        session_id=cmd_row.session_id,
+        sequence_num=cmd_row.sequence_num,
+        command=cmd_row.command,
+        stdout=cmd_row.stdout,
+        stderr=cmd_row.stderr,
+        exit_code=cmd_row.exit_code,
+        executed_at=cmd_row.executed_at,
+        duration_ms=cmd_row.duration_ms,
+        created_at=cmd_row.created_at,
+    )
+
+
 @router.post("/{session_id}/interrupt", status_code=204)
 def interrupt_session(session_id: UUID, db: Session = Depends(get_db)) -> None:
     """Send Ctrl+C (SIGINT) to interrupt a running command in HTTP command mode."""
@@ -442,7 +613,7 @@ def get_commands_summary(session_id: UUID, db: Session = Depends(get_db)) -> dic
 @router.post("/{session_id}/to-playbook")
 def convert_to_playbook(
     session_id: UUID,
-    body: dict = {},
+    body: dict | None = None,
     save: bool = Query(False),
     name: str | None = Query(None),
     engine: str | None = Query(None),

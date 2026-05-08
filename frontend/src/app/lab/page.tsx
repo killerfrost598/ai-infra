@@ -2,11 +2,33 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { History, Plus, Power, Terminal } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { History, Plus, Power, Terminal, Cpu, ListChecks, Play } from "lucide-react";
+import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useCreateSession, useServers } from "@/lib/queries";
-import type { ParsedCommand, Server, Session, SessionListItem } from "@/lib/types";
+import type { MachineSnapshotPayload, ModelEntry, ParsedCommand, Server, Session, SessionListItem } from "@/lib/types";
+import { PtyTerminal } from "@/components/PtyTerminal";
+import { SessionLogsModal } from "@/components/SessionLogsModal";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { StatusBadge } from "@/components/StatusBadge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { MachineInfoTab } from "@/components/lab/MachineInfoTab";
+import { TestRunsTab } from "@/components/lab/TestRunsTab";
+import { RunModelPanel } from "@/components/lab/RunModelPanel";
+import { OutcomeBanner } from "@/components/lab/OutcomeBanner";
 
 // Fallback for non-secure contexts (HTTP) where crypto.randomUUID is unavailable
 function genId(): string {
@@ -47,22 +69,6 @@ function _parsePtyBlock(
     exit_code: exitCode,
   };
 }
-import { PtyTerminal } from "@/components/PtyTerminal";
-import { SessionLogsModal } from "@/components/SessionLogsModal";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { StatusBadge } from "@/components/StatusBadge";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 
 interface LabTab {
   tabId: string;
@@ -71,7 +77,73 @@ interface LabTab {
   status: "ACTIVE" | "TERMINATED";
 }
 
+type ActiveView = "sessions" | "machine" | "runs";
+
+const LAB_WORKSPACE_KEY = "inferix:lab-workspace:v1";
+
+interface PersistedLabWorkspace {
+  tabs: LabTab[];
+  activeTabId: string | null;
+  activeView: ActiveView;
+  logsOpen: boolean;
+  runModelOpen: boolean;
+}
+
+function sessionCommandsToParsed(session: Session | null): ParsedCommand[] {
+  return (session?.commands ?? []).map((cmd) => {
+    const started = new Date(cmd.executed_at).getTime();
+    const stderr = cmd.stderr?.trim();
+    const stdout = cmd.stdout?.trim();
+    return {
+      command: cmd.command,
+      output: [stdout, stderr ? `[stderr]\n${stderr}` : ""].filter(Boolean).join("\n\n"),
+      started_ms: Number.isFinite(started) ? started : Date.now(),
+      completed_ms: Number.isFinite(started) ? started + (cmd.duration_ms ?? 0) : Date.now(),
+      duration_ms: cmd.duration_ms ?? 0,
+      exit_code: cmd.exit_code,
+    };
+  });
+}
+
+function loadPersistedWorkspace(): PersistedLabWorkspace | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LAB_WORKSPACE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedLabWorkspace>;
+    const tabs = Array.isArray(parsed.tabs)
+      ? parsed.tabs.filter((tab): tab is LabTab =>
+          typeof tab?.tabId === "string" &&
+          typeof tab?.sessionId === "string" &&
+          typeof tab?.label === "string" &&
+          (tab?.status === "ACTIVE" || tab?.status === "TERMINATED"),
+        )
+      : [];
+    return {
+      tabs,
+      activeTabId: typeof parsed.activeTabId === "string" ? parsed.activeTabId : null,
+      activeView: parsed.activeView === "machine" || parsed.activeView === "runs" ? parsed.activeView : "sessions",
+      logsOpen: Boolean(parsed.logsOpen),
+      runModelOpen: Boolean(parsed.runModelOpen),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistWorkspace(workspace: PersistedLabWorkspace): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LAB_WORKSPACE_KEY, JSON.stringify(workspace));
+  } catch {
+    // Non-fatal: private browsing or storage quota should not break Lab.
+  }
+}
+
 export default function LabPage() {
+  const { resolvedTheme } = useTheme();
+  const ptyTheme: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light";
+
   const [tabs, setTabs] = useState<LabTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -79,6 +151,12 @@ export default function LabPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [closingTabId, setClosingTabId] = useState<string | null>(null);
   const [isTerminatingActive, setIsTerminatingActive] = useState(false);
+
+  // Secondary view state
+  const [activeView, setActiveView] = useState<ActiveView>("sessions");
+  const [runModelOpen, setRunModelOpen] = useState(false);
+  const [pendingModelId, setPendingModelId] = useState<string | null>(null);
+  const [pendingQuantId, setPendingQuantId] = useState<string | null>(null);
 
   // Active tab's session data — drives the logs panel
   const [session, setSession] = useState<Session | null>(null);
@@ -94,8 +172,41 @@ export default function LabPage() {
   const [liveCommandsMap, setLiveCommandsMap] = useState<Record<string, ParsedCommand[]>>({});
 
   const hasAppliedInitialTarget = useRef(false);
+  const hasHydratedWorkspace = useRef(false);
+  const tabsRef = useRef(tabs);
+  useEffect(() => { tabsRef.current = tabs; });
   const activeTab = tabs.find((t) => t.tabId === activeTabId) ?? null;
   const activeSessionId = activeTab?.sessionId ?? null;
+
+  // Lazy-load models only when the Run Model panel is opened
+  const { data: modelsData, isLoading: modelsLoading } = useQuery({
+    queryKey: ["models", "all"],
+    queryFn: () => api.models.list(),
+    enabled: runModelOpen,
+    staleTime: 5 * 60 * 1000,
+  });
+  const models: ModelEntry[] = modelsData ?? [];
+
+  // ── Tab status drift reconciliation — poll backend every 30 s ────────────
+  useEffect(() => {
+    const id = setInterval(async () => {
+      const activeTabs = tabsRef.current.filter((t) => t.status === "ACTIVE");
+      if (!activeTabs.length) return;
+      for (const tab of activeTabs) {
+        try {
+          const s = await api.sessions.get(tab.sessionId);
+          if (s.status === "TERMINATED") {
+            setTabs((prev) =>
+              prev.map((t) => t.tabId === tab.tabId ? { ...t, status: "TERMINATED" } : t)
+            );
+          }
+        } catch {
+          // Session may be gone; will reconcile on next tick
+        }
+      }
+    }, 30_000);
+    return () => clearInterval(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load session data when active tab changes ──────────────────────────────
   useEffect(() => {
@@ -114,7 +225,7 @@ export default function LabPage() {
     ]).then(([s, summary]) => {
       if (cancelled) return;
       setSession(s);
-      setCommands(summary.commands);
+      setCommands([...sessionCommandsToParsed(s), ...summary.commands]);
     }).catch(() => {
       if (cancelled) return;
       setSession(null);
@@ -131,9 +242,12 @@ export default function LabPage() {
     if (hasAppliedInitialTarget.current) return;
     hasAppliedInitialTarget.current = true;
 
-    const queryTarget = typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("session")
-      : null;
+    const params = typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+    const queryTarget = params.get("session");
+    const modelId = params.get("model_id");
+    const quantId = params.get("quant_id");
     const storageTarget = typeof window !== "undefined"
       ? sessionStorage.getItem("lab_session_id")
       : null;
@@ -141,8 +255,49 @@ export default function LabPage() {
     if (storageTarget) sessionStorage.removeItem("lab_session_id");
     if (typeof window !== "undefined") window.history.replaceState({}, "", "/lab");
 
+    // Pre-seed Run Model panel when navigated from Models page
+    if (modelId || quantId) {
+      if (modelId) setPendingModelId(modelId);
+      if (quantId) setPendingQuantId(quantId);
+      setRunModelOpen(true);
+    }
+
     const targetId = queryTarget || storageTarget;
-    if (!targetId) return;
+    if (!targetId) {
+      const saved = loadPersistedWorkspace();
+      if (!saved || saved.tabs.length === 0) {
+        hasHydratedWorkspace.current = true;
+        return;
+      }
+
+      Promise.all(
+        saved.tabs.map((tab) =>
+          api.sessions.get(tab.sessionId)
+            .then((s) => ({
+              ...tab,
+              label: s.label ?? tab.label,
+              status: s.status as "ACTIVE" | "TERMINATED",
+            }))
+            .catch(() => null),
+        ),
+      ).then((restored) => {
+        const nextTabs = restored.filter((tab): tab is LabTab => Boolean(tab));
+        if (nextTabs.length > 0) {
+          setTabs(nextTabs);
+          setActiveTabId(
+            nextTabs.some((tab) => tab.tabId === saved.activeTabId)
+              ? saved.activeTabId
+              : nextTabs[0].tabId,
+          );
+          setActiveView(saved.activeView ?? "sessions");
+          setLogsOpen(Boolean(saved.logsOpen));
+          setRunModelOpen(Boolean(saved.runModelOpen || modelId || quantId));
+        }
+      }).finally(() => {
+        hasHydratedWorkspace.current = true;
+      });
+      return;
+    }
 
     api.sessions.get(targetId).then((s) => {
       const newTab: LabTab = {
@@ -153,8 +308,21 @@ export default function LabPage() {
       };
       setTabs([newTab]);
       setActiveTabId(newTab.tabId);
-    }).catch(() => {});
+    }).finally(() => {
+      hasHydratedWorkspace.current = true;
+    });
   }, []);
+
+  useEffect(() => {
+    if (!hasHydratedWorkspace.current) return;
+    persistWorkspace({
+      tabs,
+      activeTabId,
+      activeView,
+      logsOpen,
+      runModelOpen,
+    });
+  }, [tabs, activeTabId, activeView, logsOpen, runModelOpen]);
 
   // ── Tab management ─────────────────────────────────────────────────────────
   const addTab = useCallback((sessionId: string, label: string, status: "ACTIVE" | "TERMINATED") => {
@@ -263,12 +431,25 @@ export default function LabPage() {
     if (!activeSessionId) return;
     setCmdLoading(true);
     try {
-      const summary = await api.sessions.commandsSummary(activeSessionId);
-      setCommands(summary.commands);
+      const [s, summary] = await Promise.all([
+        api.sessions.get(activeSessionId),
+        api.sessions.commandsSummary(activeSessionId),
+      ]);
+      setSession(s);
+      setCommands([...sessionCommandsToParsed(s), ...summary.commands]);
     } finally {
       setCmdLoading(false);
     }
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!logsOpen || !activeSessionId) return;
+    if (!commands.some((cmd) => cmd.exit_code == null)) return;
+    const id = window.setInterval(() => {
+      refreshCommands();
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [logsOpen, activeSessionId, commands, refreshCommands]);
 
   const loadHistory = useCallback(() => {
     setHistoryLoading(true);
@@ -278,12 +459,16 @@ export default function LabPage() {
       .finally(() => setHistoryLoading(false));
   }, []);
 
+  const handleSnapshotUpdated = useCallback((snap: MachineSnapshotPayload) => {
+    setSession((prev) => prev ? { ...prev, latest_snapshot: snap } : prev);
+  }, []);
+
   const closingTab = closingTabId ? tabs.find((t) => t.tabId === closingTabId) ?? null : null;
 
   // L4 — use live commands while session is active, fall back to API data after termination
   const liveCommands = activeTabId ? (liveCommandsMap[activeTabId] ?? []) : [];
   const effectiveCommands = activeTab?.status === "ACTIVE" && liveCommands.length > 0
-    ? liveCommands
+    ? [...commands, ...liveCommands]
     : commands;
 
   return (
@@ -397,52 +582,125 @@ export default function LabPage() {
         </div>
       </div>
 
-      {/* Terminal area */}
-      {tabs.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-          <Terminal className="h-8 w-8 opacity-20" />
-          <p className="text-sm">No active sessions.</p>
-          <Button size="sm" onClick={() => setShowServerPicker(true)}>
-            <Plus className="mr-1.5 h-3 w-3" />
-            New Session
+      {/* Secondary nav */}
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-muted/20 px-4">
+        {([
+          { id: "sessions", label: "Sessions", icon: Terminal },
+          { id: "machine", label: "Machine Info", icon: Cpu },
+          { id: "runs", label: "Test Runs", icon: ListChecks },
+        ] as const).map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveView(id)}
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs transition-colors ${
+              activeView === id
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Icon className="h-3 w-3" />
+            {label}
+          </button>
+        ))}
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            variant={runModelOpen ? "secondary" : "outline"}
+            className="h-7 gap-1.5 text-xs"
+            onClick={() => setRunModelOpen((v) => !v)}
+            disabled={!activeTab}
+          >
+            <Play className="h-3 w-3" />
+            Run Model
           </Button>
         </div>
+      </div>
+
+      {/* Main content */}
+      {tabs.length === 0 ? (
+        <AvailableServersPanel
+          onStart={(sessionId, label) => addTab(sessionId, label, "ACTIVE")}
+          onManageServers={() => setShowServerPicker(true)}
+        />
       ) : (
         <div className="relative flex-1 overflow-hidden">
-          {tabs.map((tab) => (
-            <div
-              key={tab.tabId}
-              className="absolute inset-0"
-              style={{ display: tab.tabId === activeTabId ? "block" : "none" }}
-            >
-              {tab.status === "ACTIVE" ? (
-                <PtyTerminal
-                  key={tab.sessionId}
-                  sessionId={tab.sessionId}
-                  onDisconnect={() =>
-                    setTabs((prev) =>
-                      prev.map((t) => t.tabId === tab.tabId ? { ...t, status: "TERMINATED" } : t)
-                    )
-                  }
-                  onData={(data) => handlePtyData(tab.tabId, data)}
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center bg-[#09090b] text-sm text-muted-foreground">
-                  Session terminated — terminal unavailable
-                </div>
-              )}
-            </div>
-          ))}
+          {/* Sessions view — always mounted to keep PTY alive, hidden when inactive */}
+          <div
+            className="absolute inset-0 flex flex-col"
+            style={{ display: activeView === "sessions" ? "flex" : "none" }}
+          >
+            {/* Outcome banner: appears when there's a RUNNING run for this server */}
+            <OutcomeBanner serverId={session?.server_id ?? null} />
 
-          {/* Logs slide-in — no backdrop, terminal stays interactive */}
-          <SessionLogsModal
-            isOpen={logsOpen}
-            onClose={() => setLogsOpen(false)}
+            <div className="relative flex-1 overflow-hidden">
+            {tabs.map((tab) => (
+              <div
+                key={tab.tabId}
+                className="absolute inset-0"
+                style={{ display: tab.tabId === activeTabId ? "block" : "none" }}
+              >
+                {tab.status === "ACTIVE" ? (
+                  <PtyTerminal
+                    key={tab.sessionId}
+                    sessionId={tab.sessionId}
+                    theme={ptyTheme}
+                    onDisconnect={() =>
+                      setTabs((prev) =>
+                        prev.map((t) => t.tabId === tab.tabId ? { ...t, status: "TERMINATED" } : t)
+                      )
+                    }
+                    onData={(data) => handlePtyData(tab.tabId, data)}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
+                    Session terminated — terminal unavailable
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Logs slide-in — no backdrop, terminal stays interactive */}
+            <SessionLogsModal
+              isOpen={logsOpen}
+              onClose={() => setLogsOpen(false)}
+              sessionId={activeSessionId}
+              session={session}
+              commands={effectiveCommands}
+              cmdLoading={activeTab?.status === "ACTIVE" ? false : cmdLoading}
+              onRefresh={refreshCommands}
+            />
+            </div>
+          </div>
+
+          {/* Machine Info */}
+          {activeView === "machine" && (
+            <MachineInfoTab
+              session={session}
+              onSnapshotUpdated={handleSnapshotUpdated}
+            />
+          )}
+
+          {/* Test Runs */}
+          {activeView === "runs" && (
+            <TestRunsTab serverId={session?.server_id ?? null} />
+          )}
+
+          {/* Run Model Panel — absolute overlay at bottom */}
+          <RunModelPanel
+            open={runModelOpen}
+            onClose={() => setRunModelOpen(false)}
+            serverId={session?.server_id ?? null}
             sessionId={activeSessionId}
-            session={session}
-            commands={effectiveCommands}
-            cmdLoading={activeTab?.status === "ACTIVE" ? false : cmdLoading}
-            onRefresh={refreshCommands}
+            models={models}
+            modelsLoading={modelsLoading}
+            pendingModelId={pendingModelId}
+            pendingQuantId={pendingQuantId}
+            onPendingConsumed={() => { setPendingModelId(null); setPendingQuantId(null); }}
+            onCommandExecuted={() => {
+              setLogsOpen(true);
+              refreshCommands();
+            }}
+            onShowTerminal={() => setActiveView("sessions")}
           />
         </div>
       )}
@@ -499,6 +757,81 @@ export default function LabPage() {
 }
 
 // ── Server Picker Modal ───────────────────────────────────────────────────────
+
+function AvailableServersPanel({
+  onStart,
+  onManageServers,
+}: {
+  onStart: (sessionId: string, label: string) => void;
+  onManageServers: () => void;
+}) {
+  const { data: serversData, isLoading } = useServers();
+  const createSession = useCreateSession();
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const servers = serversData?.items ?? [];
+  const available = servers.filter((s) => s.status === "READY" || s.status === "PROVISIONING");
+
+  async function start(server: Server) {
+    setStartingId(server.id);
+    try {
+      const session = await createSession.mutateAsync({ server_id: server.id });
+      onStart(session.id, server.hostname);
+    } finally {
+      setStartingId(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden bg-background">
+      <div className="border-b border-border px-6 py-4">
+        <h1 className="text-base font-semibold">Lab Servers</h1>
+        <p className="text-xs text-muted-foreground">Start a terminal session from an available machine.</p>
+      </div>
+      <div className="flex-1 overflow-y-auto p-6">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading servers...</p>
+        ) : available.length === 0 ? (
+          <div className="rounded-md border border-border p-6 text-sm text-muted-foreground">
+            <Terminal className="mb-3 h-8 w-8 opacity-25" />
+            No ready servers are available.
+            <div className="mt-4">
+              <Button size="sm" onClick={onManageServers}>Add or rent a server</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {available.map((server) => (
+              <Card key={server.id} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{server.hostname}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {server.gpu_model ?? "GPU unknown"}{server.vram_gb ? ` · ${server.vram_gb} GB` : ""}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                      {server.ssh_username}@{server.hostname}:{server.ssh_port}
+                    </p>
+                  </div>
+                  <StatusBadge status={server.status} />
+                </div>
+                <Button
+                  size="sm"
+                  className="mt-4 h-8 w-full gap-1.5 text-xs"
+                  disabled={!!startingId}
+                  loading={startingId === server.id}
+                  onClick={() => start(server)}
+                >
+                  <Terminal className="h-3 w-3" />
+                  Start session
+                </Button>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function ServerPickerModal({
   onClose,

@@ -17,6 +17,64 @@ services:
     networks:
       - platform
 
+  # ── Dev-only services (opt-in via `--profile dev`) ──────────────────────
+  # Use the dev image for hot reload, typechecks, and lint runs. The image
+  # bakes node_modules at build time; an anonymous volume protects it from
+  # being shadowed by the host bind-mount on /app.
+
+  frontend-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: aip-frontend-dev:latest
+    container_name: aip_frontend_dev
+    profiles: ["dev"]
+    env_file:
+      - ./.env
+      - ./frontend/.env.example
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      WATCHPACK_POLLING: "true"   # reliable file watching on Windows/WSL2 hosts
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${FRONTEND_DEV_PORT:-3001}:3000"
+    volumes:
+      - ./frontend:/app
+      - frontend_dev_node_modules:/app/node_modules
+      - frontend_dev_next_cache:/app/.next
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - platform
+    command: ["npm", "run", "dev"]
+
+  frontend-typecheck:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: aip-frontend-dev:latest
+    profiles: ["dev"]
+    volumes:
+      - ./frontend:/app
+      - frontend_dev_node_modules:/app/node_modules
+    networks:
+      - platform
+    command: ["npx", "tsc", "--noEmit", "--pretty", "false"]
+
+  frontend-lint:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: aip-frontend-dev:latest
+    profiles: ["dev"]
+    volumes:
+      - ./frontend:/app
+      - frontend_dev_node_modules:/app/node_modules
+    networks:
+      - platform
+    command: ["npm", "run", "lint"]
+
   backend:
     build:
       context: ./backend
@@ -113,6 +171,8 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  frontend_dev_node_modules:
+  frontend_dev_next_cache:
 
 networks:
   platform:

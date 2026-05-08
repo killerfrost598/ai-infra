@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Card } from "@/components/ui/card"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
 interface PageStateProps {
@@ -23,7 +24,7 @@ interface EmptyStateProps extends PageStateProps {
 export function LoadingState({ text = "Loading…", className }: LoadingStateProps) {
   return (
     <div className={cn("flex items-center gap-2 text-sm text-muted-foreground", className)}>
-      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
+      <Spinner />
       {text}
     </div>
   )

@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { InferenceBenchmark, ModelDeployment } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { LoadingState } from "@/components/layouts/page-states";
 import { ConcurrencyChart } from "./ConcurrencyChart";
 
 interface Props {
@@ -119,12 +120,7 @@ export function PerformanceTab({ serverId, gpuModel }: Props) {
       </div>
 
       {/* Loading */}
-      {loadingBench && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-muted-foreground" />
-          Loading benchmarks…
-        </div>
-      )}
+      {loadingBench && <LoadingState text="Loading benchmarks…" className="text-xs" />}
 
       {/* No data */}
       {!loadingBench && !latest && (

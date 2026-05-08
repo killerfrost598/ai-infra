@@ -14,3 +14,4 @@ clore-ai==0.1.1
 anthropic>=0.40.0
 huggingface_hub>=0.23.0
 pytest>=8.0.0
+PyGithub>=2.1.1

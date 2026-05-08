@@ -1,3 +1,5 @@
+import type { KvCache } from "./models/schema";
+
 export type ServerStatus = "NEW" | "PROVISIONING" | "READY" | "FAILED" | "TERMINATED";
 export type DeploymentStatus = "PENDING" | "DEPLOYING" | "RUNNING" | "FAILED" | "STOPPED";
 export type TaskStatus = "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "PARTIAL";
@@ -31,6 +33,7 @@ export interface ServerCreate {
   vram_gb?: number;
   ram_gb?: number;
   os_image?: string;
+  cuda_version?: string;
 }
 
 export type EngineKind = "VLLM" | "SGLANG" | "OLLAMA";
@@ -176,6 +179,7 @@ export interface Session {
   pty_log: string | null;
   created_at: string;
   commands: SessionCommand[];
+  latest_snapshot: MachineSnapshotPayload | null;
 }
 
 export interface SessionListItem {
@@ -211,7 +215,7 @@ export interface ParsedCommand {
   started_ms: number;
   completed_ms: number;
   duration_ms: number;
-  exit_code: number;
+  exit_code: number | null;
 }
 
 export interface CommandsSummary {
@@ -254,6 +258,7 @@ export interface CloreOfferGroup {
   vendor: string | null;
   family: string;
   variant: string | null;
+  arch: string | null;
   display_name: string;
   offer_count: number;
   total_gpu_count: number;
@@ -304,6 +309,22 @@ export interface RentRequest {
   jupyter_token?: string;
   spot_price?: number;
   required_price?: number;
+}
+
+export interface GpuProfileEntry {
+  model_key: string;
+  display_name: string;
+  aliases: string[];
+  arch: string;
+  cc: string;
+  vram_gb: number | null;
+  fp8_native: boolean;
+  bf16: boolean;
+  marlin: boolean;
+  fa2: boolean;
+  fa3: boolean;
+  is_full_profile: boolean;
+  notes: string | null;
 }
 
 export interface SettingEntry {
@@ -479,7 +500,7 @@ export interface ModelEntry {
   moe_active_params_b: number | null;
   num_attention_heads: number | null;
   tp_allowed_sizes: number[] | null;
-  kv_cache: Record<string, unknown>;
+  kv_cache: KvCache;
   recommended_engines: { engine: string; score: number; min_vram_gb: number }[];
   recommended_flags: Record<string, string[]>;
   source: string;
@@ -540,10 +561,10 @@ export interface ModelCreate {
   moe_active_params_b?: number | null;
   num_attention_heads?: number | null;
   tp_allowed_sizes?: number[] | null;
-  kv_cache?: Record<string, unknown>;
+  kv_cache?: KvCache;
   recommended_engines?: { engine: string; score: number; min_vram_gb: number }[];
   recommended_flags?: Record<string, string[]>;
-  quants?: Omit<ModelQuant, "id" | "model_id" | "created_at">[];
+  quants?: ModelQuantCreate[];
 }
 
 export interface ModelQuantCreate {
@@ -558,4 +579,197 @@ export interface ModelQuantCreate {
   arch_vllm?: boolean;
   arch_sglang?: boolean;
   notes?: string | null;
+}
+
+export interface MachineSnapshotPayload {
+  driver_version: string | null;
+  cuda_runtime_host: string | null;
+  gpu_count: number;
+  gpus: Array<{ name: string; cc: string; vram_gb: number; driver_version?: string }>;
+  nvlink_topology: string | null;
+  homogeneous: boolean;
+  docker_present: boolean;
+  nvidia_container_toolkit: boolean;
+  captured_at: string | null;
+  is_stale: boolean;
+}
+
+export type RunStatus = "PLANNED" | "RUNNING" | "SUCCESS" | "FAILED" | "ABANDONED";
+export type FailureStage = "PLAN" | "IMAGE_PULL" | "OOM" | "CC_MISMATCH" | "CUDA_MISMATCH" | "TIMEOUT" | "HEALTH_CHECK" | "OTHER";
+
+export interface ModelRunAttempt {
+  id: string;
+  server_id: string;
+  session_id: string | null;
+  model_id: string;
+  quant_id: string;
+  host_snapshot_id: string | null;
+  task_run_id: string | null;
+  engine: EngineKind;
+  engine_version: string | null;
+  mode: string;
+  container_image: string | null;
+  container_id: string | null;
+  launch_command: string;
+  launch_plan_json: Record<string, unknown> | null;
+  feasibility_verdict: string;
+  forced: boolean;
+  status: RunStatus;
+  succeeded: boolean | null;
+  failure_stage: FailureStage | null;
+  failure_message: string | null;
+  ttft_ms: number | null;
+  tps_steady: number | null;
+  vram_used_gb: number | null;
+  health_check_url: string | null;
+  health_check_ok: boolean | null;
+  operator_notes: string | null;
+  started_at: string;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  published_url: string | null;
+  published_sha: string | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelRunAttemptCreate {
+  server_id: string;
+  session_id?: string;
+  model_id: string;
+  quant_id: string;
+  engine: EngineKind;
+  mode?: string;
+  container_image?: string;
+  launch_command?: string;
+  feasibility_verdict?: string;
+  forced?: boolean;
+}
+
+export interface ModelRunAttemptUpdate {
+  status?: string;
+  succeeded?: boolean;
+  failure_stage?: string;
+  failure_message?: string;
+  operator_notes?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+}
+
+export interface FeasibilityCheckOut {
+  id: string;
+  status: "PASS" | "FAIL" | "UNKNOWN";
+  reason: string;
+  source: string;
+}
+
+export interface FeasibilityReportOut {
+  verdict: "READY" | "BLOCKED" | "UNKNOWN";
+  mode: string;
+  gpu_profile_key: string | null;
+  stack_matrix_id: number | null;
+  checks: FeasibilityCheckOut[];
+}
+
+export interface ParallelPlanOut {
+  tp_size: number;
+  blocked: boolean;
+  block_reason: string | null;
+  nvlink: boolean;
+  interconnect_label: string;
+}
+
+export interface InstallPlanOut {
+  stack_matrix_id: number;
+  mode: string;
+  container_image: string | null;
+  pip_index_url: string | null;
+  packages: string[];
+  launch_cmd: string;
+  tp_size: number;
+  gpu_memory_utilization: number;
+  env: Record<string, string>;
+  remote_port: number;
+}
+
+export interface LaunchRecommendation {
+  requires_reprobe: boolean;
+  feasibility: FeasibilityReportOut | null;
+  parallel: ParallelPlanOut | null;
+  install_plan: InstallPlanOut | null;
+  injectable_command: string;
+  warnings: string[];
+  force_required: boolean;
+}
+
+export interface RecommendRequest {
+  server_id: string;
+  model_id: string;
+  quant_id: string;
+  engine?: string;
+  session_id?: string;
+  remote_port?: number;
+}
+
+export interface ExecuteRecommendationRequest extends RecommendRequest {
+  force?: boolean;
+  command_timeout_seconds?: number;
+  health_timeout_seconds?: number;
+}
+
+export interface ExecuteRecommendationResponse {
+  run: ModelRunAttempt;
+  recommendation: LaunchRecommendation;
+  command_exit_code: number | null;
+  command_stdout: string;
+  command_stderr: string;
+  health_ok: boolean | null;
+  vram_used_gb: number | null;
+}
+
+export interface AiAssistRequest extends RecommendRequest {
+  provider?: "auto" | "anthropic" | "openai" | "chatgpt";
+  operator_goal?: string;
+  include_prompt_context?: boolean;
+}
+
+export interface AiAssistResponse {
+  provider: string;
+  model: string;
+  guidance: string;
+  prompt_context: Record<string, unknown> | null;
+}
+
+export interface DeploymentPlanStep {
+  id: string;
+  title: string;
+  stage: string;
+  command: string | null;
+  required: boolean;
+  expected: string | null;
+  notes: string | null;
+}
+
+export interface DeploymentPlanRequest extends RecommendRequest {
+  runtime_mode?: "auto" | "docker" | "uv_venv";
+}
+
+export interface DeploymentPlanResponse {
+  runtime_mode: string;
+  engine: string;
+  remote_port: number;
+  ready_to_run: boolean;
+  blockers: string[];
+  steps: DeploymentPlanStep[];
+  recommendation: LaunchRecommendation;
+}
+
+export interface ModelRunAggregate {
+  model_id: string;
+  quant_id: string;
+  total: number;
+  successful: number;
+  success_rate: number;
+  avg_tps: number | null;
 }

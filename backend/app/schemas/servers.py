@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from pydantic import Field, model_validator
 
 from app.models.entities import ServerStatus
@@ -7,7 +5,6 @@ from app.schemas.base import BaseSchema, UUIDSchema
 
 
 class ServerCreate(BaseSchema):
-    provider_account_id: UUID | None = None
     external_server_id: str
     hostname: str
     ssh_port: int = 22
@@ -36,7 +33,6 @@ class ServerUpdate(BaseSchema):
 
 
 class ServerResponse(UUIDSchema):
-    provider_account_id: UUID | None
     external_server_id: str
     hostname: str
     ssh_port: int

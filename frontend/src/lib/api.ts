@@ -1,5 +1,7 @@
 import type {
   ApproveCandidate,
+  AiAssistRequest,
+  AiAssistResponse,
   BenchmarkRunResponse,
   CloreBalance,
   CloreOffer,
@@ -9,18 +11,30 @@ import type {
   CommandsSummary,
   ExecResult,
   FeasibilityReport,
+  GpuProfileEntry,
   HostCapabilitySnapshot,
+  ExecuteRecommendationRequest,
+  ExecuteRecommendationResponse,
+  DeploymentPlanRequest,
+  DeploymentPlanResponse,
   FeasibilityRequest,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
+  LaunchRecommendation,
   LeaderboardRow,
   ListResponse,
+  MachineSnapshotPayload,
   ModelDeployment,
   ModelEntry,
   ModelCreate,
   ModelQuant,
   ModelQuantCreate,
+  ModelRunAggregate,
+  ModelRunAttempt,
+  ModelRunAttemptCreate,
+  ModelRunAttemptUpdate,
   Playbook,
+  RecommendRequest,
   RentRequest,
   ScrapeRun,
   SeedResponse,
@@ -232,6 +246,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ command, timeout }),
       }),
+    queueCommand: (id: string, command: string, timeout = 1800) =>
+      apiFetch<SessionCommand>(`/api/v1/sessions/${id}/commands/async`, {
+        method: "POST",
+        body: JSON.stringify({ command, timeout }),
+      }),
     interrupt: (id: string) =>
       fetch(`${BASE_URL}/api/v1/sessions/${id}/interrupt`, { method: "POST" }),
     commandsSummary: (id: string) =>
@@ -254,6 +273,8 @@ export const api = {
     downloadTranscriptUrl: (id: string) => `${BASE_URL}/api/v1/sessions/${id}/download`,
     downloadCommandUrl: (sessionId: string, cmdId: string) =>
       `${BASE_URL}/api/v1/sessions/${sessionId}/commands/${cmdId}/download`,
+    refreshSnapshot: (id: string) =>
+      apiFetch<MachineSnapshotPayload>(`/api/v1/sessions/${id}/refresh-snapshot`, { method: "POST" }),
   },
 
   feasibility: {
@@ -347,5 +368,85 @@ export const api = {
       ),
     syncStatus: () => apiFetch<SyncStatus>("/api/v1/models/sync-status"),
     tagVocabulary: () => apiFetch<string[]>("/api/v1/models/tag-vocabulary"),
+  },
+
+  gpuProfiles: {
+    list: () => apiFetch<GpuProfileEntry[]>("/api/v1/gpu-profiles"),
+  },
+
+  lab: {
+    recommend: (data: RecommendRequest) =>
+      apiFetch<LaunchRecommendation>("/api/v1/lab/recommend", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    assist: (data: AiAssistRequest) =>
+      apiFetch<AiAssistResponse>("/api/v1/lab/assist", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    planDeployment: (data: DeploymentPlanRequest) =>
+      apiFetch<DeploymentPlanResponse>("/api/v1/lab/deployments/plan", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    inject: (sessionId: string, data: { command: string; dry_run?: boolean; model_run_id?: string }) =>
+      apiFetch<{ injected: boolean; command: string }>(`/api/v1/lab/sessions/${sessionId}/inject`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    executeRecommendation: (sessionId: string, data: ExecuteRecommendationRequest) =>
+      apiFetch<ExecuteRecommendationResponse>(`/api/v1/lab/sessions/${sessionId}/execute-recommendation`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
+
+  runReports: {
+    preview: (runId: string) =>
+      apiFetch<Record<string, unknown>>(`/api/v1/run-reports/${runId}/preview`),
+    publish: (runId: string) =>
+      apiFetch<{ url: string; sha: string }>(`/api/v1/run-reports/${runId}/publish`, {
+        method: "POST",
+      }),
+  },
+
+  modelRuns: {
+    list: (params?: {
+      server_id?: string;
+      model_id?: string;
+      quant_id?: string;
+      succeeded?: boolean;
+      status?: string;
+      limit?: number;
+      skip?: number;
+    }) => {
+      const q = new URLSearchParams();
+      if (params?.server_id) q.set("server_id", params.server_id);
+      if (params?.model_id) q.set("model_id", params.model_id);
+      if (params?.quant_id) q.set("quant_id", params.quant_id);
+      if (params?.succeeded != null) q.set("succeeded", String(params.succeeded));
+      if (params?.status) q.set("status", params.status);
+      if (params?.limit) q.set("limit", String(params.limit));
+      if (params?.skip) q.set("skip", String(params.skip));
+      return apiFetch<ListResponse<ModelRunAttempt>>(`/api/v1/model-runs?${q}`);
+    },
+    create: (data: ModelRunAttemptCreate) =>
+      apiFetch<ModelRunAttempt>("/api/v1/model-runs", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: ModelRunAttemptUpdate) =>
+      apiFetch<ModelRunAttempt>(`/api/v1/model-runs/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    aggregate: (params?: { model_id?: string; quant_id?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.model_id) q.set("model_id", params.model_id);
+      if (params?.quant_id) q.set("quant_id", params.quant_id);
+      const qs = q.toString();
+      return apiFetch<ModelRunAggregate[]>(`/api/v1/model-runs/aggregate${qs ? `?${qs}` : ""}`);
+    },
   },
 };

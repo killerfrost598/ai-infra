@@ -252,15 +252,23 @@ def _raw_order_to_server(raw: dict) -> CloreServer:
                 break
 
     specs = raw.get("specs") or {}
-    gpu_raw = specs.get("gpu", "") or ""
+    if not isinstance(specs, dict):
+        specs = {}
+    gpu_raw = specs.get("gpu", "") or raw.get("gpu_name", "") or raw.get("gpu", "") or ""
     gpu_name = re.sub(r"^\d+[xX]\s+", "", gpu_raw).strip() or "Unknown"
-    vram_gb = int(float(specs.get("gpuram") or 0))
+    try:
+        vram_gb = int(float(specs.get("gpuram") or raw.get("vram_gb") or raw.get("gpu_ram") or 0))
+    except (TypeError, ValueError):
+        vram_gb = 0
 
-    online = raw.get("online", False)
+    online = raw.get("online", raw.get("status") == "active")
     status = "active" if online else "offline"
+    raw_id = raw.get("id") or raw.get("order_id") or raw.get("rental_id")
+    if raw_id is None:
+        raise ValueError("Clore order is missing id/order_id/rental_id")
 
     return CloreServer(
-        id=str(raw.get("id", "")),
+        id=str(raw_id),
         gpu_name=gpu_name,
         vram_gb=vram_gb,
         hostname=hostname,
@@ -347,7 +355,18 @@ class CloreClient:
         """
         try:
             raw_orders = self._raw_my_orders(return_completed=False)
-            return [_raw_order_to_server(o) for o in raw_orders]
+            rentals: list[CloreServer] = []
+            for order in raw_orders:
+                try:
+                    rentals.append(_raw_order_to_server(order))
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping unparseable Clore order id=%r si=%r: %s",
+                        order.get("id") if isinstance(order, dict) else None,
+                        order.get("si") if isinstance(order, dict) else None,
+                        exc,
+                    )
+            return rentals
         except Exception as exc:
             raise RuntimeError(f"Failed to list Clore.ai rentals: {exc}") from exc
 

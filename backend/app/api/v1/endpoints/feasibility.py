@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.cache import get_redis_client
 from app.db.session import get_db
-from app.models.entities import HostCapabilitySnapshot, ModelVariant, Server
+from app.models.entities import HostCapabilitySnapshot, Model, ModelQuant, Server
 from app.services.compat.feasibility import CheckResult, FeasibilityReport, run_feasibility
 
 router = APIRouter()
@@ -49,16 +50,16 @@ def _report_to_out(r: FeasibilityReport) -> FeasibilityReportOut:
     )
 
 
-def _get_redis():
-    import redis as _redis
-    return _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=2)
-
-
 @router.post("", response_model=FeasibilityReportOut)
 def check_feasibility(req: FeasibilityRequest, db: Session = Depends(get_db)) -> FeasibilityReportOut:
-    variant = db.query(ModelVariant).filter_by(model_key=req.model_key, quant=req.quant).first()
-    if not variant:
-        raise HTTPException(422, f"ModelVariant not found for ({req.model_key}, {req.quant})")
+    quant_exists = (
+        db.query(ModelQuant)
+        .join(Model, Model.id == ModelQuant.model_id)
+        .filter(Model.model_key == req.model_key, ModelQuant.name == req.quant)
+        .first()
+    )
+    if not quant_exists:
+        raise HTTPException(404, f"No quant '{req.quant}' for model '{req.model_key}'")
 
     gpu_name: str | None = None
     vram_gb_total: int | None = None
@@ -85,8 +86,8 @@ def check_feasibility(req: FeasibilityRequest, db: Session = Depends(get_db)) ->
     elif req.offer_id is not None:
         # Try Redis cache for Clore offers
         try:
-            r = _get_redis()
-            cached = r.get("clore:offers:raw")
+            r = get_redis_client()
+            cached = r.get("clore:offers:raw:v2")
             if cached:
                 offers = json.loads(cached)
                 for o in offers:

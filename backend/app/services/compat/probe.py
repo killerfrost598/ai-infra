@@ -12,6 +12,8 @@ class ProbeResult:
     homogeneous: bool = True
     docker_present: bool = False
     nvidia_container_toolkit: bool = False
+    mem_total_gb: int | None = None
+    os_pretty_name: str | None = None
     raw_outputs: dict = field(default_factory=dict)
 
 
@@ -81,6 +83,28 @@ def probe_host(ssh) -> ProbeResult:
             stdout, _, _ = ssh.execute("docker info --format '{{.Runtimes}}' 2>/dev/null")
             result.nvidia_container_toolkit = "nvidia" in (stdout or "")
             result.raw_outputs["nvidia_container_toolkit"] = result.nvidia_container_toolkit
+    except Exception:
+        pass
+
+    # 5. Total RAM from /proc/meminfo
+    try:
+        stdout, _, rc = ssh.execute(
+            "awk '/MemTotal/ {print int($2/1024/1024)}' /proc/meminfo"
+        )
+        if rc == 0 and stdout.strip().isdigit():
+            result.mem_total_gb = int(stdout.strip())
+            result.raw_outputs["mem_total_gb"] = result.mem_total_gb
+    except Exception:
+        pass
+
+    # 6. OS pretty name from /etc/os-release
+    try:
+        stdout, _, rc = ssh.execute(
+            "grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"'"
+        )
+        if rc == 0 and stdout.strip():
+            result.os_pretty_name = stdout.strip()
+            result.raw_outputs["os_pretty_name"] = result.os_pretty_name
     except Exception:
         pass
 
