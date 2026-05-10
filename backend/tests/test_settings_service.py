@@ -5,6 +5,9 @@ from app.services.settings_service import (
     _VALID_QUANT_FORMATS,
     get_default_seed_models,
     get_excluded_quant_formats,
+    get_lab_auto_setup_mode,
+    get_lab_default_runtime_mode,
+    get_lab_preflight_command_overrides,
 )
 
 
@@ -121,3 +124,63 @@ def test_default_seed_models_preserves_order(db):
     _put(db, "default_seed_models", "\n".join(repos))
     result = get_default_seed_models(db)
     assert result == repos
+
+
+# ── Lab deployment settings ──────────────────────────────────────────────────
+
+def test_lab_auto_setup_mode_defaults_to_recommend_only(db):
+    _clear(db, "lab_auto_setup_mode")
+    assert get_lab_auto_setup_mode(db) == "recommend_only"
+
+
+def test_lab_auto_setup_mode_accepts_auto_low_risk(db):
+    _put(db, "lab_auto_setup_mode", "auto_low_risk_setup")
+    assert get_lab_auto_setup_mode(db) == "auto_low_risk_setup"
+
+
+def test_lab_auto_setup_mode_rejects_unknown(db):
+    _put(db, "lab_auto_setup_mode", "dangerous")
+    assert get_lab_auto_setup_mode(db) == "recommend_only"
+
+
+def test_lab_default_runtime_mode_defaults_to_auto(db):
+    _clear(db, "lab_default_runtime_mode")
+    assert get_lab_default_runtime_mode(db) == "auto"
+
+
+def test_lab_default_runtime_mode_accepts_uv_venv(db):
+    _put(db, "lab_default_runtime_mode", "uv_venv")
+    assert get_lab_default_runtime_mode(db) == "uv_venv"
+
+
+def test_lab_default_runtime_mode_rejects_unknown(db):
+    _put(db, "lab_default_runtime_mode", "systemd")
+    assert get_lab_default_runtime_mode(db) == "auto"
+
+
+def test_lab_preflight_command_overrides_empty_when_not_set(db):
+    _clear(db, "lab_preflight_command_overrides")
+    assert get_lab_preflight_command_overrides(db) == {}
+
+
+def test_lab_preflight_command_overrides_sanitizes_known_steps(db):
+    _put(
+        db,
+        "lab_preflight_command_overrides",
+        '{"apt_update":{"enabled":false},"create_venv":{"command":"echo {venv_id}","required":false}}',
+    )
+    result = get_lab_preflight_command_overrides(db)
+    assert result == {
+        "apt_update": {"enabled": False},
+        "create_venv": {"required": False, "command": "echo {venv_id}"},
+    }
+
+
+def test_lab_preflight_command_overrides_ignores_unknown_steps(db):
+    _put(db, "lab_preflight_command_overrides", '{"launch_vllm":{"command":"rm -rf /"}}')
+    assert get_lab_preflight_command_overrides(db) == {}
+
+
+def test_lab_preflight_command_overrides_ignores_invalid_json(db):
+    _put(db, "lab_preflight_command_overrides", "not-json")
+    assert get_lab_preflight_command_overrides(db) == {}

@@ -35,9 +35,6 @@ _ANSI_RE = re.compile(
 _INITIAL_PROMPT_DRAIN_TIMEOUT = 5.0
 _INITIAL_PROMPT_SETTLE_SLEEP = 0.1
 
-# PS1 marker injected via PROMPT_COMMAND so every command boundary is timestamped.
-# Format: __PS1__<epoch_ms>__<exit_code>__
-_PROMPT_COMMAND = "export PROMPT_COMMAND='echo \"__PS1__$(date +%s%3N)__$?__\"'"
 _PS1_RE = re.compile(r"__PS1__(\d+)__(\d+)__")
 
 # Control characters to strip from stored PTY logs (not printable, not meaningful for display)
@@ -122,17 +119,6 @@ def open_session(server: Server) -> SessionHandle:
             channel.recv(4096)
         time.sleep(_INITIAL_PROMPT_SETTLE_SLEEP)
         if not channel.recv_ready():
-            break
-
-    # Inject PROMPT_COMMAND so every command completion is timestamped with an
-    # __PS1__<ms>__<exit_code>__ marker. This enables parse_pty_commands() later.
-    channel.sendall(f"{_PROMPT_COMMAND}\n".encode())
-    time.sleep(0.3)
-    drain_deadline = time.monotonic() + 1.0
-    while time.monotonic() < drain_deadline:
-        if channel.recv_ready():
-            channel.recv(4096)
-        else:
             break
 
     logger.info("PTY session opened for server %s", server.id)

@@ -6,11 +6,12 @@ import time
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.entities import EngineKind, FailureStage, ModelRunAttempt, RunStatus
+from app.models.entities import EngineKind, FailureStage, Model, ModelQuant, ModelRunAttempt, RunStatus, Server, TaskRun, TaskStatus
 from app.models.entities import Session as SessionModel, SessionStatus
 from app.schemas.lab import (
     AiAssistRequest,
@@ -24,13 +25,45 @@ from app.schemas.lab import (
     ObserveResponse,
     RecommendRequest,
 )
-from app.schemas.deployment_plan import DeploymentPlanRequest, DeploymentPlanResponse
+from app.schemas.agent_runs import (
+    AgentRunEvent,
+    AgentRunRequest,
+    AgentRunStartResponse,
+    AgentRunStatusResponse,
+    AgentToolApprovalRequest,
+    AgentToolApprovalResponse,
+    PromotePlaybookResponse,
+)
+from app.schemas.deployment_plan import (
+    DeploymentPlanRequest,
+    DeploymentPlanResponse,
+    DeploymentPlanStep,
+    DeploymentRunRequest,
+    DeploymentRunStartResponse,
+    DeploymentRunStatusResponse,
+    PipelineDownloadModelRequest,
+    PipelineModelFlags,
+    PipelineRunModelRequest,
+    PipelineStartResponse,
+    PipelineStepRequest,
+)
 from app.schemas.model_runs import ModelRunAttemptResponse
 from app.services.ai_deploy_assistant import build_deploy_context, choose_provider, generate_deploy_guidance
-from app.services.deployments.planner import build_deployment_plan
+from app.services.agent_run import (
+    _initial_agent_steps,
+    agent_status_response,
+    approve_agent_tool,
+    promote_agent_playbook,
+    request_cancel_agent_run,
+    run_agent_task,
+    model_tmux_session_name,
+)
+from app.services.deployments.executor import run_deployment_task, run_pipeline_step_task
+from app.services.deployments.planner import build_deployment_plan, lab_preflight_command_templates
 from app.services import session_store
 from app.services.lab_recommender import recommend_launch
 from app.services.session_runner import execute_command
+from app.services.settings_service import get_lab_auto_setup_mode, get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +161,11 @@ def _extract_container_id(stdout: str) -> str | None:
     return None
 
 
+def _expand_runtime_secrets(command: str, db: Session) -> str:
+    hf_token = get_setting("hf_token", db) or ""
+    return command.replace("$INFERIX_HF_TOKEN", hf_token)
+
+
 @router.post("/recommend", response_model=LaunchRecommendation)
 def recommend(payload: RecommendRequest, db: Session = Depends(get_db)) -> LaunchRecommendation:
     """Return a feasibility-checked launch plan for a server + model + quant combination.
@@ -205,6 +243,281 @@ def plan_deployment(payload: DeploymentPlanRequest, db: Session = Depends(get_db
     )
 
 
+@router.get("/preflight-command-templates", response_model=list[DeploymentPlanStep])
+def preflight_command_templates() -> list[DeploymentPlanStep]:
+    """Return the configurable low-risk Lab command templates."""
+    return lab_preflight_command_templates()
+
+
+@router.post("/deployments/run", response_model=DeploymentRunStartResponse, status_code=202)
+def run_deployment(
+    payload: DeploymentRunRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> DeploymentRunStartResponse:
+    """Start a structured Lab deployment workflow and stream progress via TaskRun logs."""
+    session = db.query(SessionModel).filter(SessionModel.id == payload.session_id).first() if payload.session_id else None
+    if not session:
+        raise HTTPException(status_code=404, detail="Active session is required to run a Lab deployment")
+    if session.status == SessionStatus.TERMINATED:
+        raise HTTPException(status_code=409, detail="Session is terminated")
+    if session.server_id != payload.server_id:
+        raise HTTPException(status_code=422, detail="Payload server_id does not match session server_id")
+    if session_store.get(str(session.id)) is None:
+        raise HTTPException(status_code=409, detail="No active SSH handle for this session")
+
+    auto_setup_mode = payload.auto_setup_mode or get_lab_auto_setup_mode(db)
+    if auto_setup_mode not in {"recommend_only", "auto_low_risk_setup"}:
+        auto_setup_mode = "recommend_only"
+
+    plan = build_deployment_plan(
+        db=db,
+        server_id=payload.server_id,
+        model_id=payload.model_id,
+        quant_id=payload.quant_id,
+        session_id=payload.session_id,
+        engine=payload.engine,
+        remote_port=payload.remote_port,
+        runtime_mode=payload.runtime_mode,
+    )
+
+    try:
+        engine = EngineKind(payload.engine.upper())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Unknown engine '{payload.engine}'") from exc
+
+    install_plan = plan.recommendation.install_plan
+    run = ModelRunAttempt(
+        server_id=payload.server_id,
+        session_id=payload.session_id,
+        model_id=payload.model_id,
+        quant_id=payload.quant_id,
+        engine=engine,
+        mode="container" if plan.runtime_mode == "docker" else "venv",
+        container_image=install_plan.container_image if install_plan else None,
+        launch_command=plan.recommendation.injectable_command,
+        launch_plan_json=jsonable_encoder(plan),
+        feasibility_verdict=plan.recommendation.feasibility.verdict if plan.recommendation.feasibility else "UNKNOWN",
+        forced=payload.force,
+        status=RunStatus.PLANNED,
+    )
+    db.add(run)
+    db.flush()
+
+    task_run = TaskRun(
+        task_type="lab.deployment",
+        status=TaskStatus.PENDING,
+        server_id=payload.server_id,
+        started_at=datetime.now(timezone.utc),
+        metadata_json={
+            "deployment_run": True,
+            "model_run_id": str(run.id),
+            "session_id": str(session.id),
+            "runtime_mode": plan.runtime_mode,
+            "runtime_mode_requested": payload.runtime_mode,
+            "auto_setup_mode": auto_setup_mode,
+            "cancel_requested": False,
+            "steps": [jsonable_encoder(step) for step in plan.steps],
+        },
+    )
+    db.add(task_run)
+    db.flush()
+    run.task_run_id = task_run.id
+    db.commit()
+
+    background_tasks.add_task(
+        run_deployment_task,
+        task_run_id=str(task_run.id),
+        model_run_id=str(run.id),
+        session_id=str(session.id),
+        auto_setup_mode=auto_setup_mode,
+        health_timeout_seconds=payload.health_timeout_seconds,
+        command_timeout_seconds=payload.command_timeout_seconds,
+    )
+
+    return DeploymentRunStartResponse(
+        task_run_id=task_run.id,
+        model_run_id=run.id,
+        status=task_run.status.value if hasattr(task_run.status, "value") else str(task_run.status),
+    )
+
+
+@router.get("/deployments/runs/{task_run_id}", response_model=DeploymentRunStatusResponse)
+def get_deployment_run(task_run_id: UUID, db: Session = Depends(get_db)) -> DeploymentRunStatusResponse:
+    task_run = db.query(TaskRun).filter(TaskRun.id == task_run_id).first()
+    if not task_run:
+        raise HTTPException(status_code=404, detail="Task run not found")
+    metadata = task_run.metadata_json or {}
+    return DeploymentRunStatusResponse(
+        task_run_id=task_run.id,
+        model_run_id=UUID(metadata["model_run_id"]) if metadata.get("model_run_id") else None,
+        status=task_run.status.value if hasattr(task_run.status, "value") else str(task_run.status),
+        error_summary=task_run.error_summary,
+        runtime_mode=metadata.get("runtime_mode"),
+        auto_setup_mode=metadata.get("auto_setup_mode"),
+        cancel_requested=bool(metadata.get("cancel_requested")),
+        steps=metadata.get("steps") or [],
+    )
+
+
+@router.post("/deployments/runs/{task_run_id}/cancel", response_model=DeploymentRunStatusResponse)
+def cancel_deployment_run(task_run_id: UUID, db: Session = Depends(get_db)) -> DeploymentRunStatusResponse:
+    task_run = db.query(TaskRun).filter(TaskRun.id == task_run_id).first()
+    if not task_run:
+        raise HTTPException(status_code=404, detail="Task run not found")
+    metadata = dict(task_run.metadata_json or {})
+    metadata["cancel_requested"] = True
+    task_run.metadata_json = metadata
+    db.commit()
+    return get_deployment_run(task_run_id, db)
+
+
+def _get_agent_task(task_run_id: UUID, db: Session) -> TaskRun:
+    task_run = db.query(TaskRun).filter(TaskRun.id == task_run_id).first()
+    if not task_run:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    if task_run.task_type != "lab.agent_run":
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    return task_run
+
+
+@router.post("/agent-runs", response_model=AgentRunStartResponse, status_code=202)
+def start_agent_run(
+    payload: AgentRunRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> AgentRunStartResponse:
+    """Start a guarded AI-style Lab run that owns one managed tmux session."""
+    session = db.query(SessionModel).filter(SessionModel.id == payload.session_id).first() if payload.session_id else None
+    if not session:
+        raise HTTPException(status_code=404, detail="Active session is required to run the Lab agent")
+    if session.status == SessionStatus.TERMINATED:
+        raise HTTPException(status_code=409, detail="Session is terminated")
+    if session.server_id != payload.server_id:
+        raise HTTPException(status_code=422, detail="Payload server_id does not match session server_id")
+    if session_store.get(str(session.id)) is None:
+        raise HTTPException(status_code=409, detail="No active SSH handle for this session")
+
+    try:
+        engine = EngineKind(payload.engine.upper())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Unknown engine '{payload.engine}'") from exc
+    if not db.query(Server).filter(Server.id == payload.server_id).first():
+        raise HTTPException(status_code=404, detail="Server not found")
+    if not db.query(Model).filter(Model.id == payload.model_id).first():
+        raise HTTPException(status_code=404, detail="Model not found")
+    if not db.query(ModelQuant).filter(ModelQuant.id == payload.quant_id).first():
+        raise HTTPException(status_code=404, detail="ModelQuant not found")
+
+    recommendation = recommend_launch(
+        server_id=payload.server_id,
+        model_id=payload.model_id,
+        quant_id=payload.quant_id,
+        engine_str=payload.engine,
+        db=db,
+        session_id=payload.session_id,
+        remote_port=payload.remote_port,
+    )
+
+    run = ModelRunAttempt(
+        server_id=payload.server_id,
+        session_id=payload.session_id,
+        model_id=payload.model_id,
+        quant_id=payload.quant_id,
+        engine=engine,
+        mode=recommendation.install_plan.mode if recommendation.install_plan else "container",
+        container_image=recommendation.install_plan.container_image if recommendation.install_plan else None,
+        launch_command=recommendation.injectable_command,
+        launch_plan_json=recommendation.model_dump(mode="json"),
+        feasibility_verdict=recommendation.feasibility.verdict if recommendation.feasibility else "UNKNOWN",
+        forced=payload.force,
+        status=RunStatus.PLANNED,
+    )
+    db.add(run)
+    db.flush()
+
+    tmux_session = model_tmux_session_name(run.id)
+    task_run = TaskRun(
+        task_type="lab.agent_run",
+        status=TaskStatus.PENDING,
+        server_id=payload.server_id,
+        started_at=datetime.now(timezone.utc),
+        metadata_json={
+            "agent_run": True,
+            "model_run_id": str(run.id),
+            "session_id": str(session.id),
+            "request": payload.model_dump(mode="json"),
+            "cancel_requested": False,
+            "agent": {
+                "model_run_id": str(run.id),
+                "session_id": str(session.id),
+                "tmux_session": tmux_session,
+                "events": [],
+                "steps": _initial_agent_steps(),
+                "health": {},
+                "success_ready": False,
+                "cancel_requested": False,
+            },
+        },
+    )
+    db.add(task_run)
+    db.flush()
+    run.task_run_id = task_run.id
+    db.commit()
+
+    background_tasks.add_task(
+        run_agent_task,
+        task_run_id=str(task_run.id),
+        model_run_id=str(run.id),
+        session_id=str(session.id),
+        max_iterations=max(1, min(payload.max_iterations, 5)),
+        command_timeout_seconds=max(30, payload.command_timeout_seconds),
+        health_timeout_seconds=max(30, payload.health_timeout_seconds),
+    )
+
+    return AgentRunStartResponse(
+        task_run_id=task_run.id,
+        model_run_id=run.id,
+        status=task_run.status.value if hasattr(task_run.status, "value") else str(task_run.status),
+        tmux_session=tmux_session,
+    )
+
+
+@router.get("/agent-runs/{task_run_id}", response_model=AgentRunStatusResponse)
+def get_agent_run(task_run_id: UUID, db: Session = Depends(get_db)) -> AgentRunStatusResponse:
+    return agent_status_response(_get_agent_task(task_run_id, db))
+
+
+@router.get("/agent-runs/{task_run_id}/events", response_model=list[AgentRunEvent])
+def get_agent_run_events(task_run_id: UUID, db: Session = Depends(get_db)) -> list[AgentRunEvent]:
+    return agent_status_response(_get_agent_task(task_run_id, db)).events
+
+
+@router.post("/agent-runs/{task_run_id}/cancel", response_model=AgentRunStatusResponse)
+def cancel_agent_run(task_run_id: UUID, db: Session = Depends(get_db)) -> AgentRunStatusResponse:
+    return request_cancel_agent_run(_get_agent_task(task_run_id, db), db)
+
+
+@router.post("/agent-runs/{task_run_id}/approve-tool", response_model=AgentToolApprovalResponse)
+def approve_agent_run_tool(
+    task_run_id: UUID,
+    payload: AgentToolApprovalRequest,
+    db: Session = Depends(get_db),
+) -> AgentToolApprovalResponse:
+    task_run = _get_agent_task(task_run_id, db)
+    approve_agent_tool(task_run, db, payload.tool_call_id, payload.approved, payload.note)
+    return AgentToolApprovalResponse(task_run_id=task_run.id, tool_call_id=payload.tool_call_id, approved=payload.approved)
+
+
+@router.post("/agent-runs/{task_run_id}/promote-playbook", response_model=PromotePlaybookResponse)
+def promote_agent_run_playbook(task_run_id: UUID, db: Session = Depends(get_db)) -> PromotePlaybookResponse:
+    task_run = _get_agent_task(task_run_id, db)
+    try:
+        return promote_agent_playbook(task_run, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/sessions/{session_id}/execute-recommendation", response_model=ExecuteRecommendationResponse)
 def execute_recommendation(
     session_id: UUID,
@@ -279,7 +592,7 @@ def execute_recommendation(
     try:
         command_stdout, command_stderr, command_exit_code = _ssh_exec(
             handle,
-            recommendation.injectable_command,
+            _expand_runtime_secrets(recommendation.injectable_command, db),
             timeout=max(30, payload.command_timeout_seconds),
         )
         run.container_id = _extract_container_id(command_stdout)
@@ -456,3 +769,265 @@ def observe_session(
         health_ok=health_ok,
         raw=raw,
     )
+
+
+# ── Pipeline endpoints (4-step Lab deploy flow) ───────────────────────────────
+
+def _require_pipeline_session(session_id, server_id, db: Session) -> "SessionModel":
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status == SessionStatus.TERMINATED:
+        raise HTTPException(status_code=409, detail="Session is terminated")
+    if session.server_id != server_id:
+        raise HTTPException(status_code=422, detail="Server ID does not match session")
+    if session_store.get(str(session.id)) is None:
+        raise HTTPException(status_code=409, detail="No active SSH handle for this session")
+    return session
+
+
+def _build_vllm_serve_cmd(hf_repo: str, flags: PipelineModelFlags) -> str:
+    venv = "~/.inferix/venvs/vllm-2"
+    parts = [
+        f"{venv}/bin/vllm serve {hf_repo}",
+        f"--port {flags.remote_port}",
+        f"--gpu-memory-utilization {flags.gpu_memory_utilization}",
+        f"--dtype {flags.dtype}",
+    ]
+    if flags.tensor_parallel_size > 1:
+        parts.append(f"--tensor-parallel-size {flags.tensor_parallel_size}")
+    if flags.max_model_len:
+        parts.append(f"--max-model-len {flags.max_model_len}")
+    if flags.enable_tools:
+        parts.append("--enable-auto-tool-choice")
+        if flags.tool_call_parser:
+            parts.append(f"--tool-call-parser {flags.tool_call_parser}")
+    if flags.enable_thinking and flags.reasoning_parser:
+        parts.append(f"--reasoning-parser {flags.reasoning_parser}")
+    if flags.enable_chunked_prefill:
+        parts.append("--enable-chunked-prefill")
+    if flags.trust_remote_code:
+        parts.append("--trust-remote-code")
+    if flags.extra_flags.strip():
+        parts.append(flags.extra_flags.strip())
+    return " ".join(parts)
+
+
+def _make_pipeline_task(task_type: str, server_id, session_id, meta: dict, db: Session) -> TaskRun:
+    task_run = TaskRun(
+        task_type=task_type,
+        status=TaskStatus.PENDING,
+        server_id=server_id,
+        started_at=datetime.now(timezone.utc),
+        metadata_json={"session_id": str(session_id), **meta},
+    )
+    db.add(task_run)
+    db.commit()
+    return task_run
+
+
+@router.post("/pipeline/init-server", response_model=PipelineStartResponse, status_code=202)
+def pipeline_init_server(
+    payload: PipelineStepRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> PipelineStartResponse:
+    """Step 1: Install curl, uv, create Python 3.12 venv at ~/.inferix/venvs/vllm-2."""
+    _require_pipeline_session(payload.session_id, payload.server_id, db)
+    commands = [
+        (
+            "if ! command -v curl >/dev/null 2>&1; then\n"
+            "  echo '[+] Installing curl...'\n"
+            "  apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates\n"
+            "else\n"
+            "  echo \"[+] curl already installed: $(curl --version | head -n1)\"\n"
+            "fi"
+        ),
+        (
+            "export PATH=\"$HOME/.local/bin:$PATH\"\n"
+            "if ! command -v uv >/dev/null 2>&1; then\n"
+            "  echo '[+] Installing uv...'\n"
+            "  curl -LsSf https://astral.sh/uv/install.sh | sh\n"
+            "  source \"$HOME/.local/bin/env\" 2>/dev/null || true\n"
+            "else\n"
+            "  echo \"[+] uv already installed: $(uv --version)\"\n"
+            "fi\n"
+            "grep -q 'HOME/.local/bin' ~/.bashrc 2>/dev/null || "
+            "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc"
+        ),
+        (
+            "export PATH=\"$HOME/.local/bin:$PATH\"\n"
+            "VENV=\"$HOME/.inferix/venvs/vllm-2\"\n"
+            "mkdir -p \"$(dirname \"$VENV\")\"\n"
+            "if [ ! -x \"$VENV/bin/python\" ]; then\n"
+            "  echo \"[+] Creating venv at $VENV...\"\n"
+            "  uv venv \"$VENV\" --python 3.12\n"
+            "  echo '[+] Venv created'\n"
+            "else\n"
+            "  echo \"[+] Venv already exists at $VENV\"\n"
+            "fi"
+        ),
+    ]
+    task_run = _make_pipeline_task(
+        "lab.pipeline.init_server", payload.server_id, payload.session_id,
+        {"pipeline_step": "init_server"}, db,
+    )
+    background_tasks.add_task(
+        run_pipeline_step_task,
+        task_run_id=str(task_run.id),
+        session_id=str(payload.session_id),
+        commands=commands,
+        step_name="init server",
+    )
+    return PipelineStartResponse(task_run_id=task_run.id, status="PENDING")
+
+
+@router.post("/pipeline/install-vllm", response_model=PipelineStartResponse, status_code=202)
+def pipeline_install_vllm(
+    payload: PipelineStepRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> PipelineStartResponse:
+    """Step 2: Probe CUDA version and install the matching vLLM into the managed venv."""
+    _require_pipeline_session(payload.session_id, payload.server_id, db)
+    commands = [
+        (
+            "export PATH=\"$HOME/.local/bin:$PATH\"\n"
+            "VENV=\"$HOME/.inferix/venvs/vllm-2\"\n"
+            "echo '[+] Probing CUDA version...'\n"
+            "CUDA_VER=$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version: \\K[\\d.]+' || echo 'unknown')\n"
+            "echo \"[+] Detected CUDA: $CUDA_VER\"\n"
+            "CUDA_MAJOR=$(echo \"$CUDA_VER\" | cut -d. -f1 2>/dev/null || echo '0')\n"
+            "CUDA_MINOR=$(echo \"$CUDA_VER\" | cut -d. -f2 2>/dev/null || echo '0')\n"
+            "if [ \"$CUDA_MAJOR\" = '11' ]; then\n"
+            "  VLLM_PKG='vllm==0.4.3'\n"
+            "elif [ \"$CUDA_MAJOR\" = '12' ] && [ \"$CUDA_MINOR\" = '1' ]; then\n"
+            "  VLLM_PKG='vllm==0.6.6'\n"
+            "else\n"
+            "  VLLM_PKG='vllm'\n"
+            "fi\n"
+            "echo \"[+] Installing: $VLLM_PKG\"\n"
+            "$VENV/bin/uv pip install \"$VLLM_PKG\"\n"
+            "echo '[+] Verifying installation...'\n"
+            "$VENV/bin/python -c \"import vllm; print(f'[+] vLLM {vllm.__version__} installed')\""
+        ),
+    ]
+    task_run = _make_pipeline_task(
+        "lab.pipeline.install_vllm", payload.server_id, payload.session_id,
+        {"pipeline_step": "install_vllm"}, db,
+    )
+    background_tasks.add_task(
+        run_pipeline_step_task,
+        task_run_id=str(task_run.id),
+        session_id=str(payload.session_id),
+        commands=commands,
+        step_name="install vLLM",
+    )
+    return PipelineStartResponse(task_run_id=task_run.id, status="PENDING")
+
+
+@router.post("/pipeline/download-model", response_model=PipelineStartResponse, status_code=202)
+def pipeline_download_model(
+    payload: PipelineDownloadModelRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> PipelineStartResponse:
+    """Step 3: Download model weights to ~/.cache/huggingface on the remote server."""
+    _require_pipeline_session(payload.session_id, payload.server_id, db)
+    from app.models.entities import Model as ModelEntity, ModelQuant as ModelQuantEntity
+    model = db.query(ModelEntity).filter(ModelEntity.id == payload.model_id).first()
+    quant = db.query(ModelQuantEntity).filter(ModelQuantEntity.id == payload.quant_id).first()
+    if not model or not quant:
+        raise HTTPException(status_code=404, detail="Model or quant not found")
+    hf_repo = quant.hf_repo or model.hf_repo or model.model_key
+    commands = [
+        (
+            "export PATH=\"$HOME/.local/bin:$PATH\"\n"
+            f"VENV=\"$HOME/.inferix/venvs/vllm-2\"\n"
+            f"REPO=\"{hf_repo}\"\n"
+            f"HF_CACHE=\"$HOME/.cache/huggingface\"\n"
+            f"echo \"[+] Downloading $REPO...\"\n"
+            f"HF_TOKEN=$INFERIX_HF_TOKEN $VENV/bin/huggingface-cli download \"$REPO\" --cache-dir \"$HF_CACHE\"\n"
+            f"echo \"[+] Download complete: $REPO\""
+        ),
+    ]
+    task_run = _make_pipeline_task(
+        "lab.pipeline.download_model", payload.server_id, payload.session_id,
+        {"pipeline_step": "download_model", "hf_repo": hf_repo,
+         "model_id": str(payload.model_id), "quant_id": str(payload.quant_id)}, db,
+    )
+    background_tasks.add_task(
+        run_pipeline_step_task,
+        task_run_id=str(task_run.id),
+        session_id=str(payload.session_id),
+        commands=commands,
+        step_name=f"download {hf_repo}",
+    )
+    return PipelineStartResponse(task_run_id=task_run.id, status="PENDING")
+
+
+@router.post("/pipeline/run-model", response_model=PipelineStartResponse, status_code=202)
+def pipeline_run_model(
+    payload: PipelineRunModelRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> PipelineStartResponse:
+    """Step 4: Launch vLLM in tmux session inferix-vllm with specified capability flags."""
+    _require_pipeline_session(payload.session_id, payload.server_id, db)
+    from app.models.entities import Model as ModelEntity, ModelQuant as ModelQuantEntity
+    model = db.query(ModelEntity).filter(ModelEntity.id == payload.model_id).first()
+    quant = db.query(ModelQuantEntity).filter(ModelQuantEntity.id == payload.quant_id).first()
+    if not model or not quant:
+        raise HTTPException(status_code=404, detail="Model or quant not found")
+    hf_repo = quant.hf_repo or model.hf_repo or model.model_key
+    vllm_cmd = _build_vllm_serve_cmd(hf_repo, payload.flags)
+    commands = [
+        "tmux kill-session -t inferix-vllm 2>/dev/null || true",
+        (
+            f"tmux new-session -d -s inferix-vllm "
+            f"\"export PATH=$HOME/.local/bin:$PATH; "
+            f"export HF_TOKEN=$INFERIX_HF_TOKEN; "
+            f"{vllm_cmd} 2>&1 | tee /tmp/vllm.log\""
+        ),
+        "sleep 2 && echo '[+] vLLM launched in tmux session: inferix-vllm'",
+        "echo '[+] Monitor: tail -f /tmp/vllm.log'",
+    ]
+    task_run = _make_pipeline_task(
+        "lab.pipeline.run_model", payload.server_id, payload.session_id,
+        {"pipeline_step": "run_model", "hf_repo": hf_repo,
+         "remote_port": payload.flags.remote_port,
+         "model_id": str(payload.model_id), "quant_id": str(payload.quant_id)}, db,
+    )
+    background_tasks.add_task(
+        run_pipeline_step_task,
+        task_run_id=str(task_run.id),
+        session_id=str(payload.session_id),
+        commands=commands,
+        step_name=f"launch {hf_repo}",
+    )
+    return PipelineStartResponse(task_run_id=task_run.id, status="PENDING")
+
+
+@router.post("/pipeline/stop-model", response_model=PipelineStartResponse, status_code=202)
+def pipeline_stop_model(
+    payload: PipelineStepRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> PipelineStartResponse:
+    """Kill the inferix-vllm tmux session."""
+    _require_pipeline_session(payload.session_id, payload.server_id, db)
+    commands = [
+        "tmux kill-session -t inferix-vllm 2>/dev/null && echo '[+] vLLM session stopped' || echo '[+] No running session found'",
+    ]
+    task_run = _make_pipeline_task(
+        "lab.pipeline.stop_model", payload.server_id, payload.session_id,
+        {"pipeline_step": "stop_model"}, db,
+    )
+    background_tasks.add_task(
+        run_pipeline_step_task,
+        task_run_id=str(task_run.id),
+        session_id=str(payload.session_id),
+        commands=commands,
+        step_name="stop vLLM",
+    )
+    return PipelineStartResponse(task_run_id=task_run.id, status="PENDING")

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.cache import get_redis_client
 from app.db.session import get_db
 from app.models.entities import Server, ServerStatus
+from app.models.entities import Session as SessionEntity, SessionStatus
 from app.schemas.servers import ServerResponse
 from app.services.clore_client import CloreClient, CloreOffer
 from app.services.clore_filters import apply_filters, load_clore_filters
@@ -138,14 +139,44 @@ def list_offers(
 
 @router.get("/rentals")
 def list_rentals(db: Session = Depends(get_db)) -> dict:
-    """List all active Clore.ai rentals."""
+    """List all active Clore.ai rentals and reconcile local server statuses.
+
+    Any server in PROVISIONING or READY state whose Clore rental is no longer
+    active will be marked TERMINATED, and its open sessions will be closed.
+    This keeps the local DB in sync even when rentals are cancelled externally.
+    """
     api_key = _resolve_clore_key(db)
     try:
         with CloreClient(api_key) as client:
             rentals = client.list_rentals()
-        return {"rentals": [r.model_dump() for r in rentals]}
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    active_ids = {r.id for r in rentals}
+    stale_servers = (
+        db.query(Server)
+        .filter(
+            Server.status.in_([ServerStatus.PROVISIONING, ServerStatus.READY]),
+            Server.external_server_id.isnot(None),
+        )
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    for server in stale_servers:
+        ext_id = server.external_server_id
+        if ext_id and not ext_id.startswith("manual-") and ext_id not in active_ids:
+            server.status = ServerStatus.TERMINATED
+            (
+                db.query(SessionEntity)
+                .filter(
+                    SessionEntity.server_id == server.id,
+                    SessionEntity.status == SessionStatus.ACTIVE,
+                )
+                .update({"status": SessionStatus.TERMINATED, "terminated_at": now})
+            )
+    db.commit()
+
+    return {"rentals": [r.model_dump() for r in rentals]}
 
 
 @router.get("/rentals/{rental_id}")

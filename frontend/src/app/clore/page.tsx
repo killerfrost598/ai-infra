@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import {
-  useCloreOffers, useRefreshCloreOffers, useRentals, useServers,
+  useCloreBalance, useCloreOffers, useRefreshCloreOffers, useRentals, useServers,
   useTerminateRental, useCreateSession,
 } from "@/lib/queries";
 import type { CloreOffer, CloreOfferGroup, CloreRental, Server } from "@/lib/types";
@@ -504,10 +504,32 @@ function GroupDrawer({ group, offerMap, onRent, onAdvise }: {
 
 // ── Rentals tab ───────────────────────────────────────────────────────────────
 
+function fmtDuration(rentedAt: string | null): string {
+  if (!rentedAt) return "";
+  const ms = Date.now() - new Date(rentedAt).getTime();
+  if (ms < 0) return "";
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    const rh = h % 24;
+    return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+  }
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function fmtCost(pricePerDay: number | null, rentedAt: string | null): string {
+  if (!pricePerDay || !rentedAt) return "";
+  const hoursElapsed = Math.max(0, (Date.now() - new Date(rentedAt).getTime()) / 3_600_000);
+  const cost = (pricePerDay / 24) * hoursElapsed;
+  return `$${cost.toFixed(3)} spent`;
+}
+
 function RentalsTab() {
   const router = useRouter();
   const { data: rentalsData, isLoading, error } = useRentals();
   const { data: serversData } = useServers(0, 100);
+  const { data: balanceData } = useCloreBalance();
   const rentals: CloreRental[] = rentalsData?.rentals ?? [];
   const servers: Server[] = serversData?.items ?? [];
 
@@ -522,6 +544,8 @@ function RentalsTab() {
     () => new Map(servers.map((s) => [s.external_server_id, s])),
     [servers],
   );
+
+  const totalDailyBurn = rentals.reduce((sum, r) => sum + (r.price_per_day ?? 0), 0);
 
   function handleTerminate(id: string) {
     const target = rentals.find((r) => r.id === id) ?? null;
@@ -544,6 +568,31 @@ function RentalsTab() {
     <>
       {error && <ErrorState message={error.message} />}
       {isLoading && <LoadingState text="Loading rentals…" />}
+
+      {/* Balance + burn rate summary */}
+      {!isLoading && !error && (balanceData || rentals.length > 0) && (
+        <div className="flex flex-wrap gap-3">
+          {balanceData?.balances.map((b) => (
+            <Card key={b.currency} className="flex items-center gap-3 px-4 py-2.5">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{b.currency} Balance</p>
+                <p className="text-sm font-semibold tabular-nums">{b.amount.toFixed(4)}</p>
+              </div>
+            </Card>
+          ))}
+          {totalDailyBurn > 0 && (
+            <Card className="flex items-center gap-3 px-4 py-2.5">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Daily burn</p>
+                <p className="text-sm font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+                  ${totalDailyBurn.toFixed(2)}/day
+                </p>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
       {!isLoading && !error && rentals.length === 0 && (
         <Card className="px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">No active rentals.</p>
@@ -555,6 +604,8 @@ function RentalsTab() {
         {rentals.map((r) => {
           const server = serverByExtId.get(r.id);
           const isRegistering = registeringId === r.id;
+          const costLabel = fmtCost(r.price_per_day, r.rented_at);
+          const durationLabel = fmtDuration(r.rented_at);
           return (
             <Card key={r.id} className="overflow-hidden">
               <div className="flex items-center gap-4 px-4 py-3">
@@ -569,6 +620,11 @@ function RentalsTab() {
                     <span>{r.ssh_username}</span>
                     {r.vram_gb > 0 && <span>{r.vram_gb} GB VRAM</span>}
                     {r.cuda_version && <span>CUDA {r.cuda_version}</span>}
+                    {r.price_per_day != null && (
+                      <span className="text-foreground/70 font-medium">${r.price_per_day.toFixed(2)}/day</span>
+                    )}
+                    {durationLabel && <span className="text-muted-foreground/70">up {durationLabel}</span>}
+                    {costLabel && <span className="text-amber-600 dark:text-amber-400">{costLabel}</span>}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">

@@ -112,6 +112,42 @@ export interface ListResponse<T> {
   total: number;
 }
 
+export interface PipelineModelFlags {
+  enable_tools: boolean;
+  tool_call_parser: string | null;
+  enable_thinking: boolean;
+  reasoning_parser: string | null;
+  max_model_len: number | null;
+  gpu_memory_utilization: number;
+  dtype: string;
+  tensor_parallel_size: number;
+  enable_chunked_prefill: boolean;
+  trust_remote_code: boolean;
+  extra_flags: string;
+  remote_port: number;
+}
+
+export interface PipelineStartResponse {
+  task_run_id: string;
+  status: string;
+}
+
+export interface PipelineStepRequest {
+  session_id: string;
+  server_id: string;
+}
+
+export interface PipelineDownloadModelRequest extends PipelineStepRequest {
+  model_id: string;
+  quant_id: string;
+}
+
+export interface PipelineRunModelRequest extends PipelineStepRequest {
+  model_id: string;
+  quant_id: string;
+  flags: PipelineModelFlags;
+}
+
 export interface SSHTestStep {
   step: string;
   success: boolean;
@@ -294,6 +330,8 @@ export interface CloreRental {
   ssh_password: string | null;
   cuda_version: string | null;
   status: string;
+  price_per_day: number | null;
+  rented_at: string | null;
 }
 
 export interface RentRequest {
@@ -747,8 +785,17 @@ export interface DeploymentPlanStep {
   stage: string;
   command: string | null;
   required: boolean;
+  status: string;
+  risk: string;
+  auto_eligible: boolean;
+  recommended: boolean;
   expected: string | null;
   notes: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  stdout_tail: string;
+  stderr_tail: string;
+  error: string | null;
 }
 
 export interface DeploymentPlanRequest extends RecommendRequest {
@@ -763,6 +810,79 @@ export interface DeploymentPlanResponse {
   blockers: string[];
   steps: DeploymentPlanStep[];
   recommendation: LaunchRecommendation;
+}
+
+export interface DeploymentRunRequest extends DeploymentPlanRequest {
+  auto_setup_mode?: "recommend_only" | "auto_low_risk_setup";
+  force?: boolean;
+  health_timeout_seconds?: number;
+  command_timeout_seconds?: number;
+}
+
+export interface DeploymentRunStartResponse {
+  task_run_id: string;
+  model_run_id: string;
+  status: string;
+}
+
+export interface DeploymentRunStatusResponse {
+  task_run_id: string;
+  model_run_id: string | null;
+  status: string;
+  error_summary: string | null;
+  runtime_mode: string | null;
+  auto_setup_mode: string | null;
+  cancel_requested: boolean;
+  steps: DeploymentPlanStep[];
+}
+
+export interface AgentRunEvent {
+  id: string;
+  ts: string;
+  type: string;
+  summary: string;
+  tool: string | null;
+  input: Record<string, unknown> | null;
+  output: Record<string, unknown> | null;
+  status: string;
+}
+
+export interface AgentRunRequest extends RecommendRequest {
+  runtime_mode?: "auto" | "docker" | "uv_venv";
+  force?: boolean;
+  max_iterations?: number;
+  command_timeout_seconds?: number;
+  health_timeout_seconds?: number;
+}
+
+export interface AgentRunStartResponse {
+  task_run_id: string;
+  model_run_id: string;
+  status: string;
+  tmux_session: string;
+}
+
+export interface AgentRunStatusResponse {
+  task_run_id: string;
+  model_run_id: string | null;
+  status: string;
+  error_summary: string | null;
+  tmux_session: string | null;
+  cancel_requested: boolean;
+  current_launch_command: string | null;
+  reasoning_summary: string | null;
+  health: Record<string, unknown>;
+  success_ready: boolean;
+  playbook_id: string | null;
+  tmux_output_tail: string;
+  events: AgentRunEvent[];
+  steps: DeploymentPlanStep[];
+}
+
+export interface PromotePlaybookResponse {
+  playbook_id: string;
+  git_repo: string;
+  git_commit: string | null;
 }
 
 export interface ModelRunAggregate {

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,7 +12,6 @@ import { keys, useServers, useRentals, useCreateServer, useDeleteServer, useCrea
 import type { CloreRental, Server, ServerCreate, SSHTestResult } from "@/lib/types";
 import { serverSchema, type ServerFormValues } from "@/lib/schemas";
 import { StatusBadge } from "@/components/StatusBadge";
-import { TerminalModal } from "@/components/terminal/TerminalModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/layouts/page-
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
 export default function ServersPage() {
+  const router = useRouter();
   const { data: serversData, isLoading, error } = useServers();
   const { data: rentalsData } = useRentals();
   const servers: Server[] = serversData?.items ?? [];
@@ -34,10 +35,6 @@ export default function ServersPage() {
 
   const [registeringId, setRegisteringId] = useState<string | null>(null);
   const [startingSSH, setStartingSSH] = useState<string | null>(null);
-  const [terminalSession, setTerminalSession] = useState<
-    | { id: string; sessionLabel: string; server: Server }
-    | null
-  >(null);
   const [showForm, setShowForm] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [sshTestResults, setSshTestResults] = useState<Record<string, SSHTestResult>>({});
@@ -107,16 +104,13 @@ export default function ServersPage() {
   }
 
   async function handleStartSSH(serverId: string) {
-    const server = servers.find((s) => s.id === serverId);
-    if (!server) return;
     setStartingSSH(serverId);
     try {
       const session = await createSession.mutateAsync({ server_id: serverId });
-      const sessionLabel = `ses_${session.id.replace(/-/g, "").slice(0, 6)}`;
-      setTerminalSession({ id: session.id, sessionLabel, server });
+      sessionStorage.setItem("lab_session_id", session.id);
+      router.push("/lab");
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start SSH session");
-    } finally {
       setStartingSSH(null);
     }
   }
@@ -354,35 +348,6 @@ export default function ServersPage() {
           </div>
         ))}
       </div>
-
-      {/* Terminal modal — designed shell, theme-aware terminal */}
-      <TerminalModal
-        open={!!terminalSession}
-        onOpenChange={(open) => {
-          if (!open && terminalSession) {
-            api.sessions.terminate(terminalSession.id).catch(() => {});
-            setTerminalSession(null);
-          }
-        }}
-        sessionId={terminalSession?.id ?? null}
-        sessionLabel={terminalSession?.sessionLabel}
-        serverMeta={
-          terminalSession
-            ? {
-                gpu_model: terminalSession.server.gpu_model,
-                vram_gb: terminalSession.server.vram_gb,
-                hostname: terminalSession.server.hostname,
-                status: terminalSession.server.status,
-              }
-            : undefined
-        }
-        onDisconnect={() => {
-          if (terminalSession) {
-            api.sessions.terminate(terminalSession.id).catch(() => {});
-            setTerminalSession(null);
-          }
-        }}
-      />
 
       {unregisteredRentals.length > 0 && (
         <div className="space-y-2">

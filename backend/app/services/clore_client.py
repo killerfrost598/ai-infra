@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -103,6 +104,8 @@ class CloreServer(BaseModel):
     ssh_password: str | None = None
     cuda_version: str | None = None
     status: str
+    price_per_day: float | None = None
+    rented_at: str | None = None  # ISO-8601 UTC timestamp
 
 
 def _sdk_to_offer(s: Any) -> CloreOffer:
@@ -267,6 +270,25 @@ def _raw_order_to_server(raw: dict) -> CloreServer:
     if raw_id is None:
         raise ValueError("Clore order is missing id/order_id/rental_id")
 
+    # Price — Clore stores on-demand price at top-level or inside a price/specs object
+    price_per_day: float | None = None
+    for field in ("price", "price_per_day", "cost_per_day"):
+        v = raw.get(field)
+        if v is not None:
+            extracted = _to_float(v)
+            if extracted > 0:
+                price_per_day = extracted
+                break
+
+    # Creation timestamp — `ct` is unix epoch seconds
+    rented_at: str | None = None
+    ct = raw.get("ct")
+    if ct is not None:
+        try:
+            rented_at = datetime.fromtimestamp(float(ct), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError):
+            pass
+
     return CloreServer(
         id=str(raw_id),
         gpu_name=gpu_name,
@@ -277,6 +299,8 @@ def _raw_order_to_server(raw: dict) -> CloreServer:
         ssh_password=raw.get("ssh_password"),
         cuda_version=None,
         status=status,
+        price_per_day=price_per_day,
+        rented_at=rented_at,
     )
 
 

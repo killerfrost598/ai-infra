@@ -13,6 +13,9 @@ build/
 venv/
 env/
 
+.claude
+backend/docs/
+
 # Node / Next.js
 node_modules/
 .next/

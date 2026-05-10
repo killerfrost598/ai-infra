@@ -14,6 +14,7 @@ const WIDE_ROUTES = [
   "/models",
   "/find",
   "/compat",
+  "/settings",
 ];
 
 const PAGE_LABELS: Record<string, string> = {

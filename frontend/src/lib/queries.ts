@@ -23,6 +23,8 @@ export const keys = {
   gpuProfiles: () => ["gpu-profiles"] as const,
   modelRuns: (serverId?: string) => ["model-runs", serverId ?? ""] as const,
   labSession: (id: string) => ["lab-session", id] as const,
+  deploymentRun: (taskRunId?: string) => ["lab", "deployment-run", taskRunId ?? ""] as const,
+  agentRun: (taskRunId?: string) => ["lab", "agent-run", taskRunId ?? ""] as const,
 }
 
 // ─── Query Hooks ─────────────────────────────────────────────────────────────
@@ -318,5 +320,31 @@ export function useActiveRuns(serverId?: string) {
     queryFn: () => api.modelRuns.list({ server_id: serverId, status: "RUNNING", limit: 3 }),
     enabled: !!serverId,
     refetchInterval: 10_000,
+  })
+}
+
+export function useDeploymentRun(taskRunId?: string | null) {
+  return useQuery({
+    queryKey: keys.deploymentRun(taskRunId ?? undefined),
+    queryFn: () => api.lab.deploymentRun(taskRunId as string),
+    enabled: !!taskRunId,
+    refetchInterval: (query) => {
+      const data = query.state.data as import("./types").DeploymentRunStatusResponse | undefined
+      const status = data?.status
+      return status === "SUCCESS" || status === "FAILED" || status === "PARTIAL" ? false : 2000
+    },
+  })
+}
+
+export function useAgentRun(taskRunId?: string | null) {
+  return useQuery({
+    queryKey: keys.agentRun(taskRunId ?? undefined),
+    queryFn: () => api.lab.agentRun(taskRunId as string),
+    enabled: !!taskRunId,
+    refetchInterval: (query) => {
+      const data = query.state.data as import("./types").AgentRunStatusResponse | undefined
+      const status = data?.status
+      return status === "SUCCESS" || status === "FAILED" || status === "PARTIAL" ? false : 2000
+    },
   })
 }

@@ -150,6 +150,35 @@ export function PtyTerminal({
       terminal.open(containerRef.current);
       fitAddon.fit();
 
+      // If the container is hidden (display:none) when the terminal mounts,
+      // fitAddon.fit() gets 0 dimensions and xterm collapses to minimum size.
+      // Incoming WebSocket data written at that size wraps at 1 column and stays
+      // garbled permanently even after the container becomes visible.
+      // Fix: buffer all incoming data until fitAddon.fit() produces real dimensions.
+      let renderReady = terminal.cols > 10 && terminal.rows > 2;
+      const writeQueue: Array<Uint8Array | string> = [];
+
+      function flushWriteQueue() {
+        for (const item of writeQueue) {
+          if (typeof item === "string") {
+            try { terminal.write(item); } catch { /* absorb */ }
+          } else {
+            writeChunked((chunk) => terminal.write(chunk), item);
+          }
+        }
+        writeQueue.length = 0;
+      }
+
+      function termWrite(bytes: Uint8Array): void {
+        if (renderReady) { writeChunked((chunk) => terminal.write(chunk), bytes); return; }
+        writeQueue.push(bytes);
+      }
+
+      function termWriteText(text: string): void {
+        if (renderReady) { try { terminal.write(text); } catch { /* absorb */ } return; }
+        writeQueue.push(text);
+      }
+
       let bytesSent = 0;
       let bytesReceived = 0;
       let latencyMs: number | null = null;
@@ -186,16 +215,12 @@ export function PtyTerminal({
         if (event.data instanceof ArrayBuffer) {
           const bytes = new Uint8Array(event.data);
           bytesReceived += bytes.byteLength;
-          writeChunked((chunk) => terminal.write(chunk), bytes);
+          termWrite(bytes);
           onDataRef.current?.(bytes);
         } else {
           const text = event.data as string;
           bytesReceived += text.length;
-          try {
-            terminal.write(text);
-          } catch {
-            // Absorb write errors on text frames (shouldn't happen but be safe)
-          }
+          termWriteText(text);
         }
         emitStats();
       };
@@ -243,6 +268,10 @@ export function PtyTerminal({
       observer = new ResizeObserver(() => {
         try {
           fitAddon.fit();
+          if (!renderReady && terminal.cols > 10 && terminal.rows > 2) {
+            renderReady = true;
+            flushWriteQueue();
+          }
         } catch {
           // Non-fatal: container may have zero dimensions during tab transitions
         }

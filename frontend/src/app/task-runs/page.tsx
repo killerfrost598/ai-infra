@@ -16,6 +16,7 @@ const TASK_LABELS: Record<string, string> = {
   "servers.terminate": "Server Terminate",
   "deployments.deploy": "Model Deploy",
   "ssh.execute_command": "SSH Command",
+  "lab.deployment": "Lab Deployment",
   "playbooks.run": "Playbook Run",
   "health.ping": "Health Check",
 };

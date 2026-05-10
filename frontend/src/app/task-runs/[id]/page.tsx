@@ -40,6 +40,30 @@ export default function TaskRunDetailPage() {
   }, [logs]);
 
   useEffect(() => {
+    async function fetchLogs() {
+      try {
+        const text = await api.taskRuns.logs(id);
+        setLogs(text);
+        setLogsError(null);
+      } catch {
+        // A running task can be created before its log file exists.
+      }
+    }
+
+    function startPolling(includeLogs: boolean) {
+      stopPoll();
+      pollRef.current = setInterval(async () => {
+        try {
+          const updated = await api.taskRuns.get(id);
+          setRun(updated);
+          if (includeLogs) fetchLogs();
+          if (TERMINAL.has(updated.status)) stopPoll();
+        } catch {
+          stopPoll();
+        }
+      }, 2000);
+    }
+
     async function init() {
       try {
         const taskRun = await api.taskRuns.get(id);
@@ -61,28 +85,23 @@ export default function TaskRunDetailPage() {
 
       es.addEventListener("done", () => {
         stopStream();
+        fetchLogs();
         // Fetch final task run status once stream closes
         api.taskRuns.get(id).then(setRun).catch(() => null);
       });
 
       es.onerror = () => {
         stopStream();
-        setLogsError("Log stream disconnected.");
+        setLogsError("Log stream disconnected; polling log file instead.");
         // Still show whatever we got; attempt final status fetch
         api.taskRuns.get(id).then(setRun).catch(() => null);
+        fetchLogs();
+        startPolling(true);
       };
 
       // Poll task run metadata while active (status badge + timing)
       if (!TERMINAL.has(initialStatus)) {
-        pollRef.current = setInterval(async () => {
-          try {
-            const updated = await api.taskRuns.get(id);
-            setRun(updated);
-            if (TERMINAL.has(updated.status)) stopPoll();
-          } catch {
-            stopPoll();
-          }
-        }, 2000);
+        startPolling(false);
       }
     }
 

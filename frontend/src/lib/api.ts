@@ -1,5 +1,9 @@
 import type {
   ApproveCandidate,
+  AgentRunEvent,
+  AgentRunRequest,
+  AgentRunStartResponse,
+  AgentRunStatusResponse,
   AiAssistRequest,
   AiAssistResponse,
   BenchmarkRunResponse,
@@ -17,6 +21,10 @@ import type {
   ExecuteRecommendationResponse,
   DeploymentPlanRequest,
   DeploymentPlanResponse,
+  DeploymentPlanStep,
+  DeploymentRunRequest,
+  DeploymentRunStartResponse,
+  DeploymentRunStatusResponse,
   FeasibilityRequest,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
@@ -33,7 +41,13 @@ import type {
   ModelRunAttempt,
   ModelRunAttemptCreate,
   ModelRunAttemptUpdate,
+  PipelineDownloadModelRequest,
+  PipelineModelFlags,
+  PipelineRunModelRequest,
+  PipelineStartResponse,
+  PipelineStepRequest,
   Playbook,
+  PromotePlaybookResponse,
   RecommendRequest,
   RentRequest,
   ScrapeRun,
@@ -390,6 +404,36 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    preflightCommandTemplates: () =>
+      apiFetch<DeploymentPlanStep[]>("/api/v1/lab/preflight-command-templates"),
+    runDeployment: (data: DeploymentRunRequest) =>
+      apiFetch<DeploymentRunStartResponse>("/api/v1/lab/deployments/run", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    deploymentRun: (taskRunId: string) =>
+      apiFetch<DeploymentRunStatusResponse>(`/api/v1/lab/deployments/runs/${taskRunId}`),
+    cancelDeploymentRun: (taskRunId: string) =>
+      apiFetch<DeploymentRunStatusResponse>(`/api/v1/lab/deployments/runs/${taskRunId}/cancel`, {
+        method: "POST",
+      }),
+    startAgentRun: (data: AgentRunRequest) =>
+      apiFetch<AgentRunStartResponse>("/api/v1/lab/agent-runs", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    agentRun: (taskRunId: string) =>
+      apiFetch<AgentRunStatusResponse>(`/api/v1/lab/agent-runs/${taskRunId}`),
+    agentRunEvents: (taskRunId: string) =>
+      apiFetch<AgentRunEvent[]>(`/api/v1/lab/agent-runs/${taskRunId}/events`),
+    cancelAgentRun: (taskRunId: string) =>
+      apiFetch<AgentRunStatusResponse>(`/api/v1/lab/agent-runs/${taskRunId}/cancel`, {
+        method: "POST",
+      }),
+    promoteAgentPlaybook: (taskRunId: string) =>
+      apiFetch<PromotePlaybookResponse>(`/api/v1/lab/agent-runs/${taskRunId}/promote-playbook`, {
+        method: "POST",
+      }),
     inject: (sessionId: string, data: { command: string; dry_run?: boolean; model_run_id?: string }) =>
       apiFetch<{ injected: boolean; command: string }>(`/api/v1/lab/sessions/${sessionId}/inject`, {
         method: "POST",
@@ -397,6 +441,31 @@ export const api = {
       }),
     executeRecommendation: (sessionId: string, data: ExecuteRecommendationRequest) =>
       apiFetch<ExecuteRecommendationResponse>(`/api/v1/lab/sessions/${sessionId}/execute-recommendation`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    pipelineInitServer: (data: PipelineStepRequest) =>
+      apiFetch<PipelineStartResponse>("/api/v1/lab/pipeline/init-server", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    pipelineInstallVllm: (data: PipelineStepRequest) =>
+      apiFetch<PipelineStartResponse>("/api/v1/lab/pipeline/install-vllm", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    pipelineDownloadModel: (data: PipelineDownloadModelRequest) =>
+      apiFetch<PipelineStartResponse>("/api/v1/lab/pipeline/download-model", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    pipelineRunModel: (data: PipelineRunModelRequest) =>
+      apiFetch<PipelineStartResponse>("/api/v1/lab/pipeline/run-model", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    pipelineStopModel: (data: PipelineStepRequest) =>
+      apiFetch<PipelineStartResponse>("/api/v1/lab/pipeline/stop-model", {
         method: "POST",
         body: JSON.stringify(data),
       }),

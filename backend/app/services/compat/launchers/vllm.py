@@ -17,7 +17,7 @@ def build_launch_cmd(
         else ""
     )
     tp_flag = f"--tensor-parallel-size {tp_size} " if tp_size > 1 else ""
-    hf_env = f"-e HUGGING_FACE_HUB_TOKEN={hf_token} " if hf_token and mode == "container" else ""
+    hf_env = "-e HUGGING_FACE_HUB_TOKEN=$INFERIX_HF_TOKEN " if hf_token and mode == "container" else ""
     safe_name = variant.model_key.replace("-", "_").replace(".", "_").replace("/", "_")
 
     if mode == "container":
@@ -39,10 +39,10 @@ def build_launch_cmd(
         ).strip()
 
     # venv fallback
-    hf_env_venv = f"HUGGING_FACE_HUB_TOKEN={hf_token} " if hf_token else ""
+    hf_env_venv = "HUGGING_FACE_HUB_TOKEN=$INFERIX_HF_TOKEN " if hf_token else ""
     return (
         f"{hf_env_venv}"
-        f"nohup ~/aip_venv/bin/python -m vllm.entrypoints.openai.api_server "
+        f"nohup ~/.inferix/venvs/vllm-{stack_row.id}/bin/python -m vllm.entrypoints.openai.api_server "
         f"--model {model} "
         f"--port {remote_port} "
         f"--gpu-memory-utilization 0.90 "

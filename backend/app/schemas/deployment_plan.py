@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from app.schemas.base import BaseSchema
@@ -22,8 +23,17 @@ class DeploymentPlanStep(BaseSchema):
     stage: str
     command: str | None = None
     required: bool = True
+    status: str = "PENDING"
+    risk: str = "low"
+    auto_eligible: bool = False
+    recommended: bool = False
     expected: str | None = None
     notes: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    stdout_tail: str = ""
+    stderr_tail: str = ""
+    error: str | None = None
 
 
 class DeploymentPlanResponse(BaseSchema):
@@ -34,3 +44,63 @@ class DeploymentPlanResponse(BaseSchema):
     blockers: list[str]
     steps: list[DeploymentPlanStep]
     recommendation: LaunchRecommendation
+
+
+class DeploymentRunRequest(DeploymentPlanRequest):
+    auto_setup_mode: str | None = None
+    force: bool = False
+    health_timeout_seconds: int = 180
+    command_timeout_seconds: int = 1800
+
+
+class DeploymentRunStartResponse(BaseSchema):
+    task_run_id: UUID
+    model_run_id: UUID
+    status: str
+
+
+class DeploymentRunStatusResponse(BaseSchema):
+    task_run_id: UUID
+    model_run_id: UUID | None = None
+    status: str
+    error_summary: str | None = None
+    runtime_mode: str | None = None
+    auto_setup_mode: str | None = None
+    cancel_requested: bool = False
+    steps: list[DeploymentPlanStep]
+
+
+class PipelineStepRequest(BaseSchema):
+    session_id: UUID
+    server_id: UUID
+
+
+class PipelineDownloadModelRequest(PipelineStepRequest):
+    model_id: UUID
+    quant_id: UUID
+
+
+class PipelineModelFlags(BaseSchema):
+    enable_tools: bool = False
+    tool_call_parser: str | None = None
+    enable_thinking: bool = False
+    reasoning_parser: str | None = None
+    max_model_len: int | None = None
+    gpu_memory_utilization: float = 0.9
+    dtype: str = "auto"
+    tensor_parallel_size: int = 1
+    enable_chunked_prefill: bool = False
+    trust_remote_code: bool = False
+    extra_flags: str = ""
+    remote_port: int = 8000
+
+
+class PipelineRunModelRequest(PipelineStepRequest):
+    model_id: UUID
+    quant_id: UUID
+    flags: PipelineModelFlags = PipelineModelFlags()
+
+
+class PipelineStartResponse(BaseSchema):
+    task_run_id: UUID
+    status: str
