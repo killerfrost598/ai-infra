@@ -10,7 +10,13 @@ from app.services.settings_service import CLORE_FILTER_KEYS, KNOWN_KEYS, get_set
 
 router = APIRouter()
 
-_FILTERED_CACHE_KEYS = ("clore:offers:filtered", "clore:offers:meta")
+_FILTERED_CACHE_KEYS = (
+    "clore:offers:filtered",
+    "clore:offers:meta",
+    "clore:offers:filtered:v2",
+    "clore:offers:groups:v2",
+    "clore:offers:meta:v2",
+)
 _SECRET_KEYS = SECRET_SETTING_KEYS
 
 

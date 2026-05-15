@@ -10,6 +10,7 @@ import {
   FlaskConical,
   LayoutDashboard,
   Layers,
+  MessageSquare,
   Monitor,
   Moon,
   ScanSearch,
@@ -40,6 +41,7 @@ import {
 const NAV_ITEMS = [
   { href: "/",                       label: "Overview",    icon: LayoutDashboard },
   { href: "/servers",                label: "Servers",     icon: Server },
+  { href: "/chat",                   label: "Chat",        icon: MessageSquare },
   { href: "/deployments",            label: "Deployments", icon: Layers },
   { href: "/playbooks",              label: "Playbooks",   icon: BookOpen },
   { href: "/clore",                  label: "Clore",       icon: Monitor },

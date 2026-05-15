@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     playbooks_git_repo: str = ""
     playbooks_git_branch: str = "main"
     logs_base_path: str = "/var/log/inferix"
+    inference_proxy_public_base_url: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

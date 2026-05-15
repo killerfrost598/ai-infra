@@ -223,6 +223,100 @@ def _sdk_to_offer(s: Any) -> CloreOffer:
     )
 
 
+def _nested_float(raw: dict, path: tuple[str, ...]) -> float:
+    current: Any = raw
+    for segment in path:
+        if not isinstance(current, dict):
+            return 0.0
+        current = current.get(segment)
+    return _to_float(current)
+
+
+def _raw_marketplace_to_offer(raw: dict) -> CloreOffer:
+    """Map the public /marketplace JSON shape to our CloreOffer schema."""
+    from app.services.gpu_name_parser import is_mixed_rig, parse_gpu_name
+
+    specs = raw.get("specs") if isinstance(raw.get("specs"), dict) else {}
+    raw_model = str(specs.get("gpu") or raw.get("gpu_model") or "Unknown")
+    gpu_name = re.sub(r"^\d+[xX]\s+", "", raw_model).strip() or raw_model
+
+    raw_gpu_array = raw.get("gpu_array") or []
+    gpu_array: list[str] = []
+    if isinstance(raw_gpu_array, str):
+        gpu_array = [part.strip() for part in raw_gpu_array.split(",") if part.strip()]
+    elif isinstance(raw_gpu_array, list):
+        gpu_array = [str(item).strip() for item in raw_gpu_array if str(item).strip()]
+
+    count_match = re.match(r"^(\d+)[xX]\s+", raw_model)
+    gpu_count = int(count_match.group(1)) if count_match else max(1, len(gpu_array) or 1)
+
+    price = raw.get("price") if isinstance(raw.get("price"), dict) else {}
+    price_per_day = (
+        _nested_float(price, ("usd", "on_demand_usd"))
+        or _nested_float(price, ("usd", "on_demand_clore"))
+        or _nested_float(price, ("original_usd", "CLORE-Blockchain", "on_demand"))
+        or _nested_float(price, ("original_usd", "USD-Blockchain", "on_demand"))
+        or _nested_float(price, ("on_demand", "USD-Blockchain"))
+        or 0.0
+    )
+    spot_price = (
+        _nested_float(price, ("usd", "spot"))
+        or _nested_float(price, ("original_usd", "CLORE-Blockchain", "spot"))
+        or _nested_float(price, ("original_usd", "USD-Blockchain", "spot"))
+        or _nested_float(price, ("spot", "USD-Blockchain"))
+        or None
+    )
+
+    net = specs.get("net") if isinstance(specs.get("net"), dict) else {}
+    disk_gb = None
+    disk_str = specs.get("disk")
+    if isinstance(disk_str, str):
+        matches = re.findall(r"(\d+\.?\d*)\s*GB", disk_str, re.IGNORECASE)
+        disk_gb = int(float(matches[-1])) if matches else None
+
+    ram_raw = specs.get("ram")
+    ram_gb = int(float(ram_raw)) if ram_raw is not None else None
+
+    allowed_raw = raw.get("allowed_coins") or []
+    allowed_coins = allowed_raw if isinstance(allowed_raw, list) else str(allowed_raw).split()
+
+    if is_mixed_rig(gpu_array):
+        gpu_vendor = gpu_family = gpu_variant = gpu_cc = None
+    else:
+        from app.services.gpu_name_parser import cc_lookup
+
+        parsed = parse_gpu_name(gpu_name)
+        gpu_vendor = parsed.vendor
+        gpu_family = parsed.family
+        gpu_variant = parsed.variant
+        gpu_cc = cc_lookup(gpu_name)
+
+    return CloreOffer(
+        id=str(raw.get("id")),
+        gpu_name=gpu_name,
+        gpu_count=gpu_count,
+        gpu_array=gpu_array,
+        vram_gb=int(_to_float(specs.get("gpuram"))),
+        cuda_version=str(raw.get("cuda_version")) if raw.get("cuda_version") is not None else None,
+        price_per_day=price_per_day,
+        spot_price_per_day=spot_price if spot_price and spot_price > 0 else None,
+        upload_mbps=(_to_float(net.get("up")) or None) if net else None,
+        download_mbps=(_to_float(net.get("down")) or None) if net else None,
+        cpu_model=str(specs.get("cpu")) if specs.get("cpu") is not None else None,
+        ram_gb=ram_gb,
+        disk_gb=disk_gb,
+        pcie_version=str(specs.get("pcie_rev")) if specs.get("pcie_rev") is not None else None,
+        pcie_width=int(specs["pcie_width"]) if specs.get("pcie_width") is not None else None,
+        allowed_coins=allowed_coins,
+        score=_to_float(raw.get("reliability")) or None,
+        mrl=int(raw["mrl"]) if raw.get("mrl") is not None else None,
+        gpu_vendor=gpu_vendor,
+        gpu_family=gpu_family,
+        gpu_variant=gpu_variant,
+        gpu_cc=gpu_cc,
+    )
+
+
 def _raw_order_to_server(raw: dict) -> CloreServer:
     """Parse a raw my_orders API dict into CloreServer.
 
@@ -344,16 +438,17 @@ class CloreClient:
     incompatible with the real API response shapes).
     """
 
-    def __init__(self, api_key: str) -> None:
-        if not _SDK_AVAILABLE:
-            raise RuntimeError(
-                "clore-ai SDK not installed — run: pip install clore-ai"
-            )
-        self._sdk: Any = _CloreAISDK(api_key=api_key)
-        self._api_key = api_key
+    def __init__(self, api_key: str | None = None) -> None:
+        self._api_key = (api_key or "").strip()
+        self._sdk: Any | None = None
+        if _SDK_AVAILABLE and self._api_key:
+            self._sdk = _CloreAISDK(api_key=self._api_key)
+        headers = {"User-Agent": "Inferix/0.1"}
+        if self._api_key:
+            headers["auth"] = self._api_key
         self._http = httpx.Client(
             base_url=_CLORE_API_BASE,
-            headers={"auth": api_key},
+            headers=headers,
             timeout=30.0,
         )
 
@@ -377,12 +472,28 @@ class CloreClient:
 
     def list_offers(self, gpu_name: str | None = None) -> list[CloreOffer]:
         """List available GPU marketplace offers."""
+        if self._sdk is not None:
+            try:
+                kwargs: dict[str, Any] = {}
+                if gpu_name:
+                    kwargs["gpu"] = gpu_name
+                servers = self._sdk.marketplace(**kwargs)
+                return [_sdk_to_offer(s) for s in (servers or [])]
+            except Exception:
+                logger.exception("Clore SDK marketplace failed; falling back to public API")
+
         try:
-            kwargs: dict[str, Any] = {}
+            result = self._raw_get("marketplace")
+            servers = result.get("servers") or []
+            offers = [
+                _raw_marketplace_to_offer(server)
+                for server in servers
+                if isinstance(server, dict) and not server.get("rented")
+            ]
             if gpu_name:
-                kwargs["gpu"] = gpu_name
-            servers = self._sdk.marketplace(**kwargs)
-            return [_sdk_to_offer(s) for s in (servers or [])]
+                needle = gpu_name.lower()
+                offers = [offer for offer in offers if needle in offer.gpu_name.lower()]
+            return offers
         except Exception as exc:
             raise RuntimeError(f"Failed to list Clore.ai offers: {exc}") from exc
 
@@ -507,6 +618,8 @@ class CloreClient:
 
     def get_balance(self) -> CloreBalance:
         """Return wallet balances for the authenticated Clore.ai account."""
+        if self._sdk is None:
+            raise RuntimeError("Clore API key and clore-ai SDK are required for wallet balance")
         try:
             wallets = self._sdk.wallets()
             balances: list[dict] = []
@@ -525,6 +638,8 @@ class CloreClient:
 
     def terminate_rental(self, rental_id: str) -> bool:
         """Terminate a rental."""
+        if self._sdk is None:
+            raise RuntimeError("Clore API key and clore-ai SDK are required to terminate rentals")
         try:
             self._sdk.cancel_order(order_id=int(rental_id))
             return True

@@ -1,5 +1,6 @@
-from app.models.entities import Model, ModelQuant, Server, ServerStatus
+from app.models.entities import InferenceProxyRoute, Model, ModelQuant, Server, ServerStatus
 from app.services.lab_state import (
+    clear_active_model,
     lab_state_response,
     mark_active_model,
     mark_launch_failure,
@@ -89,3 +90,26 @@ def test_lab_state_persists_readiness_cache_active_and_failure(db):
     assert state.active_model.port == 8000
     assert state.last_failure_kind == "cuda_oom"
     assert state.last_failure_diagnosis[0].issue_id == "cuda_oom"
+
+
+def test_mark_active_model_registers_proxy_route_and_clear_deactivates(db):
+    server, model, quant = _fixtures(db)
+
+    mark_active_model(
+        db,
+        server_id=server.id,
+        model_id=model.id,
+        quant_id=quant.id,
+        repo_id="test/model-fp8",
+        port=8001,
+        profile={"max_model_len": 2048},
+    )
+
+    route = db.query(InferenceProxyRoute).filter(InferenceProxyRoute.server_id == server.id).one()
+    assert route.status == "active"
+    assert route.model_name == "test/model-fp8"
+    assert route.target_base_url == "http://127.0.0.1:8001/v1"
+
+    clear_active_model(db, server.id)
+    db.refresh(route)
+    assert route.status == "inactive"

@@ -6,10 +6,11 @@ import logging
 import json
 import os
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models.entities import PlatformSetting
+from app.models.entities import Model, PlatformSetting
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,8 @@ KNOWN_KEYS: tuple[str, ...] = (
     "clore_min_ul_mbps",
     "clore_min_cuda",
     "clore_min_vram_gb",
+    "clore_gpu_query",
+    "clore_max_price_per_day",
     # Models knowledge base
     "default_seed_models",       # newline-separated HF repo IDs to auto-seed on first run
     "excluded_quant_formats",    # comma/newline-separated quant formats to hide globally
@@ -57,6 +60,8 @@ CLORE_FILTER_KEYS: frozenset[str] = frozenset({
     "clore_min_ul_mbps",
     "clore_min_cuda",
     "clore_min_vram_gb",
+    "clore_gpu_query",
+    "clore_max_price_per_day",
 })
 
 # Environment variable names used as fallback when a key is absent from the DB.
@@ -90,6 +95,164 @@ def get_setting(key: str, db: Session) -> str | None:
         if value and value != "replace_me":
             return value
     return None
+
+
+_BOOTSTRAP_SENTINEL_KEY = "_default_env_bootstrapped_at"
+
+_DEFAULT_FILTER_ALIASES: dict[str, str] = {
+    "pcie_gen": "clore_min_pcie_gen",
+    "min_pcie_gen": "clore_min_pcie_gen",
+    "clore_min_pcie_gen": "clore_min_pcie_gen",
+    "pcie_width": "clore_min_pcie_width",
+    "min_pcie_width": "clore_min_pcie_width",
+    "clore_min_pcie_width": "clore_min_pcie_width",
+    "disk": "clore_min_disk_gb",
+    "disk_gb": "clore_min_disk_gb",
+    "min_disk_gb": "clore_min_disk_gb",
+    "clore_min_disk_gb": "clore_min_disk_gb",
+    "download": "clore_min_dl_mbps",
+    "download_mbps": "clore_min_dl_mbps",
+    "dl_mbps": "clore_min_dl_mbps",
+    "bandwidth_down": "clore_min_dl_mbps",
+    "min_download_mbps": "clore_min_dl_mbps",
+    "min_dl_mbps": "clore_min_dl_mbps",
+    "clore_min_dl_mbps": "clore_min_dl_mbps",
+    "upload": "clore_min_ul_mbps",
+    "upload_mbps": "clore_min_ul_mbps",
+    "ul_mbps": "clore_min_ul_mbps",
+    "bandwidth_up": "clore_min_ul_mbps",
+    "min_upload_mbps": "clore_min_ul_mbps",
+    "min_ul_mbps": "clore_min_ul_mbps",
+    "clore_min_ul_mbps": "clore_min_ul_mbps",
+    "cuda": "clore_min_cuda",
+    "min_cuda": "clore_min_cuda",
+    "clore_min_cuda": "clore_min_cuda",
+    "vram": "clore_min_vram_gb",
+    "vram_gb": "clore_min_vram_gb",
+    "min_vram_gb": "clore_min_vram_gb",
+    "clore_min_vram_gb": "clore_min_vram_gb",
+    "gpu": "clore_gpu_query",
+    "gpu_query": "clore_gpu_query",
+    "clore_gpu_query": "clore_gpu_query",
+    "price": "clore_max_price_per_day",
+    "max_price": "clore_max_price_per_day",
+    "max_price_per_day": "clore_max_price_per_day",
+    "clore_max_price_per_day": "clore_max_price_per_day",
+}
+
+
+def _parse_structured_defaults(raw: str) -> dict[str, Any]:
+    raw = raw.strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+
+    result: dict[str, str] = {}
+    for token in raw.replace(";", ",").split(","):
+        if not token.strip() or "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
+def _normalize_default_filter_value(key: str, value: Any) -> str | None:
+    if value is None:
+        return None
+    if key == "clore_gpu_query":
+        text = str(value).strip()
+        return text or None
+    if key == "clore_min_cuda":
+        text = str(value).strip()
+        return text or None
+
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric < 0:
+        return None
+    if key in {"clore_min_dl_mbps", "clore_min_ul_mbps"}:
+        numeric = min(numeric, 3000)
+    if key == "clore_max_price_per_day":
+        return str(round(numeric, 4))
+    return str(int(numeric))
+
+
+def _upsert_if_missing(db: Session, key: str, value: str) -> bool:
+    existing = db.query(PlatformSetting).filter(PlatformSetting.key == key).first()
+    if existing:
+        return False
+    db.add(PlatformSetting(key=key, value=value))
+    return True
+
+
+def bootstrap_defaults_from_env(db: Session) -> dict[str, object]:
+    """Seed first-boot defaults from Docker env vars without overwriting users.
+
+    The sentinel is intentionally internal, so these env vars behave as one-time
+    bootstrapping inputs instead of runtime fallbacks.
+    """
+    if db.query(PlatformSetting).filter(PlatformSetting.key == _BOOTSTRAP_SENTINEL_KEY).first():
+        return {"bootstrapped": False, "reason": "already_bootstrapped"}
+
+    changed: list[str] = []
+    raw_seed_models = os.environ.get("DEFAULT_SEED_MODELS", "").strip()
+    if raw_seed_models:
+        repos = [
+            token.strip()
+            for token in raw_seed_models.replace("\n", ",").split(",")
+            if token.strip() and "/" in token.strip()
+        ]
+        if repos and _upsert_if_missing(db, "default_seed_models", "\n".join(repos)):
+            changed.append("default_seed_models")
+
+    raw_excluded = os.environ.get("DEFAULT_EXCLUDED_QUANT_FORMATS", "").strip()
+    if raw_excluded:
+        formats = sorted(
+            {
+                token.strip().lower()
+                for token in raw_excluded.replace("\n", ",").split(",")
+                if token.strip().lower() in _VALID_QUANT_FORMATS
+            }
+        )
+        if formats and _upsert_if_missing(db, "excluded_quant_formats", ",".join(formats)):
+            changed.append("excluded_quant_formats")
+
+    raw_filters = os.environ.get("DEFAULT_GLOBAL_FILTERS", "").strip()
+    if raw_filters:
+        for raw_key, raw_value in _parse_structured_defaults(raw_filters).items():
+            key = _DEFAULT_FILTER_ALIASES.get(str(raw_key).strip().lower())
+            if not key:
+                continue
+            value = _normalize_default_filter_value(key, raw_value)
+            if value and _upsert_if_missing(db, key, value):
+                changed.append(key)
+
+    db.add(PlatformSetting(key=_BOOTSTRAP_SENTINEL_KEY, value=datetime.now(timezone.utc).isoformat()))
+    db.commit()
+
+    queued: list[str] = []
+    repos = get_default_seed_models(db)
+    if repos:
+        try:
+            from app.workers.tasks import seed_model_from_hf
+
+            existing = {row[0] for row in db.query(Model.model_key).filter(Model.model_key.in_(repos)).all()}
+            for repo_id in repos:
+                if repo_id in existing:
+                    continue
+                seed_model_from_hf.delay(repo_id)
+                queued.append(repo_id)
+        except Exception:
+            logger.exception("Failed to queue DEFAULT_SEED_MODELS tasks")
+
+    return {"bootstrapped": True, "settings": changed, "queued_seed_models": queued}
 
 
 _VALID_QUANT_FORMATS: frozenset[str] = frozenset({

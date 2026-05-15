@@ -544,6 +544,75 @@ class LabServerState(Base):
     )
 
 
+class InferenceProxyRoute(Base):
+    __tablename__ = "inference_proxy_routes"
+    __table_args__ = (
+        UniqueConstraint("route_slug", name="uq_inference_proxy_routes_route_slug"),
+        Index("ix_inference_proxy_routes_server_status", "server_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    route_slug: Mapped[str] = mapped_column(String(96), nullable=False)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    model_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("models.id", ondelete="SET NULL"), nullable=True
+    )
+    quant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_quants.id", ondelete="SET NULL"), nullable=True
+    )
+    model_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_run_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    model_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_base_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    remote_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    hourly_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class InferenceProxyMetric(Base):
+    __tablename__ = "inference_proxy_metrics"
+    __table_args__ = (
+        Index("ix_inference_proxy_metrics_route_created", "route_id", "created_at"),
+        Index("ix_inference_proxy_metrics_server_created", "server_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    route_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inference_proxy_routes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    server_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    model_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_run_attempts.id", ondelete="SET NULL"), nullable=True
+    )
+    category: Mapped[str] = mapped_column(String(32), nullable=False, default="chat")
+    method: Mapped[str] = mapped_column(String(16), nullable=False)
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    ttft_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_per_second: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    effectiveness_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class LabModelCache(Base):
     __tablename__ = "lab_model_caches"
     __table_args__ = (

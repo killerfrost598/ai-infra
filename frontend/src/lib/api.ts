@@ -32,6 +32,8 @@ import type {
   FeasibilityRequest,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
+  InferenceProxyMetricResponse,
+  InferenceProxyRoutesResponse,
   LabBenchmarkActiveResponse,
   LabChatRequest,
   LabChatResponse,
@@ -598,5 +600,15 @@ export const api = {
       apiFetch<{ cancelled: boolean }>(`/api/v1/model-downloads/${downloadId}/cancel`, {
         method: "POST",
       }),
+  },
+
+  inference: {
+    routes: () => apiFetch<InferenceProxyRoutesResponse>("/api/v1/inference/routes"),
+    metrics: (serverId?: string) =>
+      apiFetch<InferenceProxyMetricResponse>(
+        `/api/v1/inference/metrics${serverId ? `?server_id=${encodeURIComponent(serverId)}` : ""}`,
+      ),
+    proxyUrl: (routeSlug: string, path = "chat/completions") =>
+      `${BASE_URL}${withInferixApiKey(`/api/v1/inference/${encodeURIComponent(routeSlug)}/v1/${path}`)}`,
   },
 };

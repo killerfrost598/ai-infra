@@ -25,6 +25,29 @@ export const keys = {
   labSession: (id: string) => ["lab-session", id] as const,
   deploymentRun: (taskRunId?: string) => ["lab", "deployment-run", taskRunId ?? ""] as const,
   agentRun: (taskRunId?: string) => ["lab", "agent-run", taskRunId ?? ""] as const,
+  inferenceRoutes: () => ["inference", "routes"] as const,
+  inferenceMetrics: (serverId?: string) => ["inference", "metrics", serverId ?? ""] as const,
+}
+
+const GLOBAL_FILTER_SETTING_KEYS = new Set([
+  "clore_min_pcie_gen",
+  "clore_min_pcie_width",
+  "clore_min_disk_gb",
+  "clore_min_dl_mbps",
+  "clore_min_ul_mbps",
+  "clore_min_cuda",
+  "clore_min_vram_gb",
+  "clore_gpu_query",
+  "clore_max_price_per_day",
+  "excluded_quant_formats",
+])
+
+function invalidateSettingDependents(qc: ReturnType<typeof useQueryClient>, settingKey: string) {
+  qc.invalidateQueries({ queryKey: keys.settings() })
+  if (!GLOBAL_FILTER_SETTING_KEYS.has(settingKey)) return
+  qc.invalidateQueries({ queryKey: keys.cloreOffers() })
+  qc.invalidateQueries({ queryKey: ["models"] })
+  qc.invalidateQueries({ queryKey: ["model-catalogue"] })
 }
 
 // ─── Query Hooks ─────────────────────────────────────────────────────────────
@@ -118,6 +141,22 @@ export function useSettings() {
   return useQuery({
     queryKey: keys.settings(),
     queryFn: () => api.settings.list(),
+  })
+}
+
+export function useInferenceRoutes() {
+  return useQuery({
+    queryKey: keys.inferenceRoutes(),
+    queryFn: () => api.inference.routes(),
+    refetchInterval: 10_000,
+  })
+}
+
+export function useInferenceMetrics(serverId?: string) {
+  return useQuery({
+    queryKey: keys.inferenceMetrics(serverId),
+    queryFn: () => api.inference.metrics(serverId),
+    refetchInterval: 10_000,
   })
 }
 
@@ -259,7 +298,7 @@ export function useSaveSetting() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) => api.settings.set(key, value),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.settings() }),
+    onSuccess: (_data, vars) => invalidateSettingDependents(qc, vars.key),
     onError: (e: Error) => toast.error(e.message),
   })
 }
@@ -268,7 +307,7 @@ export function useDeleteSetting() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (key: string) => api.settings.delete(key),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.settings() }),
+    onSuccess: (_data, key) => invalidateSettingDependents(qc, key),
     onError: (e: Error) => toast.error(e.message),
   })
 }

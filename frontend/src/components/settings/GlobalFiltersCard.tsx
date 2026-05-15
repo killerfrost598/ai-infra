@@ -33,12 +33,14 @@ const CLORE_FILTERS = [
     key: "clore_min_dl_mbps",
     label: "Min Download (Mbps)",
     placeholder: "e.g. 500",
+    max: 3000,
     tip: "Exclude servers with download bandwidth below this threshold. Low bandwidth makes model pulls painfully slow.",
   },
   {
     key: "clore_min_ul_mbps",
     label: "Min Upload (Mbps)",
     placeholder: "e.g. 200",
+    max: 3000,
     tip: "Exclude servers with upload bandwidth below this threshold.",
   },
   {
@@ -101,12 +103,14 @@ function FilterRow({
   label,
   placeholder,
   tip,
+  max,
   currentValue,
 }: {
   filterKey: string;
   label: string;
   placeholder: string;
   tip: string;
+  max?: number;
   currentValue: string | null | undefined;
 }) {
   const saveSetting = useSaveSetting();
@@ -114,8 +118,12 @@ function FilterRow({
   const [input, setInput] = useState("");
 
   function handleSet() {
-    const v = input.trim();
+    let v = input.trim();
     if (!v) return;
+    if (max != null) {
+      const numeric = Math.min(max, Math.max(0, Number(v) || 0));
+      v = String(numeric);
+    }
     saveSetting.mutate({ key: filterKey, value: v }, { onSuccess: () => setInput("") });
   }
 
@@ -223,6 +231,7 @@ export function GlobalFiltersCard() {
               label={f.label}
               placeholder={f.placeholder}
               tip={f.tip}
+              max={"max" in f ? f.max : undefined}
               currentValue={getVal(f.key)}
             />
           ))}

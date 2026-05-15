@@ -43,8 +43,8 @@ export function GpuFinderPanel() {
   const { data: offersData, isLoading: loadingOffers } = useCloreOffers();
   const refreshMutation = useRefreshCloreOffers();
   const offers = offersData?.offers;
-  const groups = offersData?.groups ?? [];
-  const models = catalogue?.models ?? [];
+  const groups = useMemo(() => offersData?.groups ?? [], [offersData?.groups]);
+  const models = useMemo(() => catalogue?.models ?? [], [catalogue?.models]);
 
   const [formState, setFormState] = useState<GpuFinderFormState>(() => ({
     modelId: "",
@@ -69,6 +69,7 @@ export function GpuFinderPanel() {
   const [rentTarget, setRentTarget] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
+  const [authPrompt, setAuthPrompt] = useState<string | null>(null);
 
   function switchViewMode(mode: ViewMode) {
     setViewMode(mode);
@@ -116,18 +117,17 @@ export function GpuFinderPanel() {
   const okCount          = rankResult?.ranked.filter((r) => r.bucket === "ok").length ?? 0;
   const tightCount       = rankResult?.ranked.filter((r) => r.bucket === "tight").length ?? 0;
 
-  const baseRanked: RankedOffer[] = bucketFilter
-    ? rankResult?.ranked.filter((r) => r.bucket === bucketFilter) ?? []
-    : rankResult?.ranked ?? [];
-
   const filteredRanked: RankedOffer[] = useMemo(() => {
+    const baseRanked = bucketFilter
+      ? rankResult?.ranked.filter((r) => r.bucket === bucketFilter) ?? []
+      : rankResult?.ranked ?? [];
     if (sortKey === "rank") return baseRanked;
     return [...baseRanked].sort((a, b) =>
       sortKey === "price_asc"
         ? a.offer.price_per_day - b.offer.price_per_day
         : b.offer.price_per_day - a.offer.price_per_day,
     );
-  }, [baseRanked, sortKey]);
+  }, [bucketFilter, rankResult?.ranked, sortKey]);
 
   const displayedRanked = filteredRanked.slice(0, visibleCount);
   const hasMore = filteredRanked.length > visibleCount;
@@ -176,6 +176,11 @@ export function GpuFinderPanel() {
   }, [rankResult, bucketFilter]);
 
   function openRent(offer: CloreOffer) {
+    if (!offersData?.meta?.authenticated) {
+      setAuthPrompt("Set your Clore API key in Settings to enable this action.");
+      return;
+    }
+    setAuthPrompt(null);
     setRentTarget(offer);
   }
 
@@ -321,8 +326,14 @@ export function GpuFinderPanel() {
         {!loadingOffers && !loadingCatalogue && !offers?.length && (
           <EmptyState
             title="No marketplace data"
-            body="Could not load Clore.ai offers. Check your API key in Settings."
+            body="Could not load public Clore.ai offers."
           />
+        )}
+
+        {authPrompt && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+            <p className="text-sm text-amber-700 dark:text-amber-300">{authPrompt}</p>
+          </div>
         )}
 
         {/* ── Empty: no offers pass config ── */}
@@ -465,7 +476,7 @@ export function GpuFinderPanel() {
         onOpenChange={setAdvisorOpen}
         onDeployRequested={() => {
           setAdvisorOpen(false);
-          if (advisorOffer) setRentTarget(advisorOffer);
+          if (advisorOffer) openRent(advisorOffer);
         }}
       />
     </div>

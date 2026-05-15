@@ -278,9 +278,17 @@ export function GpuFinderForm({ models, state, onChange }: Props) {
             <Input
               type="number"
               min={0}
+              max={3000}
               placeholder="any"
               value={state.minDownloadMbps}
-              onChange={(e) => set("minDownloadMbps", e.target.value)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (!raw) {
+                  set("minDownloadMbps", "");
+                  return;
+                }
+                set("minDownloadMbps", String(Math.min(3000, Math.max(0, Number(raw) || 0))));
+              }}
               className="h-8 text-xs"
             />
           </div>

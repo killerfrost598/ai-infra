@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowRight, KeyRound, Plus, Server as ServerIcon, Terminal, Trash2, Wifi } from "lucide-react";
+import { Activity, ArrowRight, KeyRound, Plus, Server as ServerIcon, Terminal, Trash2, Wifi } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   keys,
@@ -17,8 +17,9 @@ import {
   useDeleteServer,
   useCreateSession,
   useEndCloreRental,
+  useInferenceMetrics,
 } from "@/lib/queries";
-import type { CloreRental, Server, ServerCreate, SSHTestResult } from "@/lib/types";
+import type { CloreRental, InferenceProxyMetricResponse, Server, ServerCreate, SSHTestResult } from "@/lib/types";
 import { cloreBillingLabels } from "@/lib/clore-billing";
 import { serverSchema, type ServerFormValues } from "@/lib/schemas";
 import { CloreAccountSummary } from "@/components/clore/CloreAccountSummary";
@@ -35,9 +36,10 @@ export default function ServersPage() {
   const { data: serversData, isLoading, error } = useServers();
   const { data: rentalsData } = useRentals();
   const { data: balanceData } = useCloreBalance();
-  const servers: Server[] = serversData?.items ?? [];
+  const { data: proxyMetrics } = useInferenceMetrics();
+  const servers: Server[] = useMemo(() => serversData?.items ?? [], [serversData?.items]);
   const total = serversData?.total ?? 0;
-  const rentals: CloreRental[] = rentalsData?.rentals ?? [];
+  const rentals: CloreRental[] = useMemo(() => rentalsData?.rentals ?? [], [rentalsData?.rentals]);
 
   const createServer = useCreateServer();
   const deleteServer = useDeleteServer();
@@ -248,6 +250,7 @@ export default function ServersPage() {
           <ServerMetric label="Provisioning" value={String(provisioningCount)} tone="amber" />
           <ServerMetric label="External" value={String(manualCount)} />
         </Card>
+        <ProxyUtilizationPanel metrics={proxyMetrics} />
       </div>
 
       {showForm && (
@@ -640,6 +643,47 @@ function RegisterRentalInline({
         <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
+  );
+}
+
+function ProxyUtilizationPanel({ metrics }: { metrics?: InferenceProxyMetricResponse }) {
+  const summary = metrics?.summary;
+  const cost = summary?.estimated_cost_usd_24h;
+  const efficiency = summary?.effectiveness_score_24h;
+
+  return (
+    <Card className="px-5 py-4 lg:col-span-2">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <Activity className="size-4 text-muted-foreground" />
+          <div>
+            <p className="text-sm font-semibold">Proxy utilization</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Request volume, latency, token throughput, and spend efficiency over the last 24 hours.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 text-right sm:grid-cols-5">
+          <CompactMetric label="Routes" value={String(metrics?.active_routes ?? 0)} />
+          <CompactMetric label="Req/min" value={String(summary?.requests_last_minute ?? 0)} />
+          <CompactMetric label="Tokens" value={String(summary?.total_tokens_24h ?? 0)} />
+          <CompactMetric label="TPS" value={summary?.avg_tokens_per_second_24h?.toFixed(1) ?? "-"} />
+          <CompactMetric
+            label="Efficiency"
+            value={efficiency == null ? (cost == null ? "-" : "0") : `${Math.round(efficiency)}/$`}
+          />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function CompactMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mt-1 font-mono text-lg font-semibold tabular-nums">{value}</p>
+    </div>
   );
 }
 

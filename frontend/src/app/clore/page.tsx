@@ -149,11 +149,12 @@ function MarketplaceTab() {
   const [sortAsc, setSortAsc] = useState(true);
   const [dialogOffer, setDialogOffer] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
+  const [authPrompt, setAuthPrompt] = useState<string | null>(null);
 
   const { data: offersData, isLoading, error } = useCloreOffers();
   const refreshMutation = useRefreshCloreOffers();
 
-  const offers: CloreOffer[] = offersData?.offers ?? [];
+  const offers: CloreOffer[] = useMemo(() => offersData?.offers ?? [], [offersData?.offers]);
 
   const filtered = useMemo(
     () => sortOffers(applyFilters(offers, filters), sortKey, sortAsc),
@@ -167,6 +168,16 @@ function MarketplaceTab() {
   function toggleSort(key: MarketplaceSortKey) {
     if (sortKey === key) setSortAsc((v) => !v);
     else { setSortKey(key); setSortAsc(SORT_DEFAULT_ASC[key]); }
+  }
+
+  function handleRent(offer: CloreOffer | null) {
+    if (!offer) return;
+    if (!offersData?.meta?.authenticated) {
+      setAuthPrompt("Set your Clore API key in Settings to enable this action.");
+      return;
+    }
+    setAuthPrompt(null);
+    setDialogOffer(offer);
   }
 
   const hasActiveFilters =
@@ -208,10 +219,10 @@ function MarketplaceTab() {
             </select>
           </FilterField>
           <FilterField label="Min upload (Mbps)">
-            <NumInput value={filters.minUpload} onChange={(v) => setFilter("minUpload", v)} min={0} step={100} />
+            <NumInput value={filters.minUpload} onChange={(v) => setFilter("minUpload", v)} min={0} max={3000} step={100} />
           </FilterField>
           <FilterField label="Min download (Mbps)">
-            <NumInput value={filters.minDownload} onChange={(v) => setFilter("minDownload", v)} min={0} step={100} />
+            <NumInput value={filters.minDownload} onChange={(v) => setFilter("minDownload", v)} min={0} max={3000} step={100} />
           </FilterField>
         </div>
         <div className="flex items-center gap-1 pt-1 border-t border-border/40">
@@ -238,10 +249,15 @@ function MarketplaceTab() {
 
       {error && <ErrorState message={error.message} />}
       {isLoading && <LoadingState text="Loading offers…" />}
+      {authPrompt && (
+        <Card className="border-amber-500/30 bg-amber-500/5 px-4 py-3">
+          <p className="text-sm text-amber-700 dark:text-amber-300">{authPrompt}</p>
+        </Card>
+      )}
       {!isLoading && !error && offers.length === 0 && (
         <Card className="px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">No offers found.</p>
-          <p className="mt-1 text-xs text-muted-foreground/60">Check that the Clore API key is configured in Settings.</p>
+          <p className="mt-1 text-xs text-muted-foreground/60">Public Clore marketplace returned no available listings.</p>
         </Card>
       )}
       {!isLoading && !error && offers.length > 0 && filtered.length === 0 && (
@@ -262,7 +278,7 @@ function MarketplaceTab() {
           <OfferCard
             key={offer.id}
             offer={offer}
-            onRent={() => setDialogOffer(offer)}
+            onRent={() => handleRent(offer)}
             onAdvise={() => setAdvisorOffer(offer)}
           />
         ))}
@@ -274,7 +290,7 @@ function MarketplaceTab() {
         offer={advisorOffer}
         open={!!advisorOffer}
         onOpenChange={(o) => { if (!o) setAdvisorOffer(null); }}
-        onDeployRequested={() => { setDialogOffer(advisorOffer); setAdvisorOffer(null); }}
+        onDeployRequested={() => { handleRent(advisorOffer); setAdvisorOffer(null); }}
       />
     </>
   );
@@ -287,8 +303,8 @@ type GroupSortKey = "price" | "count" | "upload" | "download";
 function GpuGroupsTab() {
   const { data, isLoading, error } = useCloreOffers();
   const refreshMutation = useRefreshCloreOffers();
-  const offers: CloreOffer[] = data?.offers ?? [];
-  const groups: CloreOfferGroup[] = data?.groups ?? [];
+  const offers: CloreOffer[] = useMemo(() => data?.offers ?? [], [data?.offers]);
+  const groups: CloreOfferGroup[] = useMemo(() => data?.groups ?? [], [data?.groups]);
 
   const offerMap = useMemo(() => new Map(offers.map((o) => [o.id, o])), [offers]);
 
@@ -296,6 +312,7 @@ function GpuGroupsTab() {
   const [archFilter, setArchFilter] = useState<string | null>(null);
   const [rentDialogOffer, setRentDialogOffer] = useState<CloreOffer | null>(null);
   const [advisorOffer, setAdvisorOffer] = useState<CloreOffer | null>(null);
+  const [authPrompt, setAuthPrompt] = useState<string | null>(null);
 
   const archOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -306,6 +323,16 @@ function GpuGroupsTab() {
   }, [groups]);
 
   const filteredGroups = archFilter ? groups.filter((g) => g.arch === archFilter) : groups;
+
+  function handleRent(offer: CloreOffer | null) {
+    if (!offer) return;
+    if (!data?.meta?.authenticated) {
+      setAuthPrompt("Set your Clore API key in Settings to enable this action.");
+      return;
+    }
+    setAuthPrompt(null);
+    setRentDialogOffer(offer);
+  }
 
   return (
     <>
@@ -320,6 +347,11 @@ function GpuGroupsTab() {
           isRefreshing={refreshMutation.isPending}
           onRefresh={() => refreshMutation.mutate()}
         />
+      )}
+      {authPrompt && (
+        <Card className="border-amber-500/30 bg-amber-500/5 px-4 py-3">
+          <p className="text-sm text-amber-700 dark:text-amber-300">{authPrompt}</p>
+        </Card>
       )}
 
       {/* Arch filter chip rail */}
@@ -370,7 +402,7 @@ function GpuGroupsTab() {
               <GroupDrawer
                 group={g}
                 offerMap={offerMap}
-                onRent={(o) => setRentDialogOffer(o)}
+                onRent={handleRent}
                 onAdvise={(o) => setAdvisorOffer(o)}
               />
             )}
@@ -384,7 +416,7 @@ function GpuGroupsTab() {
         offer={advisorOffer}
         open={!!advisorOffer}
         onOpenChange={(o) => { if (!o) setAdvisorOffer(null); }}
-        onDeployRequested={() => { setRentDialogOffer(advisorOffer); setAdvisorOffer(null); }}
+        onDeployRequested={() => { handleRent(advisorOffer); setAdvisorOffer(null); }}
       />
     </>
   );
@@ -538,8 +570,8 @@ function RentalsTab({ onRentClick }: { onRentClick: () => void }) {
   const { data: rentalsData, isLoading, error } = useRentals();
   const { data: serversData } = useServers(0, 100);
   const { data: balanceData } = useCloreBalance();
-  const rentals: CloreRental[] = rentalsData?.rentals ?? [];
-  const servers: Server[] = serversData?.items ?? [];
+  const rentals: CloreRental[] = useMemo(() => rentalsData?.rentals ?? [], [rentalsData?.rentals]);
+  const servers: Server[] = useMemo(() => serversData?.items ?? [], [serversData?.items]);
 
   const terminateRental = useTerminateRental();
   const createSession = useCreateSession();
@@ -688,12 +720,17 @@ function FilterField({ label, children }: { label: string; children: React.React
   );
 }
 
-function NumInput({ value, onChange, min = 0, step = 1, placeholder }: {
-  value: number; onChange: (v: number) => void; min?: number; step?: number; placeholder?: string;
+function NumInput({ value, onChange, min = 0, max, step = 1, placeholder }: {
+  value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; placeholder?: string;
 }) {
+  function parse(value: string): number {
+    const numeric = Number(value) || 0;
+    return Math.max(min, max == null ? numeric : Math.min(max, numeric));
+  }
+
   return (
-    <Input type="number" className="text-sm" value={value || ""} min={min} step={step}
+    <Input type="number" className="text-sm" value={value || ""} min={min} max={max} step={step}
       placeholder={placeholder ?? "0 = any"}
-      onChange={(e) => onChange(Number(e.target.value) || 0)} />
+      onChange={(e) => onChange(parse(e.target.value))} />
   );
 }

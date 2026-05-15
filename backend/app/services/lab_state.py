@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -20,6 +21,8 @@ from app.models.entities import (
 )
 from app.schemas.lab import LabActiveModelOut, LabKnownIssueMatch, LabModelCacheOut, LabStateResponse
 from app.services.lab_vllm import LAB_VLLM_HELP_NOTE, classify_vllm_failure, parse_vllm_help_flags
+
+logger = logging.getLogger(__name__)
 
 
 def utcnow() -> datetime:
@@ -141,6 +144,24 @@ def mark_active_model(
     state.last_failure_diagnosis_json = None
     db.commit()
     db.refresh(state)
+    try:
+        from app.services.inference_proxy import register_lab_route
+
+        register_lab_route(
+            db,
+            server_id=server_id,
+            model_id=model_id,
+            quant_id=quant_id,
+            repo_id=repo_id,
+            port=port,
+            profile=profile,
+            task_run_id=task_run_id,
+            model_run_id=model_run_id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to register inference proxy route for server %s", server_id)
     return state
 
 
@@ -150,6 +171,14 @@ def clear_active_model(db: Session, server_id: UUID) -> LabServerState:
     state.active_updated_at = utcnow()
     db.commit()
     db.refresh(state)
+    try:
+        from app.services.inference_proxy import deactivate_routes_for_server
+
+        deactivate_routes_for_server(db, server_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to deactivate inference proxy routes for server %s", server_id)
     return state
 
 

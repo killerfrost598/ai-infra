@@ -17,6 +17,7 @@ from app.api.v1.endpoints.servers import router as servers_router
 from app.api.v1.endpoints.settings import router as settings_router
 from app.api.v1.endpoints.task_runs import router as task_runs_router
 from app.api.v1.endpoints.model_downloads import router as model_downloads_router
+from app.api.v1.endpoints.inference_proxy import router as inference_proxy_router
 
 api_router = APIRouter()
 
@@ -37,3 +38,4 @@ api_router.include_router(model_runs_router, prefix="/model-runs", tags=["model-
 api_router.include_router(lab_router, prefix="/lab", tags=["lab"])
 api_router.include_router(run_reports_router, prefix="/run-reports", tags=["run-reports"])
 api_router.include_router(model_downloads_router, prefix="/model-downloads", tags=["model-downloads"])
+api_router.include_router(inference_proxy_router, prefix="/inference", tags=["inference"])

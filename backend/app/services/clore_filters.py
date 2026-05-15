@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class CloreFilters:
+    gpu_query: str | None = None
     min_pcie_gen: int | None = None
     min_pcie_width: int | None = None
     min_disk_gb: int | None = None
@@ -29,6 +30,7 @@ class CloreFilters:
     min_ul_mbps: int | None = None
     min_cuda: str | None = None
     min_vram_gb: int | None = None
+    max_price_per_day: float | None = None
 
 
 def load_clore_filters(db: Session) -> CloreFilters:
@@ -40,12 +42,26 @@ def load_clore_filters(db: Session) -> CloreFilters:
         if not val:
             return None
         try:
-            return int(val.strip())
+            parsed = int(float(val.strip()))
+            if key in {"clore_min_dl_mbps", "clore_min_ul_mbps"}:
+                return min(parsed, 3000)
+            return parsed
         except ValueError:
             logger.warning("clore filter %r has non-integer value %r — ignoring", key, val)
             return None
 
+    def _float(key: str) -> float | None:
+        val = get_setting(key, db)
+        if not val:
+            return None
+        try:
+            return float(val.strip())
+        except ValueError:
+            logger.warning("clore filter %r has non-float value %r — ignoring", key, val)
+            return None
+
     return CloreFilters(
+        gpu_query=get_setting("clore_gpu_query", db),
         min_pcie_gen=_int("clore_min_pcie_gen"),
         min_pcie_width=_int("clore_min_pcie_width"),
         min_disk_gb=_int("clore_min_disk_gb"),
@@ -53,6 +69,7 @@ def load_clore_filters(db: Session) -> CloreFilters:
         min_ul_mbps=_int("clore_min_ul_mbps"),
         min_cuda=get_setting("clore_min_cuda", db),
         min_vram_gb=_int("clore_min_vram_gb"),
+        max_price_per_day=_float("clore_max_price_per_day"),
     )
 
 
@@ -69,6 +86,16 @@ def apply_filters(
     """
     result = list(offers)
     applied: dict[str, int | float | str | None] = {}
+
+    if f.gpu_query:
+        needle = f.gpu_query.strip().lower()
+        if needle:
+            applied["gpu_query"] = f.gpu_query.strip()
+            result = [o for o in result if needle in o.gpu_name.lower()]
+
+    if f.max_price_per_day is not None:
+        applied["max_price_per_day"] = f.max_price_per_day
+        result = [o for o in result if o.price_per_day <= f.max_price_per_day]
 
     if f.min_pcie_gen is not None:
         applied["min_pcie_gen"] = f.min_pcie_gen

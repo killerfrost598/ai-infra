@@ -109,6 +109,20 @@ def test_min_ul_mbps():
     assert len(result) == 1
 
 
+def test_gpu_query_filters_by_name():
+    offers = [_offer(gpu_name="NVIDIA RTX 4090"), _offer(gpu_name="NVIDIA RTX 3090")]
+    result, applied = apply_filters(offers, CloreFilters(gpu_query="4090"))
+    assert [offer.gpu_name for offer in result] == ["NVIDIA RTX 4090"]
+    assert applied == {"gpu_query": "4090"}
+
+
+def test_max_price_per_day():
+    offers = [_offer(id="cheap", price_per_day=1.5), _offer(id="expensive", price_per_day=4.0)]
+    result, applied = apply_filters(offers, CloreFilters(max_price_per_day=2.0))
+    assert [offer.id for offer in result] == ["cheap"]
+    assert applied == {"max_price_per_day": 2.0}
+
+
 def test_min_cuda():
     offers = [
         _offer(cuda_version="12.4"),

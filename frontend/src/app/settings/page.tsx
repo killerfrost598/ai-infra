@@ -46,8 +46,8 @@ const FILTER_DEFS: FilterDef[] = [
   { key: "pcie_gen",   dbKey: "clore_min_pcie_gen",   label: "PCIe Gen",   unit: "",      min: 1,  max: 5,     step: 0.5, rec: 3,    seed: 8,  help: "PCIe < 3 creates GPU↔host bandwidth bottlenecks. Recommended: 3." },
   { key: "pcie_width", dbKey: "clore_min_pcie_width", label: "PCIe Width", unit: "x",    min: 1,  max: 16,    step: 1,   rec: 8,    seed: 12, help: "x8 is the minimum for reliable inference throughput." },
   { key: "disk_gb",    dbKey: "clore_min_disk_gb",    label: "Disk",       unit: " GB",  min: 20, max: 2000,  step: 10,  rec: 100,  seed: 4,  help: "100 GB is the practical minimum for a single large model." },
-  { key: "dl_mbps",    dbKey: "clore_min_dl_mbps",    label: "Download",   unit: " Mbps",min: 50, max: 10000, step: 50,  rec: 500,  seed: 7,  help: "Low bandwidth makes model pulls painfully slow." },
-  { key: "ul_mbps",    dbKey: "clore_min_ul_mbps",    label: "Upload",     unit: " Mbps",min: 50, max: 5000,  step: 50,  rec: 200,  seed: 9,  help: "Upload speed matters for distributed inference." },
+  { key: "dl_mbps",    dbKey: "clore_min_dl_mbps",    label: "Download",   unit: " Mbps",min: 50, max: 3000,  step: 50,  rec: 500,  seed: 7,  help: "Low bandwidth makes model pulls painfully slow." },
+  { key: "ul_mbps",    dbKey: "clore_min_ul_mbps",    label: "Upload",     unit: " Mbps",min: 50, max: 3000,  step: 50,  rec: 200,  seed: 9,  help: "Upload speed matters for distributed inference." },
   { key: "cuda",       dbKey: "clore_min_cuda",       label: "CUDA",       unit: "",     min: 11, max: 13,    step: 0.1, rec: 12.0, seed: 5,  help: "vLLM and SGLang require at least 11.8. Recommended: 12.0." },
   { key: "vram_gb",    dbKey: "clore_min_vram_gb",    label: "Total VRAM", unit: " GB",  min: 8,  max: 320,   step: 8,   rec: 24,   seed: 14, help: "Total VRAM = gpu_count × per_gpu_vram." },
 ];
@@ -76,7 +76,7 @@ interface SettingMeta {
 const SETTING_META: Record<string, SettingMeta> = {
   clore_api_key: {
     label: "Clore.ai API Key",
-    description: "Required to browse the GPU marketplace, rent servers, and manage rentals.",
+    description: "Required to view balances, rent servers, and manage rentals. Public marketplace browsing works without it.",
     placeholder: "Paste your Clore.ai API key…",
     inputType: "password",
   },
@@ -496,10 +496,19 @@ function MarketplaceSection({ settings }: { settings: SettingEntry[] }) {
 
   // Local draft for pending filter changes
   const [draft, setDraft] = useState<Record<string, number>>({});
+  const currentGpuQuery = settings.find((s) => s.key === "clore_gpu_query")?.value ?? "";
+  const currentMaxPrice = settings.find((s) => s.key === "clore_max_price_per_day")?.value ?? "";
+  const [gpuQueryDraft, setGpuQueryDraft] = useState(currentGpuQuery);
+  const [maxPriceDraft, setMaxPriceDraft] = useState(currentMaxPrice);
 
   useEffect(() => {
     setDraft({});
   }, [dbValues]);
+
+  useEffect(() => {
+    setGpuQueryDraft(currentGpuQuery);
+    setMaxPriceDraft(currentMaxPrice);
+  }, [currentGpuQuery, currentMaxPrice]);
 
   function getValue(key: string): number {
     if (key in draft) return draft[key];
@@ -507,9 +516,13 @@ function MarketplaceSection({ settings }: { settings: SettingEntry[] }) {
     return dbValues[key] ?? f.rec;
   }
 
-  const isDirty = FILTER_DEFS.some(
+  const numericDirty = FILTER_DEFS.some(
     (f) => f.key in draft && draft[f.key] !== (dbValues[f.key] ?? f.rec)
   );
+  const advancedDirty =
+    gpuQueryDraft.trim() !== currentGpuQuery.trim() ||
+    maxPriceDraft.trim() !== currentMaxPrice.trim();
+  const isDirty = numericDirty || advancedDirty;
 
   function saveFilters() {
     FILTER_DEFS.forEach((f) => {
@@ -517,6 +530,16 @@ function MarketplaceSection({ settings }: { settings: SettingEntry[] }) {
         saveSetting.mutate({ key: f.dbKey, value: String(draft[f.key]) });
       }
     });
+    const nextGpu = gpuQueryDraft.trim();
+    if (nextGpu !== currentGpuQuery.trim()) {
+      if (nextGpu) saveSetting.mutate({ key: "clore_gpu_query", value: nextGpu });
+      else if (currentGpuQuery) deleteSetting.mutate("clore_gpu_query");
+    }
+    const nextMaxPrice = maxPriceDraft.trim();
+    if (nextMaxPrice !== currentMaxPrice.trim()) {
+      if (nextMaxPrice) saveSetting.mutate({ key: "clore_max_price_per_day", value: nextMaxPrice });
+      else if (currentMaxPrice) deleteSetting.mutate("clore_max_price_per_day");
+    }
     setDraft({});
   }
 
@@ -564,7 +587,7 @@ function MarketplaceSection({ settings }: { settings: SettingEntry[] }) {
         <div className="flex-1" />
         <Button
           onClick={saveFilters}
-          loading={saveSetting.isPending}
+          loading={saveSetting.isPending || deleteSetting.isPending}
           size="sm"
           disabled={!isDirty}
           variant={isDirty ? "default" : "outline"}
@@ -589,6 +612,34 @@ function MarketplaceSection({ settings }: { settings: SettingEntry[] }) {
             onChange={(v) => setDraft((prev) => ({ ...prev, [f.key]: v }))}
           />
         ))}
+      </Card>
+
+      <Card className="px-5 py-4">
+        <p className="text-sm font-semibold">Offer Scope</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Optional global constraints applied before Clore, GPU Finder, and model fit views render results.
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">GPU name contains</label>
+            <Input
+              placeholder="RTX 4090"
+              value={gpuQueryDraft}
+              onChange={(e) => setGpuQueryDraft(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Max price per day</label>
+            <Input
+              type="number"
+              min={0}
+              step={0.01}
+              placeholder="Any"
+              value={maxPriceDraft}
+              onChange={(e) => setMaxPriceDraft(e.target.value)}
+            />
+          </div>
+        </div>
       </Card>
 
       {/* Quant formats + Default models side by side */}

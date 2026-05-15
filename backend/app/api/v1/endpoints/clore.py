@@ -45,7 +45,7 @@ def _resolve_clore_key(db: Session) -> str:
     if not key:
         raise HTTPException(
             status_code=503,
-            detail="Clore API key not configured — add it in Settings",
+            detail="Set your Clore API key in Settings to enable this action.",
         )
     return key
 
@@ -53,7 +53,7 @@ def _resolve_clore_key(db: Session) -> str:
 @router.get("/balance")
 def get_balance(db: Session = Depends(get_db)) -> dict:
     """Return wallet balances for the authenticated Clore.ai account."""
-    api_key = _resolve_clore_key(db)
+    api_key = get_setting("clore_api_key", db)
     try:
         with CloreClient(api_key) as client:
             balance = client.get_balance()
@@ -87,6 +87,7 @@ def list_offers(
             if filtered_raw and groups_raw and meta_raw:
                 meta = json.loads(meta_raw)
                 meta["from_cache"] = True
+                meta["authenticated"] = bool(api_key)
                 return {
                     "offers": json.loads(filtered_raw),
                     "groups": json.loads(groups_raw),
@@ -133,6 +134,7 @@ def list_offers(
         "total_filtered": len(filtered_offers),
         "applied_filters": applied,
         "from_cache": False,
+        "authenticated": bool(api_key),
     }
 
     filtered_dicts = [o.model_dump() for o in filtered_offers]

@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     from app.models.entities import Session as SessionModel, SessionStatus
     from app.services import session_store
     from app.services.compat.seeder import load_seeds
+    from app.services.settings_service import bootstrap_defaults_from_env
 
     _validate_startup_security()
 
@@ -36,6 +37,13 @@ async def lifespan(app: FastAPI):
         load_seeds(db)
     except Exception:
         logger.exception("Compatibility seed loading failed during startup")
+
+    try:
+        result = bootstrap_defaults_from_env(db)
+        if result.get("bootstrapped"):
+            logger.info("Environment defaults bootstrapped: %s", result)
+    except Exception:
+        logger.exception("Environment default bootstrapping failed during startup")
 
     # B8: reconcile sessions stuck in ACTIVE state after a restart.
     # Any ACTIVE row with no corresponding in-memory handle is unreachable — terminate it.

@@ -3,8 +3,10 @@
 from app.models.entities import PlatformSetting
 from app.services.settings_service import (
     _VALID_QUANT_FORMATS,
+    bootstrap_defaults_from_env,
     get_default_seed_models,
     get_excluded_quant_formats,
+    get_setting,
     get_lab_auto_setup_mode,
     get_lab_default_runtime_mode,
     get_lab_preflight_command_overrides,
@@ -124,6 +126,41 @@ def test_default_seed_models_preserves_order(db):
     _put(db, "default_seed_models", "\n".join(repos))
     result = get_default_seed_models(db)
     assert result == repos
+
+
+def test_bootstrap_defaults_from_env_seeds_once_and_clamps_bandwidth(db, monkeypatch):
+    for key in (
+        "_default_env_bootstrapped_at",
+        "default_seed_models",
+        "excluded_quant_formats",
+        "clore_min_pcie_gen",
+        "clore_min_dl_mbps",
+        "clore_gpu_query",
+    ):
+        _clear(db, key)
+
+    from app.workers import tasks
+
+    queued: list[str] = []
+    monkeypatch.setattr(tasks.seed_model_from_hf, "delay", lambda repo_id: queued.append(repo_id))
+    monkeypatch.setenv("DEFAULT_SEED_MODELS", "org/model-a")
+    monkeypatch.setenv("DEFAULT_EXCLUDED_QUANT_FORMATS", "gguf,not-real,mlx")
+    monkeypatch.setenv("DEFAULT_GLOBAL_FILTERS", '{"pcie_gen":3,"download_mbps":9000,"gpu":"RTX 4090"}')
+
+    result = bootstrap_defaults_from_env(db)
+
+    assert result["bootstrapped"] is True
+    assert get_setting("default_seed_models", db) == "org/model-a"
+    assert get_setting("excluded_quant_formats", db) == "gguf,mlx"
+    assert get_setting("clore_min_pcie_gen", db) == "3"
+    assert get_setting("clore_min_dl_mbps", db) == "3000"
+    assert get_setting("clore_gpu_query", db) == "RTX 4090"
+    assert queued == ["org/model-a"]
+
+    monkeypatch.setenv("DEFAULT_GLOBAL_FILTERS", '{"pcie_gen":5}')
+    second = bootstrap_defaults_from_env(db)
+    assert second["bootstrapped"] is False
+    assert get_setting("clore_min_pcie_gen", db) == "3"
 
 
 # ── Lab deployment settings ──────────────────────────────────────────────────

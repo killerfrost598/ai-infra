@@ -222,6 +222,49 @@ export interface LabBenchmarkActiveResponse {
   status: string;
 }
 
+export interface InferenceProxyRoute {
+  id: string;
+  route_slug: string;
+  server_id: string;
+  session_id: string | null;
+  model_id: string | null;
+  quant_id: string | null;
+  model_run_id: string | null;
+  model_name: string;
+  target_base_url: string;
+  proxy_base_url: string;
+  remote_port: number;
+  profile_json: Record<string, unknown> | null;
+  status: string;
+  hourly_cost_usd: number | null;
+  last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InferenceProxyRoutesResponse {
+  routes: InferenceProxyRoute[];
+}
+
+export interface InferenceProxyMetricSummary {
+  requests_last_minute: number;
+  requests_24h: number;
+  input_tokens_24h: number;
+  output_tokens_24h: number;
+  total_tokens_24h: number;
+  avg_latency_ms_24h: number | null;
+  avg_ttft_ms_24h: number | null;
+  avg_tokens_per_second_24h: number | null;
+  estimated_cost_usd_24h: number | null;
+  effectiveness_score_24h: number | null;
+  by_category_24h: Record<string, number>;
+}
+
+export interface InferenceProxyMetricResponse {
+  summary: InferenceProxyMetricSummary;
+  active_routes: number;
+}
+
 // ── Model download types ────────────────────────────────────────────────────
 
 export interface DownloadStartRequest {
@@ -450,6 +493,7 @@ export interface CloreOffersMeta {
   total_filtered: number;
   applied_filters: Record<string, number | string | null>;
   from_cache: boolean;
+  authenticated?: boolean;
 }
 
 export interface CloreOffersResponse {
