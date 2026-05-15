@@ -135,7 +135,8 @@ def _write_gpu_cache_to_redis(db: Session) -> None:
     """Write alias→CC hash and full profile list to Redis after seeding."""
     try:
         import redis as _redis
-        r = _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=2)
+        from app.core.config import settings
+        r = _redis.from_url(settings.redis_cache_url, decode_responses=True, socket_connect_timeout=2)
 
         profiles = db.query(GpuProfile).all()
 

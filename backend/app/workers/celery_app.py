@@ -4,7 +4,7 @@ from celery.schedules import crontab
 from app.core.config import settings
 
 celery_app = Celery(
-    "ai_inference_platform",
+    "inferix",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
 )

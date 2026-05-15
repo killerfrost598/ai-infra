@@ -22,6 +22,7 @@ class DeploymentPlanStep(BaseSchema):
     title: str
     stage: str
     command: str | None = None
+    kind: str | None = None  # "structured_download" → executor skips, UI opens modal
     required: bool = True
     status: str = "PENDING"
     risk: str = "low"
@@ -104,3 +105,5 @@ class PipelineRunModelRequest(PipelineStepRequest):
 class PipelineStartResponse(BaseSchema):
     task_run_id: UUID
     status: str
+    download_id: str | None = None  # set only for the download-model step
+    model_run_id: UUID | None = None  # set for the run-model step

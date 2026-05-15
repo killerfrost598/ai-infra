@@ -25,7 +25,7 @@ def build_launch_cmd(
             f"docker run -d --gpus all "
             f"-p {remote_port}:8000 "
             f"-v ~/.cache/huggingface:/root/.cache/huggingface "
-            f"--name aip_vllm_{safe_name} "
+            f"--name inferix_vllm_{safe_name} "
             f"--restart unless-stopped "
             f"{hf_env}"
             f"{stack_row.container_image} "

@@ -100,7 +100,7 @@ export default function ServerDetailPage() {
       await api.servers.delete(id);
       router.push("/servers");
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Delete failed");
+      toast.error(err instanceof Error ? err.message : "Remove failed");
       setDeleting(false);
     }
   }
@@ -140,7 +140,7 @@ export default function ServerDetailPage() {
       <div className="flex items-center justify-between">
         <Link href="/servers" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Servers</Link>
         <Button variant="destructive" size="sm" loading={deleting} onClick={() => setConfirmDeleteOpen(true)}>
-          {deleting ? "Deleting…" : "Delete server"}
+          {deleting ? "Removing…" : "Remove server"}
         </Button>
       </div>
 
@@ -422,9 +422,9 @@ export default function ServerDetailPage() {
       <ConfirmActionDialog
         open={confirmDeleteOpen}
         onOpenChange={setConfirmDeleteOpen}
-        title={server ? `Delete ${server.hostname}?` : "Delete server?"}
-        description="This removes the server record and associated task runs. The provider server is not terminated."
-        confirmLabel="Delete Server"
+        title={server ? `Remove ${server.hostname}?` : "Remove server?"}
+        description="This removes only the local server record from this platform. It does not stop a Clore.ai rental."
+        confirmLabel="Remove Server"
         onConfirm={handleDelete}
       />
     </div>

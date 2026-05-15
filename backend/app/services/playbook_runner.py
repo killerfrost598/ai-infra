@@ -21,7 +21,7 @@ def run_playbook(server, playbook, log: Callable[[str], None]) -> bool:
     Returns:
         True if setup.sh exits 0, False on any non-zero exit or SSH error.
     """
-    work_dir = f"/tmp/aip_playbook_{playbook.id}"
+    work_dir = f"/tmp/inferix_playbook_{playbook.id}"
 
     with SSHManager(
         hostname=server.hostname,

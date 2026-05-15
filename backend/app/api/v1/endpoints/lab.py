@@ -1,17 +1,19 @@
 """Lab API — recommendation, PTY inject, and live observation endpoints."""
 
-import asyncio
+import json
 import logging
+import shlex
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse, urlunparse
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.entities import EngineKind, FailureStage, Model, ModelQuant, ModelRunAttempt, RunStatus, Server, TaskRun, TaskStatus
+from app.models.entities import EngineKind, FailureStage, LabServerState, Model, ModelQuant, ModelRunAttempt, RunStatus, Server, TaskRun, TaskStatus
 from app.models.entities import Session as SessionModel, SessionStatus
 from app.schemas.lab import (
     AiAssistRequest,
@@ -20,6 +22,11 @@ from app.schemas.lab import (
     ExecuteRecommendationResponse,
     InjectRequest,
     InjectResponse,
+    LabBenchmarkActiveRequest,
+    LabBenchmarkActiveResponse,
+    LabChatRequest,
+    LabChatResponse,
+    LabStateResponse,
     LaunchRecommendation,
     ObserveRequest,
     ObserveResponse,
@@ -58,9 +65,18 @@ from app.services.agent_run import (
     run_agent_task,
     model_tmux_session_name,
 )
-from app.services.deployments.executor import run_deployment_task, run_pipeline_step_task
+from app.services.deployments.executor import run_deployment_task, run_pipeline_step_task, run_vllm_launch_retry_task
 from app.services.deployments.planner import build_deployment_plan, lab_preflight_command_templates
 from app.services import session_store
+from app.services.lab_benchmark import run_lab_active_benchmark_task
+from app.services.lab_state import clear_active_model, lab_state_response
+from app.services.lab_vllm import (
+    build_tmux_launch_cmd as service_build_tmux_launch_cmd,
+    build_vllm_serve_cmd as service_build_vllm_serve_cmd,
+    ensure_c_compiler_cmd as service_ensure_c_compiler_cmd,
+    ensure_tmux_cmd as service_ensure_tmux_cmd,
+    wait_for_vllm_ready_cmd as service_wait_for_vllm_ready_cmd,
+)
 from app.services.lab_recommender import recommend_launch
 from app.services.session_runner import execute_command
 from app.services.settings_service import get_lab_auto_setup_mode, get_setting
@@ -163,7 +179,20 @@ def _extract_container_id(stdout: str) -> str | None:
 
 def _expand_runtime_secrets(command: str, db: Session) -> str:
     hf_token = get_setting("hf_token", db) or ""
-    return command.replace("$INFERIX_HF_TOKEN", hf_token)
+    return command.replace("$INFERIX_HF_TOKEN", shlex.quote(hf_token))
+
+
+def _validate_local_health_url(raw_url: str) -> str:
+    parsed = urlparse(raw_url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=422, detail="health_check_url must use http or https")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=422, detail="health_check_url must not include credentials")
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise HTTPException(status_code=422, detail="health_check_url must target localhost on the remote server")
+    if parsed.port is not None and not (1 <= parsed.port <= 65535):
+        raise HTTPException(status_code=422, detail="health_check_url port is invalid")
+    return urlunparse(parsed)
 
 
 @router.post("/recommend", response_model=LaunchRecommendation)
@@ -247,6 +276,109 @@ def plan_deployment(payload: DeploymentPlanRequest, db: Session = Depends(get_db
 def preflight_command_templates() -> list[DeploymentPlanStep]:
     """Return the configurable low-risk Lab command templates."""
     return lab_preflight_command_templates()
+
+
+@router.get("/state/{server_id}", response_model=LabStateResponse)
+def get_lab_state(
+    server_id: UUID,
+    session_id: UUID | None = Query(None),
+    refresh: bool = Query(False),
+    db: Session = Depends(get_db),
+) -> LabStateResponse:
+    """Return persisted Lab readiness, model-cache, active endpoint, and failure state."""
+    refresh_client = None
+    if refresh and session_id:
+        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+        if session and session.server_id == server_id and session.status != SessionStatus.TERMINATED:
+            handle = session_store.get(str(session_id))
+            refresh_client = handle.client if handle else None
+    return lab_state_response(db, server_id, refresh_client=refresh_client)
+
+
+@router.post("/chat", response_model=LabChatResponse)
+def chat_with_active_model(payload: LabChatRequest, db: Session = Depends(get_db)) -> LabChatResponse:
+    """Proxy a chat completion through the active SSH session to local vLLM."""
+    session = _require_pipeline_session(payload.session_id, payload.server_id, db)
+    handle = session_store.get(str(session.id))
+    if handle is None:
+        raise HTTPException(status_code=409, detail="No active SSH handle for this session")
+
+    state = db.query(LabServerState).filter(LabServerState.server_id == payload.server_id).first()
+    port = payload.port or (state.active_port if state else None)
+    model_name = state.active_model_repo if state and state.active_model_repo else None
+    if payload.model_id and payload.quant_id:
+        quant = db.query(ModelQuant).filter(ModelQuant.id == payload.quant_id).first()
+        model = db.query(Model).filter(Model.id == payload.model_id).first()
+        model_name = (quant.hf_repo if quant else None) or (model.hf_repo if model else None) or model_name
+    if not port or not model_name:
+        raise HTTPException(status_code=409, detail="No active model endpoint is recorded for this server")
+
+    body = {
+        "model": model_name,
+        "messages": [msg.model_dump() for msg in payload.messages],
+        "max_tokens": max(1, min(payload.max_tokens, 4096)),
+        "temperature": payload.temperature,
+    }
+    command = (
+        "printf %s "
+        f"{shlex.quote(json.dumps(body, separators=(',', ':')))} "
+        "| curl -sS --max-time 180 -w '\\n__HTTP_STATUS__:%{http_code}' "
+        "-H 'Content-Type: application/json' -d @- "
+        f"http://127.0.0.1:{int(port)}/v1/chat/completions"
+    )
+    started = time.monotonic()
+    out, err, rc = _ssh_exec(handle, command, timeout=210)
+    latency_ms = int((time.monotonic() - started) * 1000)
+    if rc != 0:
+        return LabChatResponse(ok=False, model=model_name, latency_ms=latency_ms, error=(err or out or f"curl exited {rc}")[:1000])
+
+    status_marker = "\n__HTTP_STATUS__:"
+    if status_marker in out:
+        raw_json, raw_status = out.rsplit(status_marker, 1)
+        status_code = raw_status.strip().splitlines()[0]
+    else:
+        raw_json, status_code = out, "000"
+    try:
+        data = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return LabChatResponse(ok=False, model=model_name, latency_ms=latency_ms, error=f"Unparseable response ({status_code}): {raw_json[:500]}")
+
+    if not str(status_code).startswith("2"):
+        return LabChatResponse(ok=False, model=model_name, raw=data, latency_ms=latency_ms, usage=data.get("usage"), error=f"vLLM returned HTTP {status_code}")
+
+    content = ""
+    try:
+        content = data["choices"][0]["message"].get("content") or ""
+    except Exception:
+        content = ""
+    return LabChatResponse(ok=True, model=model_name, content=content, raw=data, latency_ms=latency_ms, usage=data.get("usage"))
+
+
+@router.post("/benchmark-active", response_model=LabBenchmarkActiveResponse, status_code=202)
+def benchmark_active_model(
+    payload: LabBenchmarkActiveRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> LabBenchmarkActiveResponse:
+    """Run a benchmark against the currently active Lab vLLM endpoint."""
+    _require_pipeline_session(payload.session_id, payload.server_id, db)
+    profile = payload.profile if payload.profile in {"quick", "default", "thorough"} else "quick"
+    task_run = TaskRun(
+        task_type="lab.benchmark_active",
+        status=TaskStatus.PENDING,
+        server_id=payload.server_id,
+        started_at=datetime.now(timezone.utc),
+        metadata_json={"session_id": str(payload.session_id), "profile": profile},
+    )
+    db.add(task_run)
+    db.commit()
+    background_tasks.add_task(
+        run_lab_active_benchmark_task,
+        task_run_id=str(task_run.id),
+        session_id=str(payload.session_id),
+        profile=profile,
+    )
+    return LabBenchmarkActiveResponse(task_run_id=task_run.id, status="PENDING")
 
 
 @router.post("/deployments/run", response_model=DeploymentRunStartResponse, status_code=202)
@@ -737,10 +869,11 @@ def observe_session(
     # -- Health check via curl -------------------------------------------------
     health_url = payload.health_check_url
     if health_url:
+        health_url = _validate_local_health_url(health_url)
         try:
             stdout, _, rc = execute_command(
                 handle.channel,
-                f"curl -sf --max-time 5 {health_url} >/dev/null 2>&1 && echo ok || echo fail",
+                f"curl -sf --max-time 5 {shlex.quote(health_url)} >/dev/null 2>&1 && echo ok || echo fail",
                 timeout=12.0,
             )
             raw["health_check"] = stdout.strip()
@@ -787,30 +920,60 @@ def _require_pipeline_session(session_id, server_id, db: Session) -> "SessionMod
 
 
 def _build_vllm_serve_cmd(hf_repo: str, flags: PipelineModelFlags) -> str:
-    venv = "~/.inferix/venvs/vllm-2"
-    parts = [
-        f"{venv}/bin/vllm serve {hf_repo}",
-        f"--port {flags.remote_port}",
-        f"--gpu-memory-utilization {flags.gpu_memory_utilization}",
-        f"--dtype {flags.dtype}",
-    ]
-    if flags.tensor_parallel_size > 1:
-        parts.append(f"--tensor-parallel-size {flags.tensor_parallel_size}")
-    if flags.max_model_len:
-        parts.append(f"--max-model-len {flags.max_model_len}")
-    if flags.enable_tools:
-        parts.append("--enable-auto-tool-choice")
-        if flags.tool_call_parser:
-            parts.append(f"--tool-call-parser {flags.tool_call_parser}")
-    if flags.enable_thinking and flags.reasoning_parser:
-        parts.append(f"--reasoning-parser {flags.reasoning_parser}")
-    if flags.enable_chunked_prefill:
-        parts.append("--enable-chunked-prefill")
-    if flags.trust_remote_code:
-        parts.append("--trust-remote-code")
-    if flags.extra_flags.strip():
-        parts.append(flags.extra_flags.strip())
-    return " ".join(parts)
+    return service_build_vllm_serve_cmd(hf_repo, flags)
+
+
+def _install_apt_packages_cmd(packages: str) -> str:
+    return (
+        "if ! command -v apt-get >/dev/null 2>&1; then\n"
+        "  echo 'apt-get is required to install missing packages on this host' >&2\n"
+        "  exit 127\n"
+        "fi\n"
+        "if command -v sudo >/dev/null 2>&1; then\n"
+        f"  (sudo -n apt-get update -y && sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y {packages}) || "
+        f"(apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y {packages})\n"
+        "else\n"
+        f"  apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y {packages}\n"
+        "fi"
+    )
+
+
+def _ensure_pipeline_base_packages_cmd() -> str:
+    return (
+        "missing=''\n"
+        "command -v curl >/dev/null 2>&1 || missing=\"$missing curl\"\n"
+        "command -v tmux >/dev/null 2>&1 || missing=\"$missing tmux\"\n"
+        "command -v gcc >/dev/null 2>&1 || command -v cc >/dev/null 2>&1 || missing=\"$missing build-essential\"\n"
+        "test -f /usr/include/python3.12/Python.h || missing=\"$missing python3.12-dev\"\n"
+        "if [ -n \"$missing\" ]; then\n"
+        "  echo \"[+] Installing base packages:$missing ca-certificates\"\n"
+        f"{_install_apt_packages_cmd('ca-certificates $missing')}\n"
+        "else\n"
+        "  echo \"[+] curl already installed: $(curl --version | head -n1)\"\n"
+        "  echo \"[+] tmux already installed: $(tmux -V)\"\n"
+        "  echo \"[+] C compiler already installed: $(command -v gcc || command -v cc)\"\n"
+        "  echo '[+] Python headers already installed: /usr/include/python3.12/Python.h'\n"
+        "fi\n"
+        "command -v curl >/dev/null 2>&1 && command -v tmux >/dev/null 2>&1 && "
+        "(command -v gcc >/dev/null 2>&1 || command -v cc >/dev/null 2>&1) && "
+        "test -f /usr/include/python3.12/Python.h"
+    )
+
+
+def _ensure_tmux_cmd() -> str:
+    return service_ensure_tmux_cmd()
+
+
+def _ensure_c_compiler_cmd() -> str:
+    return service_ensure_c_compiler_cmd()
+
+
+def _build_tmux_launch_cmd(vllm_cmd: str) -> str:
+    return service_build_tmux_launch_cmd(vllm_cmd)
+
+
+def _wait_for_vllm_ready_cmd(remote_port: int, timeout_seconds: int = 420) -> str:
+    return service_wait_for_vllm_ready_cmd(remote_port, timeout_seconds)
 
 
 def _make_pipeline_task(task_type: str, server_id, session_id, meta: dict, db: Session) -> TaskRun:
@@ -832,17 +995,10 @@ def pipeline_init_server(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> PipelineStartResponse:
-    """Step 1: Install curl, uv, create Python 3.12 venv at ~/.inferix/venvs/vllm-2."""
+    """Step 1: Install base tools, uv, create Python 3.12 venv at ~/.inferix/venvs/vllm-2."""
     _require_pipeline_session(payload.session_id, payload.server_id, db)
     commands = [
-        (
-            "if ! command -v curl >/dev/null 2>&1; then\n"
-            "  echo '[+] Installing curl...'\n"
-            "  apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates\n"
-            "else\n"
-            "  echo \"[+] curl already installed: $(curl --version | head -n1)\"\n"
-            "fi"
-        ),
+        _ensure_pipeline_base_packages_cmd(),
         (
             "export PATH=\"$HOME/.local/bin:$PATH\"\n"
             "if ! command -v uv >/dev/null 2>&1; then\n"
@@ -907,7 +1063,7 @@ def pipeline_install_vllm(
             "  VLLM_PKG='vllm'\n"
             "fi\n"
             "echo \"[+] Installing: $VLLM_PKG\"\n"
-            "$VENV/bin/uv pip install \"$VLLM_PKG\"\n"
+            "uv pip install --python \"$VENV/bin/python\" \"$VLLM_PKG\"\n"
             "echo '[+] Verifying installation...'\n"
             "$VENV/bin/python -c \"import vllm; print(f'[+] vLLM {vllm.__version__} installed')\""
         ),
@@ -929,41 +1085,31 @@ def pipeline_install_vllm(
 @router.post("/pipeline/download-model", response_model=PipelineStartResponse, status_code=202)
 def pipeline_download_model(
     payload: PipelineDownloadModelRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> PipelineStartResponse:
-    """Step 3: Download model weights to ~/.cache/huggingface on the remote server."""
+    """Step 2: Download model weights using per-file progress download runner."""
     _require_pipeline_session(payload.session_id, payload.server_id, db)
-    from app.models.entities import Model as ModelEntity, ModelQuant as ModelQuantEntity
-    model = db.query(ModelEntity).filter(ModelEntity.id == payload.model_id).first()
-    quant = db.query(ModelQuantEntity).filter(ModelQuantEntity.id == payload.quant_id).first()
-    if not model or not quant:
-        raise HTTPException(status_code=404, detail="Model or quant not found")
-    hf_repo = quant.hf_repo or model.hf_repo or model.model_key
-    commands = [
-        (
-            "export PATH=\"$HOME/.local/bin:$PATH\"\n"
-            f"VENV=\"$HOME/.inferix/venvs/vllm-2\"\n"
-            f"REPO=\"{hf_repo}\"\n"
-            f"HF_CACHE=\"$HOME/.cache/huggingface\"\n"
-            f"echo \"[+] Downloading $REPO...\"\n"
-            f"HF_TOKEN=$INFERIX_HF_TOKEN $VENV/bin/huggingface-cli download \"$REPO\" --cache-dir \"$HF_CACHE\"\n"
-            f"echo \"[+] Download complete: $REPO\""
-        ),
-    ]
-    task_run = _make_pipeline_task(
-        "lab.pipeline.download_model", payload.server_id, payload.session_id,
-        {"pipeline_step": "download_model", "hf_repo": hf_repo,
-         "model_id": str(payload.model_id), "quant_id": str(payload.quant_id)}, db,
+
+    from app.services.model_download.runner import start_model_download
+
+    try:
+        result = start_model_download(
+            db=db,
+            server_id=payload.server_id,
+            session_id=payload.session_id,
+            model_id=payload.model_id,
+            quant_id=payload.quant_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return PipelineStartResponse(
+        task_run_id=result.task_run_id,
+        status="PENDING",
+        download_id=result.download_id,
     )
-    background_tasks.add_task(
-        run_pipeline_step_task,
-        task_run_id=str(task_run.id),
-        session_id=str(payload.session_id),
-        commands=commands,
-        step_name=f"download {hf_repo}",
-    )
-    return PipelineStartResponse(task_run_id=task_run.id, status="PENDING")
 
 
 @router.post("/pipeline/run-model", response_model=PipelineStartResponse, status_code=202)
@@ -972,7 +1118,7 @@ def pipeline_run_model(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> PipelineStartResponse:
-    """Step 4: Launch vLLM in tmux session inferix-vllm with specified capability flags."""
+    """Step 4: Launch vLLM with deterministic retry profiles until healthy."""
     _require_pipeline_session(payload.session_id, payload.server_id, db)
     from app.models.entities import Model as ModelEntity, ModelQuant as ModelQuantEntity
     model = db.query(ModelEntity).filter(ModelEntity.id == payload.model_id).first()
@@ -980,32 +1126,57 @@ def pipeline_run_model(
     if not model or not quant:
         raise HTTPException(status_code=404, detail="Model or quant not found")
     hf_repo = quant.hf_repo or model.hf_repo or model.model_key
-    vllm_cmd = _build_vllm_serve_cmd(hf_repo, payload.flags)
-    commands = [
-        "tmux kill-session -t inferix-vllm 2>/dev/null || true",
-        (
-            f"tmux new-session -d -s inferix-vllm "
-            f"\"export PATH=$HOME/.local/bin:$PATH; "
-            f"export HF_TOKEN=$INFERIX_HF_TOKEN; "
-            f"{vllm_cmd} 2>&1 | tee /tmp/vllm.log\""
-        ),
-        "sleep 2 && echo '[+] vLLM launched in tmux session: inferix-vllm'",
-        "echo '[+] Monitor: tail -f /tmp/vllm.log'",
-    ]
-    task_run = _make_pipeline_task(
-        "lab.pipeline.run_model", payload.server_id, payload.session_id,
-        {"pipeline_step": "run_model", "hf_repo": hf_repo,
-         "remote_port": payload.flags.remote_port,
-         "model_id": str(payload.model_id), "quant_id": str(payload.quant_id)}, db,
+
+    requested_launch = _build_tmux_launch_cmd(_build_vllm_serve_cmd(hf_repo, payload.flags))
+    run = ModelRunAttempt(
+        server_id=payload.server_id,
+        session_id=payload.session_id,
+        model_id=payload.model_id,
+        quant_id=payload.quant_id,
+        engine=EngineKind.VLLM,
+        mode="venv",
+        launch_command=requested_launch,
+        launch_plan_json={"requested_flags": payload.flags.model_dump(mode="json")},
+        feasibility_verdict="UNKNOWN",
+        forced=True,
+        status=RunStatus.PLANNED,
     )
+    db.add(run)
+    db.flush()
+
+    task_run = TaskRun(
+        task_type="lab.pipeline.run_model",
+        status=TaskStatus.PENDING,
+        server_id=payload.server_id,
+        started_at=datetime.now(timezone.utc),
+        metadata_json={
+            "session_id": str(payload.session_id),
+            "pipeline_step": "run_model",
+            "hf_repo": hf_repo,
+            "remote_port": payload.flags.remote_port,
+            "model_id": str(payload.model_id),
+            "quant_id": str(payload.quant_id),
+            "model_run_id": str(run.id),
+            "flags": payload.flags.model_dump(mode="json"),
+        },
+    )
+    db.add(task_run)
+    db.flush()
+    run.task_run_id = task_run.id
+    db.commit()
+
     background_tasks.add_task(
-        run_pipeline_step_task,
+        run_vllm_launch_retry_task,
         task_run_id=str(task_run.id),
+        model_run_id=str(run.id),
         session_id=str(payload.session_id),
-        commands=commands,
-        step_name=f"launch {hf_repo}",
+        server_id=str(payload.server_id),
+        model_id=str(payload.model_id),
+        quant_id=str(payload.quant_id),
+        hf_repo=hf_repo,
+        flags=payload.flags.model_dump(mode="json"),
     )
-    return PipelineStartResponse(task_run_id=task_run.id, status="PENDING")
+    return PipelineStartResponse(task_run_id=task_run.id, model_run_id=run.id, status="PENDING")
 
 
 @router.post("/pipeline/stop-model", response_model=PipelineStartResponse, status_code=202)

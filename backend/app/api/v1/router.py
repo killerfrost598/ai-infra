@@ -16,6 +16,7 @@ from app.api.v1.endpoints.playbooks import router as playbooks_router
 from app.api.v1.endpoints.servers import router as servers_router
 from app.api.v1.endpoints.settings import router as settings_router
 from app.api.v1.endpoints.task_runs import router as task_runs_router
+from app.api.v1.endpoints.model_downloads import router as model_downloads_router
 
 api_router = APIRouter()
 
@@ -35,3 +36,4 @@ api_router.include_router(gpu_profiles_router, prefix="/gpu-profiles", tags=["gp
 api_router.include_router(model_runs_router, prefix="/model-runs", tags=["model-runs"])
 api_router.include_router(lab_router, prefix="/lab", tags=["lab"])
 api_router.include_router(run_reports_router, prefix="/run-reports", tags=["run-reports"])
+api_router.include_router(model_downloads_router, prefix="/model-downloads", tags=["model-downloads"])

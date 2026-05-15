@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import cast, exists, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.models.entities import Model, ModelQuant, TaskRun
@@ -58,9 +58,11 @@ def list_models(
     gated: bool | None = Query(None, description="True = only gated models, False = only ungated"),
     quant_format: str | None = Query(None, description="Filter models with at least one quant of this format"),
     sort: str | None = Query(None, description="downloads | likes | params | created | name (default)"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
 ) -> list[Model]:
-    q = db.query(Model).filter(Model.is_archived == archived)
+    q = db.query(Model).options(selectinload(Model.quants)).filter(Model.is_archived == archived)
 
     if family:
         q = q.filter(Model.family.ilike(f"%{family}%"))
@@ -123,7 +125,7 @@ def list_models(
     else:
         q = q.order_by(Model.family, Model.param_count_b)
 
-    return q.all()
+    return q.offset(skip).limit(limit).all()
 
 
 # ── Static sub-routes (must be before /{model_id}) ───────────────────────────

@@ -148,7 +148,7 @@ def lab_preflight_command_templates() -> list[DeploymentPlanStep]:
                 "export PATH=\"$HOME/.local/bin:$PATH\" && "
                 "mkdir -p ~/.inferix/venvs && "
                 "([ -x ~/.inferix/venvs/vllm-{venv_id}/bin/python ] || uv venv ~/.inferix/venvs/vllm-{venv_id}) && "
-                "uv pip install --python ~/.inferix/venvs/vllm-{venv_id}/bin/python {packages} huggingface_hub[cli]"
+                "uv pip install --python ~/.inferix/venvs/vllm-{venv_id}/bin/python {packages} 'huggingface_hub[cli]>=0.27' hf_xet"
             ),
             auto_eligible=True,
             recommended=True,
@@ -242,30 +242,23 @@ def build_deployment_plan(
         ])
 
     if model_ref:
-        token_prefix = "HUGGING_FACE_HUB_TOKEN=$INFERIX_HF_TOKEN " if hf_token_configured else ""
-        if mode == "docker":
-            image = recommendation.install_plan.container_image if recommendation.install_plan else "vllm/vllm-openai:latest"
-            token_env = "-e HUGGING_FACE_HUB_TOKEN=$INFERIX_HF_TOKEN " if hf_token_configured else ""
-            download_command = (
-                f"docker run --rm --entrypoint huggingface-cli "
-                f"-v ~/.cache/huggingface:/root/.cache/huggingface "
-                f"{token_env}{image} download {model_ref} --local-dir-use-symlinks False"
-            )
-        else:
-            download_command = (
-                f"{token_prefix}~/.inferix/venvs/vllm-{venv_id}/bin/huggingface-cli "
-                f"download {model_ref} --local-dir-use-symlinks False"
-            )
+        # Structured download — the UI opens a modal via POST /api/v1/model-downloads.
+        # The executor skips this step (kind=="structured_download"); progress is streamed
+        # directly to the browser over SSE from the model_download service.
         steps.append(
             DeploymentPlanStep(
                 id="download_model",
                 title="Download model artifacts",
                 stage="model",
-                command=download_command,
-                auto_eligible=True,
+                command="",
+                kind="structured_download",
+                auto_eligible=False,
                 recommended=True,
-                expected="Model files are cached before vLLM starts.",
-                notes="The executor should stream this step so the operator sees download progress.",
+                expected="Model files cached via /api/v1/model-downloads before vLLM starts.",
+                notes=(
+                    f"Per-file download for {model_ref}. "
+                    "Use POST /api/v1/model-downloads to start and GET .../stream for SSE progress."
+                ),
             )
         )
 

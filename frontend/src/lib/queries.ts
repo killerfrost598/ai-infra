@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api } from "./api"
-import type { CloreOffersResponse, InferenceBenchmarkCreate, Playbook, RentRequest, ServerCreate } from "./types"
+import type { CloreOffersResponse, InferenceBenchmarkCreate, ListResponse, Playbook, RentRequest, Server, ServerCreate } from "./types"
 
 // ─── Query Keys ──────────────────────────────────────────────────────────────
 
@@ -136,7 +136,34 @@ export function useDeleteServer() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => api.servers.delete(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.servers() }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: keys.servers() })
+      const previous = qc.getQueryData<ListResponse<Server>>(keys.servers())
+      if (previous) {
+        qc.setQueryData<ListResponse<Server>>(keys.servers(), {
+          ...previous,
+          total: Math.max(0, previous.total - 1),
+          items: previous.items.filter((server) => server.id !== id),
+        })
+      }
+      return { previous }
+    },
+    onError: (e: Error, _id, context) => {
+      if (context?.previous) qc.setQueryData(keys.servers(), context.previous)
+      toast.error(e.message)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: keys.servers() }),
+  })
+}
+
+export function useEndCloreRental() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.clore.terminate(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.rentals() })
+      qc.invalidateQueries({ queryKey: keys.servers() })
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 }
@@ -154,7 +181,10 @@ export function useTerminateRental() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => api.clore.terminate(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.rentals() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.rentals() })
+      qc.invalidateQueries({ queryKey: keys.servers() })
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 }

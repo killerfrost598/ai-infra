@@ -1,11 +1,12 @@
 import asyncio
-import os
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import SessionLocal, get_db
 from app.models.entities import TaskRun, TaskStatus
 from app.schemas.task_runs import TaskRunCreate, TaskRunListResponse, TaskRunResponse, TaskRunUpdate
@@ -13,6 +14,19 @@ from app.schemas.task_runs import TaskRunCreate, TaskRunListResponse, TaskRunRes
 router = APIRouter()
 
 _TERMINAL: frozenset[TaskStatus] = frozenset({TaskStatus.SUCCESS, TaskStatus.FAILED, TaskStatus.PARTIAL})
+
+
+def _safe_log_path(raw_path: str | None) -> Path | None:
+    if not raw_path:
+        return None
+    try:
+        base = Path(settings.logs_base_path).resolve()
+        candidate = Path(raw_path).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if candidate == base or base in candidate.parents:
+        return candidate
+    return None
 
 
 @router.get("", response_model=TaskRunListResponse)
@@ -67,9 +81,12 @@ def get_task_run_logs(task_run_id: UUID, db: Session = Depends(get_db)) -> str:
         raise HTTPException(status_code=404, detail="Task run not found")
     if not task_run.logs_path:
         raise HTTPException(status_code=404, detail="No logs available for this task run")
-    if not os.path.exists(task_run.logs_path):
+    log_path = _safe_log_path(task_run.logs_path)
+    if log_path is None:
+        raise HTTPException(status_code=403, detail="Log path is outside the configured log directory")
+    if not log_path.exists() or not log_path.is_file():
         raise HTTPException(status_code=404, detail="Log file not found on disk")
-    with open(task_run.logs_path) as f:
+    with log_path.open(encoding="utf-8", errors="replace") as f:
         return f.read()
 
 
@@ -113,8 +130,9 @@ async def stream_task_run_logs(task_run_id: UUID, request: Request) -> Streaming
                 db2.close()
 
             # Stream any new log bytes
-            if log_path and os.path.exists(log_path):
-                with open(log_path) as f:
+            safe_path = _safe_log_path(log_path)
+            if safe_path and safe_path.exists() and safe_path.is_file():
+                with safe_path.open(encoding="utf-8", errors="replace") as f:
                     f.seek(pos)
                     chunk = f.read()
                     if chunk:

@@ -11,9 +11,10 @@ import os
 from datetime import datetime, timezone
 from typing import IO
 
+from app.core.config import settings
 from app.models.entities import TaskRun
 
-LOG_DIR = "/var/log/aip"
+LOG_DIR = settings.logs_base_path
 
 
 def _utcnow() -> datetime:

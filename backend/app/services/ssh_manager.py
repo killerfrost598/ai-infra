@@ -8,13 +8,19 @@ from typing import Optional
 
 import paramiko
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
-_KEY_CLASSES = (
-    paramiko.RSAKey,
-    paramiko.Ed25519Key,
-    paramiko.ECDSAKey,
-    paramiko.DSSKey,
+_KEY_CLASSES = tuple(
+    cls
+    for cls in (
+        getattr(paramiko, "RSAKey", None),
+        getattr(paramiko, "Ed25519Key", None),
+        getattr(paramiko, "ECDSAKey", None),
+        getattr(paramiko, "DSSKey", None),
+    )
+    if cls is not None
 )
 
 
@@ -29,6 +35,16 @@ def _load_pkey_from_content(key_content: str) -> paramiko.PKey:
         "Unsupported or invalid private key format. "
         "Supported types: RSA, Ed25519, ECDSA, DSS."
     )
+
+
+def configure_host_key_policy(client: paramiko.SSHClient) -> None:
+    """Load known hosts and reject unknown hosts unless explicitly allowed."""
+    client.load_system_host_keys()
+    if settings.ssh_trust_unknown_hosts:
+        logger.warning("SSH unknown-host trust is enabled; this is unsafe for production")
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    else:
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
 
 
 class SSHManager:
@@ -59,7 +75,7 @@ class SSHManager:
     def connect(self) -> None:
         """Establish an SSH connection."""
         self._client = paramiko.SSHClient()
-        self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(self._client)
         connect_kwargs: dict = {
             "hostname": self.hostname,
             "port": self.port,

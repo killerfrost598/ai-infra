@@ -1,13 +1,29 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Check, ChevronRight, Loader2, Play, Square, Cpu, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronRight,
+  Eye,
+  Gauge,
+  Loader2,
+  MessageSquare,
+  Play,
+  Send,
+  Square,
+  Cpu,
+  RefreshCw,
+  Download,
+  Wrench,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { api } from "@/lib/api";
+import { api, withInferixApiKey } from "@/lib/api";
 import { QuantChip } from "@/components/models/QuantChip";
-import type { ModelEntry, ModelQuant, PipelineModelFlags, Session } from "@/lib/types";
+import { ModelDownloadModal } from "@/components/lab/ModelDownloadModal";
+import type { LabState, ModelEntry, ModelQuant, PipelineModelFlags, Session } from "@/lib/types";
 
 interface PipelineStepperViewProps {
   session: Session | null;
@@ -22,12 +38,30 @@ interface StepState {
   taskRunId: string | null;
 }
 
+// Step 2 runs install-vllm and download-model in parallel
+interface SetupSubState {
+  installStatus: StepStatus;
+  installTaskRunId: string | null;
+  downloadStatus: StepStatus;
+  downloadTaskRunId: string | null;
+  downloadId: string | null;         // download_id for modal SSE stream
+  downloadRepoId: string | null;     // repo label for modal header
+  showModal: boolean;
+}
+
+function setupCombinedStatus(s: SetupSubState): StepStatus {
+  if (s.installStatus === "failed" || s.downloadStatus === "failed") return "failed";
+  if (s.installStatus === "success" && s.downloadStatus === "success") return "success";
+  if (s.installStatus === "running" || s.downloadStatus === "running") return "running";
+  return "idle";
+}
+
 const DEFAULT_FLAGS: PipelineModelFlags = {
   enable_tools: false,
   tool_call_parser: null,
   enable_thinking: false,
   reasoning_parser: null,
-  max_model_len: null,
+  max_model_len: 8192,
   gpu_memory_utilization: 0.9,
   dtype: "auto",
   tensor_parallel_size: 1,
@@ -36,6 +70,31 @@ const DEFAULT_FLAGS: PipelineModelFlags = {
   extra_flags: "",
   remote_port: 8000,
 };
+
+function defaultFlagsForSession(session: Session | null): PipelineModelFlags {
+  const gpus = session?.latest_snapshot?.gpus ?? [];
+  const minVramGb = gpus.length ? Math.min(...gpus.map((gpu) => gpu.vram_gb)) : null;
+
+  if (minVramGb !== null && minVramGb <= 12) {
+    return {
+      ...DEFAULT_FLAGS,
+      max_model_len: 4096,
+      gpu_memory_utilization: 0.75,
+      enable_chunked_prefill: true,
+      extra_flags: "--enforce-eager",
+    };
+  }
+
+  if (minVramGb !== null && minVramGb <= 16) {
+    return {
+      ...DEFAULT_FLAGS,
+      gpu_memory_utilization: 0.8,
+      enable_chunked_prefill: true,
+    };
+  }
+
+  return DEFAULT_FLAGS;
+}
 
 function toolCallParserForFamily(family: string): string {
   if (family.includes("llama")) return "llama3_json";
@@ -48,7 +107,7 @@ function reasoningParserForFamily(family: string): string {
   return "qwen3";
 }
 
-// ── Inline log viewer with SSE streaming ─────────────────────────────────────
+// ── Inline log viewer ─────────────────────────────────────────────────────────
 
 function TaskRunLog({
   taskRunId,
@@ -64,7 +123,7 @@ function TaskRunLog({
 
   useEffect(() => {
     setLines([]);
-    const source = new EventSource(`/api/v1/task-runs/${taskRunId}/logs/stream`);
+    const source = new EventSource(withInferixApiKey(`/api/v1/task-runs/${taskRunId}/logs/stream`));
     let settled = false;
 
     async function finalise() {
@@ -92,7 +151,7 @@ function TaskRunLog({
   return (
     <pre
       ref={logRef}
-      className="terminal mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[11px] leading-relaxed"
+      className="terminal mt-2 max-h-44 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[11px] leading-relaxed"
     >
       {lines.join("\n") || "Waiting for output..."}
     </pre>
@@ -100,6 +159,9 @@ function TaskRunLog({
 }
 
 // ── Step header strip ─────────────────────────────────────────────────────────
+
+const STEP_LABELS = ["Init Server", "Install & Download", "Run & Tweak"];
+const STEP_ICONS = [Cpu, Download, Wrench];
 
 function StepStrip({
   current,
@@ -110,10 +172,9 @@ function StepStrip({
   statuses: StepStatus[];
   onGoTo: (n: number) => void;
 }) {
-  const labels = ["Init Server", "Install vLLM", "Download Model", "Run & Tweak"];
   return (
     <div className="flex items-center border-b border-border bg-muted/20 px-4 py-3">
-      {labels.map((label, i) => {
+      {STEP_LABELS.map((label, i) => {
         const n = i + 1;
         const status = statuses[i];
         const isCurrent = n === current;
@@ -156,7 +217,7 @@ function StepStrip({
               </span>
               <span className="hidden sm:block">{label}</span>
             </button>
-            {i < labels.length - 1 && (
+            {i < STEP_LABELS.length - 1 && (
               <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />
             )}
           </div>
@@ -170,124 +231,89 @@ function StepStrip({
 
 export function PipelineStepperView({ session, models, modelsLoading }: PipelineStepperViewProps) {
   const [currentStep, setCurrentStep] = useState(1);
-  const [steps, setSteps] = useState<StepState[]>([
-    { status: "idle", taskRunId: null },
-    { status: "idle", taskRunId: null },
-    { status: "idle", taskRunId: null },
-    { status: "idle", taskRunId: null },
-  ]);
+
+  // Step 1: Init Server
+  const [initStep, setInitStep] = useState<StepState>({ status: "idle", taskRunId: null });
+
+  // Step 2: Install vLLM + Download Model (parallel)
+  const [setup, setSetup] = useState<SetupSubState>({
+    installStatus: "idle",
+    installTaskRunId: null,
+    downloadStatus: "idle",
+    downloadTaskRunId: null,
+    downloadId: null,
+    downloadRepoId: null,
+    showModal: false,
+  });
+
+  // Step 3: Run & Tweak
+  const [runStep, setRunStep] = useState<StepState>({ status: "idle", taskRunId: null });
 
   const [selectedModel, setSelectedModel] = useState<ModelEntry | null>(null);
   const [selectedQuant, setSelectedQuant] = useState<ModelQuant | null>(null);
   const [modelSearch, setModelSearch] = useState("");
-  const [flags, setFlags] = useState<PipelineModelFlags>(DEFAULT_FLAGS);
+  const [flags, setFlags] = useState<PipelineModelFlags>(() => defaultFlagsForSession(session));
+  const [flagsTouched, setFlagsTouched] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [healthOk, setHealthOk] = useState<boolean | null>(null);
   const [checkingHealth, setCheckingHealth] = useState(false);
+  const [labState, setLabState] = useState<LabState | null>(null);
+  const [stateLoading, setStateLoading] = useState(false);
 
   const serverId = session?.server_id ?? null;
   const sessionId = session?.id ?? null;
 
-  function patchStep(idx: number, patch: Partial<StepState>) {
-    setSteps((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
-  }
+  // Derived step statuses for the strip
+  const setupStatus = setupCombinedStatus(setup);
+  const statuses: StepStatus[] = [initStep.status, setupStatus, runStep.status];
 
-  function handleStepDone(idx: number, status: "SUCCESS" | "FAILED") {
-    const stepStatus: StepStatus = status === "SUCCESS" ? "success" : "failed";
-    patchStep(idx, { status: stepStatus });
-    if (status === "SUCCESS" && idx < 3) {
-      setCurrentStep(idx + 2);
-    }
-  }
+  useEffect(() => {
+    if (!flagsTouched) setFlags(defaultFlagsForSession(session));
+  }, [flagsTouched, session?.id, session?.latest_snapshot?.captured_at]);
 
-  async function startStep(
-    idx: number,
-    fn: () => Promise<{ task_run_id: string; status: string }>,
-  ) {
-    if (!serverId || !sessionId) {
-      toast.error("No active session");
-      return;
-    }
+  const loadLabState = async (refresh = false) => {
+    if (!serverId) { setLabState(null); return; }
+    setStateLoading(true);
     try {
-      patchStep(idx, { status: "running", taskRunId: null });
-      const res = await fn();
-      patchStep(idx, { taskRunId: res.task_run_id });
-    } catch (e) {
-      patchStep(idx, { status: "failed", taskRunId: null });
-      toast.error(e instanceof Error ? e.message : "Failed to start step");
-    }
-  }
-
-  const runStep1 = () =>
-    startStep(0, () =>
-      api.lab.pipelineInitServer({ session_id: sessionId!, server_id: serverId! }),
-    );
-
-  const runStep2 = () =>
-    startStep(1, () =>
-      api.lab.pipelineInstallVllm({ session_id: sessionId!, server_id: serverId! }),
-    );
-
-  const runStep3 = () => {
-    if (!selectedModel || !selectedQuant) {
-      toast.error("Select a model and quantization first");
-      return;
-    }
-    startStep(2, () =>
-      api.lab.pipelineDownloadModel({
-        session_id: sessionId!,
-        server_id: serverId!,
-        model_id: selectedModel.id,
-        quant_id: selectedQuant.id,
-      }),
-    );
-  };
-
-  const runStep4 = () => {
-    if (!selectedModel || !selectedQuant) {
-      toast.error("Select a model and quantization first");
-      return;
-    }
-    setHealthOk(null);
-    startStep(3, () =>
-      api.lab.pipelineRunModel({
-        session_id: sessionId!,
-        server_id: serverId!,
-        model_id: selectedModel.id,
-        quant_id: selectedQuant.id,
-        flags,
-      }),
-    );
-  };
-
-  const stopModel = async () => {
-    if (!serverId || !sessionId) return;
-    try {
-      await api.lab.pipelineStopModel({ session_id: sessionId, server_id: serverId });
-      setHealthOk(null);
-      patchStep(3, { status: "idle", taskRunId: null });
-      toast.success("Stop requested");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Stop failed");
-    }
-  };
-
-  const checkHealth = async () => {
-    if (!session) return;
-    setCheckingHealth(true);
-    try {
-      const res = await api.lab.observe(session.id, {
-        health_check_url: `http://127.0.0.1:${flags.remote_port}/v1/models`,
-      });
-      setHealthOk(res.health_ok ?? false);
+      const state = await api.lab.state(serverId, { sessionId: sessionId ?? undefined, refresh });
+      setLabState(state);
+      if (state.initialized) setInitStep((prev) => prev.status === "running" ? prev : { ...prev, status: "success" });
+      setSetup((prev) => ({
+        ...prev,
+        installStatus: state.vllm_installed && prev.installStatus !== "running" ? "success" : prev.installStatus,
+        downloadStatus: state.downloaded_models.some((m) => m.status === "ready") && prev.downloadStatus !== "running" ? "success" : prev.downloadStatus,
+      }));
+      if (state.active_model?.health_ok) {
+        setRunStep((prev) => prev.status === "running" ? prev : { ...prev, status: "success" });
+        setHealthOk(true);
+      }
     } catch {
-      setHealthOk(false);
+      // State is advisory; the explicit task logs remain the source for in-flight work.
     } finally {
-      setCheckingHealth(false);
+      setStateLoading(false);
     }
   };
 
-  // Update flags when model changes (auto-fill parsers)
+  useEffect(() => {
+    loadLabState(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId, sessionId]);
+
+  useEffect(() => {
+    if (!labState || !models.length || selectedModel || selectedQuant) return;
+    const ready = labState.downloaded_models.find((m) => m.status === "ready");
+    if (!ready) return;
+    const model = models.find((m) => m.id === ready.model_id);
+    const quant = model?.quants.find((q) => q.id === ready.quant_id) ?? null;
+    if (model && quant) {
+      setSelectedModel(model);
+      setSelectedQuant(quant);
+      setModelSearch(model.name);
+      if (labState.vllm_installed) setCurrentStep(3);
+    }
+  }, [labState, models, selectedModel, selectedQuant]);
+
+  // Auto-fill parsers when model changes
   useEffect(() => {
     if (!selectedModel) return;
     const family = (selectedModel.family ?? "").toLowerCase();
@@ -300,6 +326,155 @@ export function PipelineStepperView({ session, models, modelsLoading }: Pipeline
     }));
   }, [selectedModel]);
 
+  // When both parallel tasks succeed, advance to step 3
+  useEffect(() => {
+    if (setup.installStatus === "success" && setup.downloadStatus === "success") {
+      setCurrentStep(3);
+    }
+  }, [setup.installStatus, setup.downloadStatus]);
+
+  // ── Step 1 handlers ──────────────────────────────────────────────────────────
+
+  const runInit = async () => {
+    if (!serverId || !sessionId) { toast.error("No active session"); return; }
+    try {
+      setInitStep({ status: "running", taskRunId: null });
+      const res = await api.lab.pipelineInitServer({ session_id: sessionId, server_id: serverId });
+      setInitStep({ status: "running", taskRunId: res.task_run_id });
+    } catch (e) {
+      setInitStep({ status: "failed", taskRunId: null });
+      toast.error(e instanceof Error ? e.message : "Failed to start init");
+    }
+  };
+
+  const handleInitDone = (s: "SUCCESS" | "FAILED") => {
+    const status: StepStatus = s === "SUCCESS" ? "success" : "failed";
+    setInitStep((prev) => ({ ...prev, status }));
+    if (s === "SUCCESS") { setCurrentStep(2); loadLabState(true); }
+  };
+
+  // ── Step 2 handlers ──────────────────────────────────────────────────────────
+
+  const runSetup = async () => {
+    if (!serverId || !sessionId) { toast.error("No active session"); return; }
+    if (!selectedModel || !selectedQuant) { toast.error("Select a model and quantization first"); return; }
+
+    // Reset sub-state
+    setSetup({
+      installStatus: "running",
+      installTaskRunId: null,
+      downloadStatus: "running",
+      downloadTaskRunId: null,
+      downloadId: null,
+      downloadRepoId: null,
+      showModal: false,
+    });
+
+    // Fire both in parallel
+    try {
+      const [installRes, downloadRes] = await Promise.all([
+        api.lab.pipelineInstallVllm({ session_id: sessionId, server_id: serverId }),
+        api.lab.pipelineDownloadModel({
+          session_id: sessionId,
+          server_id: serverId,
+          model_id: selectedModel.id,
+          quant_id: selectedQuant.id,
+        }),
+      ]);
+      setSetup((prev) => ({
+        ...prev,
+        installTaskRunId: installRes.task_run_id,
+        downloadTaskRunId: downloadRes.task_run_id,
+        downloadId: downloadRes.download_id ?? null,
+        downloadRepoId: selectedQuant.hf_repo || selectedModel.model_key,
+        showModal: !!downloadRes.download_id,
+      }));
+    } catch (e) {
+      setSetup({
+        installStatus: "failed",
+        installTaskRunId: null,
+        downloadStatus: "failed",
+        downloadTaskRunId: null,
+        downloadId: null,
+        downloadRepoId: null,
+        showModal: false,
+      });
+      toast.error(e instanceof Error ? e.message : "Failed to start setup");
+    }
+  };
+
+  const handleInstallDone = (s: "SUCCESS" | "FAILED") => {
+    setSetup((prev) => ({ ...prev, installStatus: s === "SUCCESS" ? "success" : "failed" }));
+    if (s === "SUCCESS") loadLabState(true);
+  };
+
+  const handleDownloadDone = (s: "SUCCESS" | "FAILED") => {
+    setSetup((prev) => ({ ...prev, downloadStatus: s === "SUCCESS" ? "success" : "failed" }));
+    if (s === "SUCCESS") loadLabState(false);
+  };
+
+  const handleDownloadModalComplete = (success: boolean) => {
+    setSetup((prev) => ({ ...prev, downloadStatus: success ? "success" : "failed" }));
+    loadLabState(false);
+  };
+
+  // ── Step 3 handlers ──────────────────────────────────────────────────────────
+
+  const runModel = async () => {
+    if (!serverId || !sessionId) { toast.error("No active session"); return; }
+    if (!selectedModel || !selectedQuant) { toast.error("Select a model and quantization first"); return; }
+    setHealthOk(null);
+    try {
+      setRunStep({ status: "running", taskRunId: null });
+      const res = await api.lab.pipelineRunModel({
+        session_id: sessionId,
+        server_id: serverId,
+        model_id: selectedModel.id,
+        quant_id: selectedQuant.id,
+        flags,
+      });
+      setRunStep({ status: "running", taskRunId: res.task_run_id });
+    } catch (e) {
+      setRunStep({ status: "failed", taskRunId: null });
+      toast.error(e instanceof Error ? e.message : "Failed to launch model");
+    }
+  };
+
+  const handleRunDone = (s: "SUCCESS" | "FAILED") => {
+    setRunStep((prev) => ({ ...prev, status: s === "SUCCESS" ? "success" : "failed" }));
+    loadLabState(true);
+  };
+
+  const stopModel = async () => {
+    if (!serverId || !sessionId) return;
+    try {
+      await api.lab.pipelineStopModel({ session_id: sessionId, server_id: serverId });
+      setHealthOk(null);
+      setRunStep({ status: "idle", taskRunId: null });
+      loadLabState(false);
+      toast.success("Stop requested");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Stop failed");
+    }
+  };
+
+  const checkHealth = async () => {
+    if (!session) return;
+    setCheckingHealth(true);
+    try {
+      const port = labState?.active_model?.port ?? flags.remote_port;
+      const res = await api.lab.observe(session.id, {
+        health_check_url: `http://127.0.0.1:${port}/v1/models`,
+      });
+      setHealthOk(res.health_ok ?? false);
+      loadLabState(true);
+    } catch {
+      setHealthOk(false);
+    } finally {
+      setCheckingHealth(false);
+    }
+  };
+
   if (!session) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
@@ -308,46 +483,67 @@ export function PipelineStepperView({ session, models, modelsLoading }: Pipeline
     );
   }
 
-  const statuses = steps.map((s) => s.status);
-
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden bg-background">
       <StepStrip current={currentStep} statuses={statuses} onGoTo={setCurrentStep} />
 
+      {/* Download modal — rendered outside the scroll container so it overlays correctly */}
+      {setup.showModal && setup.downloadId && (
+        <ModelDownloadModal
+          downloadId={setup.downloadId}
+          repoId={setup.downloadRepoId ?? setup.downloadId}
+          onClose={() => setSetup((prev) => ({ ...prev, showModal: false }))}
+          onComplete={handleDownloadModalComplete}
+        />
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <LabReadinessBar state={labState} loading={stateLoading} onRefresh={() => loadLabState(true)} />
+
+        {/* ── Step 1: Init Server ─────────────────────────────────────────── */}
         {currentStep === 1 && (
-          <StepContent
-            title="Initialize Server"
-            description="Installs curl, uv, and creates a Python 3.12 venv at ~/.inferix/venvs/vllm-2. Idempotent — safe to run multiple times."
-            step={steps[0]}
-            actionLabel="Initialize Server"
-            onAction={runStep1}
-            onDone={(s) => handleStepDone(0, s)}
-            disabled={steps[0].status === "running"}
-          />
-        )}
-
-        {currentStep === 2 && (
-          <StepContent
-            title="Install vLLM"
-            description="Probes your CUDA version via nvidia-smi and installs the matching vLLM into the managed venv."
-            step={steps[1]}
-            actionLabel="Install vLLM"
-            onAction={runStep2}
-            onDone={(s) => handleStepDone(1, s)}
-            disabled={steps[1].status === "running"}
-          />
-        )}
-
-        {currentStep === 3 && (
           <div className="space-y-4">
             <div>
-              <h3 className="text-sm font-semibold">Download Model</h3>
+              <h3 className="text-sm font-semibold">Initialize Server</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                Select a model and quantization, then download its weights to the remote server.
+                Installs curl, uv, and creates a Python 3.12 venv at ~/.inferix/venvs/vllm-2. Idempotent — safe to run again.
               </p>
             </div>
 
+            {initStep.taskRunId && (
+              <SubTaskLog
+                label="Server init"
+                status={initStep.status}
+                taskRunId={initStep.taskRunId}
+                onDone={handleInitDone}
+              />
+            )}
+
+            {(initStep.status === "idle" || initStep.status === "failed") && (
+              <Button size="sm" className="gap-1.5" onClick={runInit}>
+                <Play className="h-3.5 w-3.5" />
+                Initialize Server
+              </Button>
+            )}
+            {initStep.status === "success" && (
+              <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                <Check className="h-3.5 w-3.5" /> Done — proceed to step 2.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 2: Install & Download (parallel) ───────────────────────── */}
+        {currentStep === 2 && (
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold">Install &amp; Download</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Pick a model, then install vLLM and download model weights simultaneously.
+              </p>
+            </div>
+
+            {/* Model picker — always visible in this step */}
             <ModelPicker
               models={models}
               modelsLoading={modelsLoading}
@@ -357,103 +553,160 @@ export function PipelineStepperView({ session, models, modelsLoading }: Pipeline
               selectedQuant={selectedQuant}
               onSelectModel={(m) => { setSelectedModel(m); setSelectedQuant(null); setModelSearch(m?.name ?? ""); }}
               onSelectQuant={setSelectedQuant}
+              disabled={setupStatus === "running"}
             />
 
-            {steps[2].status !== "idle" && (
-              <StepStatusArea
-                step={steps[2]}
-                onDone={(s) => handleStepDone(2, s)}
+            <ReadyModelsPanel
+              state={labState}
+              models={models}
+              onSelect={(model, quant) => {
+                setSelectedModel(model);
+                setSelectedQuant(quant);
+                setModelSearch(model.name);
+                setCurrentStep(labState?.vllm_installed ? 3 : 2);
+              }}
+            />
+
+            {/* Parallel task logs */}
+            {setup.installTaskRunId && (
+              <SubTaskLog
+                label="Installing vLLM"
+                status={setup.installStatus}
+                taskRunId={setup.installTaskRunId}
+                onDone={handleInstallDone}
               />
             )}
 
-            {steps[2].status === "idle" || steps[2].status === "failed" ? (
+            {/* Download status panel — modal handles actual progress */}
+            {setup.downloadId && (
+              <div className="rounded-md border border-border bg-muted/10 p-3">
+                <div className="flex items-center gap-2">
+                  {setup.downloadStatus === "running" && (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  )}
+                  {setup.downloadStatus === "success" && (
+                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                  )}
+                  {setup.downloadStatus === "failed" && (
+                    <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+                  )}
+                  <span className="text-xs font-medium">Downloading model weights</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground capitalize">
+                    {setup.downloadStatus}
+                  </span>
+                  {(setup.downloadStatus === "running" || setup.downloadStatus === "success" || setup.downloadStatus === "failed") && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 px-2 text-[10px]"
+                      onClick={() => setSetup((prev) => ({ ...prev, showModal: true }))}
+                    >
+                      <Eye className="h-3 w-3" />
+                      View download
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Show partial failure message */}
+            {setupStatus === "failed" && (
+              <Card className="border-red-500/30 bg-red-500/10 p-3">
+                <p className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  One or more tasks failed. Fix the issue and retry.
+                </p>
+              </Card>
+            )}
+
+            {(setupStatus === "idle" || setupStatus === "failed") && (
               <Button
                 size="sm"
                 className="gap-1.5"
-                onClick={runStep3}
-                disabled={!selectedModel || !selectedQuant || steps[2].status === "running"}
+                onClick={runSetup}
+                disabled={!selectedModel || !selectedQuant}
               >
                 <Play className="h-3.5 w-3.5" />
-                Download Model
+                {setupStatus === "failed" ? "Retry" : "Start"}
               </Button>
-            ) : steps[2].status === "success" ? (
-              <Button size="sm" className="gap-1.5" onClick={() => setCurrentStep(4)}>
-                Next: Run &amp; Tweak <ChevronRight className="h-3.5 w-3.5" />
-              </Button>
-            ) : null}
+            )}
+
+            {setupStatus === "success" && (
+              <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                <Check className="h-3.5 w-3.5" /> Both tasks complete — proceed to Run &amp; Tweak.
+              </p>
+            )}
           </div>
         )}
 
-        {currentStep === 4 && (
+        {/* ── Step 3: Run & Tweak ─────────────────────────────────────────── */}
+        {currentStep === 3 && (
           <div className="space-y-4">
             <div>
               <h3 className="text-sm font-semibold">Run &amp; Tweak</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                Configure capabilities, then launch vLLM in a managed tmux session.
+                Configure capabilities and launch vLLM in a managed tmux session.
               </p>
             </div>
+
+            {/* Show selected model as read-only context */}
+            {selectedModel && selectedQuant && (
+              <div className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+                <span className="text-xs font-medium">{selectedModel.name}</span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-xs text-muted-foreground">{selectedQuant.name}</span>
+              </div>
+            )}
 
             <CapabilityToggles
               model={selectedModel}
               flags={flags}
-              onFlagsChange={setFlags}
+              onFlagsChange={(next) => {
+                setFlagsTouched(true);
+                setFlags(next);
+              }}
               showAdvanced={showAdvanced}
               onToggleAdvanced={() => setShowAdvanced((v) => !v)}
             />
 
-            {steps[3].status !== "idle" && (
-              <StepStatusArea
-                step={steps[3]}
-                onDone={(s) => handleStepDone(3, s)}
+            {runStep.taskRunId && (
+              <SubTaskLog
+                label="vLLM launch"
+                status={runStep.status}
+                taskRunId={runStep.taskRunId}
+                onDone={handleRunDone}
               />
             )}
 
-            {steps[3].status === "success" && (
-              <Card className="border-border p-3">
-                <div className="flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-muted-foreground" />
-                  <p className="text-xs font-medium">Endpoint</p>
-                  <code className="ml-auto text-xs text-muted-foreground">
-                    http://&lt;server&gt;:{flags.remote_port}/v1
-                  </code>
-                </div>
-                <div className="mt-2 flex items-center gap-2">
-                  {healthOk === true ? (
-                    <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                      <Check className="h-3 w-3" /> Model is healthy
-                    </span>
-                  ) : healthOk === false ? (
-                    <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-                      <AlertTriangle className="h-3 w-3" /> Not responding yet
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Health unknown</span>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="ml-auto h-6 gap-1 px-2 text-[11px]"
-                    onClick={checkHealth}
-                    disabled={checkingHealth}
-                  >
-                    {checkingHealth ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                    Check health
-                  </Button>
-                </div>
-              </Card>
+            {(runStep.status === "success" || labState?.active_model) && (
+              <RunningModelPanel
+                session={session}
+                state={labState}
+                selectedModel={selectedModel}
+                selectedQuant={selectedQuant}
+                fallbackPort={flags.remote_port}
+                healthOk={healthOk}
+                checkingHealth={checkingHealth}
+                onCheckHealth={checkHealth}
+                onBenchmarkStarted={() => loadLabState(false)}
+              />
             )}
+
+            {labState?.last_failure_diagnosis?.length ? (
+              <FailureDiagnosisPanel state={labState} />
+            ) : null}
 
             <div className="flex gap-2">
               <Button
                 size="sm"
                 className="gap-1.5"
-                onClick={runStep4}
-                disabled={!selectedModel || !selectedQuant || steps[3].status === "running"}
+                onClick={runModel}
+                disabled={runStep.status === "running"}
               >
-                {steps[3].status === "success" ? (
+                {runStep.status === "success" ? (
                   <><RefreshCw className="h-3.5 w-3.5" /> Restart</>
                 ) : (
-                  <><Play className="h-3.5 w-3.5" /> Launch vLLM</>
+                  <><Play className="h-3.5 w-3.5" /> Launch with auto-retry</>
                 )}
               </Button>
               <Button
@@ -461,7 +714,7 @@ export function PipelineStepperView({ session, models, modelsLoading }: Pipeline
                 variant="outline"
                 className="gap-1.5"
                 onClick={stopModel}
-                disabled={steps[3].status === "running"}
+                disabled={runStep.status === "running"}
               >
                 <Square className="h-3.5 w-3.5" />
                 Stop
@@ -474,63 +727,278 @@ export function PipelineStepperView({ session, models, modelsLoading }: Pipeline
   );
 }
 
-// ── Reusable step content wrapper ─────────────────────────────────────────────
-
-function StepContent({
-  title,
-  description,
-  step,
-  actionLabel,
-  onAction,
-  onDone,
-  disabled,
+function LabReadinessBar({
+  state,
+  loading,
+  onRefresh,
 }: {
-  title: string;
-  description: string;
-  step: StepState;
-  actionLabel: string;
-  onAction: () => void;
-  onDone: (s: "SUCCESS" | "FAILED") => void;
-  disabled: boolean;
+  state: LabState | null;
+  loading: boolean;
+  onRefresh: () => void;
 }) {
+  if (!state) return null;
+  const readyDownloads = state.downloaded_models.filter((m) => m.status === "ready").length;
+  const items = [
+    { label: "Server", ok: state.initialized, value: state.initialized ? "initialized" : "needs init" },
+    { label: "vLLM", ok: state.vllm_installed, value: state.vllm_version ?? (state.vllm_installed ? "installed" : "not installed") },
+    { label: "Models", ok: readyDownloads > 0, value: `${readyDownloads} ready` },
+    { label: "Endpoint", ok: state.active_model?.health_ok === true, value: state.active_model?.port ? `:${state.active_model.port}` : "none" },
+  ];
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-semibold">{title}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-      </div>
-      <StepStatusArea step={step} onDone={onDone} />
-      {(step.status === "idle" || step.status === "failed") && (
-        <Button size="sm" className="gap-1.5" onClick={onAction} disabled={disabled}>
-          <Play className="h-3.5 w-3.5" />
-          {actionLabel}
+    <div className="mb-4 rounded-md border border-border bg-muted/10 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {items.map((item) => (
+          <span key={item.label} className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px]">
+            {item.ok ? <Check className="h-3 w-3 text-emerald-500" /> : <AlertTriangle className="h-3 w-3 text-amber-500" />}
+            <span className="font-medium">{item.label}</span>
+            <span className="text-muted-foreground">{item.value}</span>
+          </span>
+        ))}
+        <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 px-2 text-xs" onClick={onRefresh} disabled={loading}>
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          Refresh
         </Button>
-      )}
-      {step.status === "success" && (
-        <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-          <Check className="h-3.5 w-3.5" />
-          Done — proceed to the next step.
-        </p>
+      </div>
+      {state.help_note && (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{state.help_note}</p>
       )}
     </div>
   );
 }
 
-function StepStatusArea({ step, onDone }: { step: StepState; onDone: (s: "SUCCESS" | "FAILED") => void }) {
-  if (!step.taskRunId) return null;
+function ReadyModelsPanel({
+  state,
+  models,
+  onSelect,
+}: {
+  state: LabState | null;
+  models: ModelEntry[];
+  onSelect: (model: ModelEntry, quant: ModelQuant) => void;
+}) {
+  const ready = state?.downloaded_models.filter((m) => m.status === "ready") ?? [];
+  if (!ready.length) return null;
   return (
-    <div>
-      {step.status === "running" && (
-        <TaskRunLog taskRunId={step.taskRunId} onDone={onDone} />
-      )}
-      {step.status === "failed" && (
-        <Card className="border-red-500/30 bg-red-500/10 p-3">
-          <p className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            Step failed. Check logs and retry.
-          </p>
-          <TaskRunLog taskRunId={step.taskRunId} onDone={() => {}} />
-        </Card>
+    <div className="rounded-md border border-emerald-500/25 bg-emerald-500/5 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <Check className="h-3.5 w-3.5 text-emerald-500" />
+        <span className="text-xs font-medium">Ready to launch</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {ready.map((cache) => {
+          const model = models.find((m) => m.id === cache.model_id);
+          const quant = model?.quants.find((q) => q.id === cache.quant_id);
+          const label = model && quant ? `${model.name} · ${quant.name}` : cache.repo_id;
+          return (
+            <button
+              key={cache.id}
+              className="rounded-md border border-border bg-background px-2 py-1 text-xs hover:bg-muted/40"
+              onClick={() => model && quant && onSelect(model, quant)}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FailureDiagnosisPanel({ state }: { state: LabState }) {
+  return (
+    <Card className="border-amber-500/30 bg-amber-500/10 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 text-amber-500" />
+        <p className="text-xs font-medium">Startup diagnosis</p>
+      </div>
+      <div className="space-y-2">
+        {state.last_failure_diagnosis.map((match) => (
+          <div key={match.issue_id} className="text-xs">
+            <p className="font-medium">{match.title}</p>
+            <p className="text-muted-foreground">{match.diagnosis}</p>
+            <p className="mt-0.5 text-muted-foreground">Fix: {match.recommended_fix}</p>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function RunningModelPanel({
+  session,
+  state,
+  selectedModel,
+  selectedQuant,
+  fallbackPort,
+  healthOk,
+  checkingHealth,
+  onCheckHealth,
+  onBenchmarkStarted,
+}: {
+  session: Session;
+  state: LabState | null;
+  selectedModel: ModelEntry | null;
+  selectedQuant: ModelQuant | null;
+  fallbackPort: number;
+  healthOk: boolean | null;
+  checkingHealth: boolean;
+  onCheckHealth: () => void;
+  onBenchmarkStarted: () => void;
+}) {
+  const active = state?.active_model;
+  const [prompt, setPrompt] = useState("Say hello in one short sentence.");
+  const [reply, setReply] = useState("");
+  const [usage, setUsage] = useState<Record<string, unknown> | null>(null);
+  const [latency, setLatency] = useState<number | null>(null);
+  const [sending, setSending] = useState(false);
+  const [benchmarkTaskId, setBenchmarkTaskId] = useState<string | null>(null);
+  const [benchmarkStatus, setBenchmarkStatus] = useState<StepStatus>("idle");
+
+  const port = active?.port ?? fallbackPort;
+  const modelLabel = active?.repo_id ?? selectedQuant?.hf_repo ?? selectedModel?.hf_repo ?? selectedModel?.model_key ?? "active model";
+  const profile = active?.profile ?? {};
+  const maxLen = typeof profile.max_model_len === "number" ? profile.max_model_len : null;
+
+  const sendChat = async () => {
+    if (!prompt.trim()) return;
+    setSending(true);
+    setReply("");
+    setUsage(null);
+    setLatency(null);
+    try {
+      const res = await api.lab.chat({
+        session_id: session.id,
+        server_id: session.server_id,
+        model_id: selectedModel?.id ?? active?.model_id ?? null,
+        quant_id: selectedQuant?.id ?? active?.quant_id ?? null,
+        port,
+        messages: [{ role: "user", content: prompt.trim() }],
+        max_tokens: 160,
+        temperature: 0.2,
+      });
+      setLatency(res.latency_ms);
+      setUsage(res.usage);
+      if (!res.ok) throw new Error(res.error ?? "Chat request failed");
+      setReply(res.content);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Chat request failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const runBenchmark = async () => {
+    setBenchmarkStatus("running");
+    try {
+      const res = await api.lab.benchmarkActive({ session_id: session.id, server_id: session.server_id, profile: "quick" });
+      setBenchmarkTaskId(res.task_run_id);
+      onBenchmarkStarted();
+    } catch (e) {
+      setBenchmarkStatus("failed");
+      toast.error(e instanceof Error ? e.message : "Benchmark failed to start");
+    }
+  };
+
+  return (
+    <Card className="border-border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Cpu className="h-4 w-4 text-muted-foreground" />
+        <p className="text-xs font-medium">{modelLabel}</p>
+        {maxLen && <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">{maxLen} ctx</span>}
+        <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">port {port}</span>
+        <span className={`ml-auto flex items-center gap-1 text-xs ${
+          (active?.health_ok ?? healthOk) ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+        }`}>
+          {(active?.health_ok ?? healthOk) ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+          {(active?.health_ok ?? healthOk) ? "healthy" : "health unknown"}
+        </span>
+        <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px]" onClick={onCheckHealth} disabled={checkingHealth}>
+          {checkingHealth ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          Check
+        </Button>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_220px]">
+        <div className="space-y-2">
+          <div className="flex items-center gap-1 text-xs font-medium">
+            <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+            Chat test
+          </div>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <div className="flex items-center gap-2">
+            <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={sendChat} disabled={sending}>
+              {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+              Send
+            </Button>
+            {latency !== null && <span className="text-[11px] text-muted-foreground">{latency} ms</span>}
+            {usage && <span className="text-[11px] text-muted-foreground">tokens {String(usage.total_tokens ?? "n/a")}</span>}
+          </div>
+          {reply && <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">{reply}</div>}
+        </div>
+
+        <div className="rounded-md border border-border bg-muted/10 p-3">
+          <div className="mb-2 flex items-center gap-1 text-xs font-medium">
+            <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
+            Benchmark
+          </div>
+          <Button size="sm" variant="outline" className="h-7 w-full gap-1.5 text-xs" onClick={runBenchmark} disabled={benchmarkStatus === "running"}>
+            {benchmarkStatus === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            Run quick benchmark
+          </Button>
+          {benchmarkTaskId && (
+            <SubTaskLog
+              label="Benchmark"
+              status={benchmarkStatus}
+              taskRunId={benchmarkTaskId}
+              onDone={(s) => {
+                setBenchmarkStatus(s === "SUCCESS" ? "success" : "failed");
+                onBenchmarkStarted();
+              }}
+            />
+          )}
+          {state?.benchmarks?.length ? (
+            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+              {state.benchmarks.slice(0, 2).map((b) => (
+                <div key={String(b.id)} className="flex justify-between gap-2">
+                  <span>{String(b.profile ?? "benchmark")}</span>
+                  <span>{typeof b.tokens_per_second_avg === "number" ? `${b.tokens_per_second_avg.toFixed(1)} tok/s` : "pending"}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ── Sub-task log with status header ──────────────────────────────────────────
+
+function SubTaskLog({
+  label,
+  status,
+  taskRunId,
+  onDone,
+}: {
+  label: string;
+  status: StepStatus;
+  taskRunId: string;
+  onDone: (s: "SUCCESS" | "FAILED") => void;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-muted/10 p-3">
+      <div className="flex items-center gap-2">
+        {status === "running" && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+        {status === "success" && <Check className="h-3.5 w-3.5 text-emerald-500" />}
+        {status === "failed" && <AlertTriangle className="h-3.5 w-3.5 text-red-500" />}
+        <span className="text-xs font-medium">{label}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground capitalize">{status}</span>
+      </div>
+      {(status === "running" || status === "failed") && (
+        <TaskRunLog taskRunId={taskRunId} onDone={onDone} />
       )}
     </div>
   );
@@ -547,6 +1015,7 @@ function ModelPicker({
   selectedQuant,
   onSelectModel,
   onSelectQuant,
+  disabled,
 }: {
   models: ModelEntry[];
   modelsLoading: boolean;
@@ -556,6 +1025,7 @@ function ModelPicker({
   selectedQuant: ModelQuant | null;
   onSelectModel: (m: ModelEntry | null) => void;
   onSelectQuant: (q: ModelQuant | null) => void;
+  disabled?: boolean;
 }) {
   const filtered = models
     .filter(
@@ -577,8 +1047,9 @@ function ModelPicker({
               type="text"
               placeholder="Search models..."
               value={search}
+              disabled={disabled}
               onChange={(e) => { onSearchChange(e.target.value); if (selectedModel) onSelectModel(null); }}
-              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             />
             {search && !selectedModel && (
               <div className="mt-1 max-h-40 overflow-y-auto rounded-md border border-border bg-background shadow-md">
@@ -615,7 +1086,7 @@ function ModelPicker({
                 key={q.id}
                 quant={q}
                 selected={selectedQuant?.id === q.id}
-                onSelect={() => onSelectQuant(q)}
+                onSelect={() => !disabled && onSelectQuant(q)}
                 showActions={false}
               />
             ))}
@@ -648,7 +1119,6 @@ function CapabilityToggles({
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-muted/20 p-4">
-      {/* Tools */}
       {model?.supports_tools && (
         <ToggleRow
           label="Tools"
@@ -659,7 +1129,6 @@ function CapabilityToggles({
         />
       )}
 
-      {/* Thinking */}
       {model?.is_reasoning && (
         <ToggleRow
           label="Thinking"
@@ -670,7 +1139,6 @@ function CapabilityToggles({
         />
       )}
 
-      {/* Context length */}
       <div className="flex items-center gap-3">
         <div className="flex-1">
           <p className="text-xs font-medium">Context length</p>
@@ -689,13 +1157,10 @@ function CapabilityToggles({
           <span className="min-w-[4rem] text-right text-xs text-muted-foreground">
             {((flags.max_model_len ?? 8192) / 1000).toFixed(0)}K
           </span>
-          {showAdvanced && (
-            <code className="text-[10px] text-muted-foreground">--max-model-len</code>
-          )}
+          {showAdvanced && <code className="text-[10px] text-muted-foreground">--max-model-len</code>}
         </div>
       </div>
 
-      {/* GPU utilization */}
       <div className="flex items-center gap-3">
         <div className="flex-1">
           <p className="text-xs font-medium">GPU utilization</p>
@@ -714,13 +1179,10 @@ function CapabilityToggles({
           <span className="min-w-[3rem] text-right text-xs text-muted-foreground">
             {Math.round(flags.gpu_memory_utilization * 100)}%
           </span>
-          {showAdvanced && (
-            <code className="text-[10px] text-muted-foreground">--gpu-memory-utilization</code>
-          )}
+          {showAdvanced && <code className="text-[10px] text-muted-foreground">--gpu-memory-utilization</code>}
         </div>
       </div>
 
-      {/* Precision */}
       <div className="flex items-center gap-3">
         <div className="flex-1">
           <p className="text-xs font-medium">Precision</p>
@@ -740,7 +1202,6 @@ function CapabilityToggles({
         </div>
       </div>
 
-      {/* Port */}
       <div className="flex items-center gap-3">
         <div className="flex-1">
           <p className="text-xs font-medium">Port</p>
@@ -756,7 +1217,6 @@ function CapabilityToggles({
         />
       </div>
 
-      {/* Advanced section */}
       <div className="border-t border-border pt-3">
         <button
           className="text-xs text-muted-foreground underline-offset-4 hover:underline"

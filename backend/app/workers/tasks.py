@@ -320,8 +320,9 @@ def deploy_model(self, deployment_id: str) -> dict:
                     if plan.mode == "venv":
                         _log("$ Setting up venv...\n")
                         venv_cmd = (
-                            "uv venv ~/aip_venv --python python3 2>&1 "
-                            "|| python3 -m venv ~/aip_venv"
+                            "mkdir -p ~/.inferix/venvs && "
+                            "uv venv ~/.inferix/venvs/deploy --python python3 2>&1 "
+                            "|| python3 -m venv ~/.inferix/venvs/deploy"
                         )
                         stdout, stderr, rc = ssh.execute(venv_cmd)
                         _log(stdout)
@@ -335,7 +336,7 @@ def deploy_model(self, deployment_id: str) -> dict:
                                 if plan.pip_index_url else ""
                             )
                             pip_cmd = (
-                                f"~/aip_venv/bin/pip install {pip_extra}{packages_str} 2>&1"
+                                f"~/.inferix/venvs/deploy/bin/pip install {pip_extra}{packages_str} 2>&1"
                             )
                             _log(f"$ pip install {packages_str}\n")
                             stdout, stderr, rc = ssh.execute(pip_cmd)

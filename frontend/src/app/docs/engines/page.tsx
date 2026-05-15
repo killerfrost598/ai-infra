@@ -97,7 +97,7 @@ export default function EnginesPage() {
 
       {/* Features */}
       <section className="space-y-4">
-        <SectionHeading>What vLLM and SGLang have that Ollama doesn't</SectionHeading>
+        <SectionHeading>What vLLM and SGLang have that Ollama does not</SectionHeading>
         <div className="grid gap-3 sm:grid-cols-2">
           {FEATURES.map((f) => (
             <div

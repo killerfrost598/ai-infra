@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import "xterm/css/xterm.css";
+import "@xterm/xterm/css/xterm.css";
+import { withInferixApiKey } from "@/lib/api";
 
 // xterm can overflow its internal call stack on writes > ~32 KB when the data
 // contains long single-line sequences (e.g. dense ANSI, OSC 8 hyperlinks).
@@ -127,8 +128,8 @@ export function PtyTerminal({
     let observer: ResizeObserver | null = null;
 
     async function init() {
-      const { Terminal } = await import("xterm");
-      const { FitAddon } = await import("xterm-addon-fit");
+      const { Terminal } = await import("@xterm/xterm");
+      const { FitAddon } = await import("@xterm/addon-fit");
 
       if (disposed || !containerRef.current) return;
 
@@ -197,7 +198,7 @@ export function PtyTerminal({
 
       onStateRef.current?.("connecting");
 
-      const socket = new WebSocket(`${getWsBase()}/api/v1/sessions/${sessionId}/pty`);
+      const socket = new WebSocket(`${getWsBase()}${withInferixApiKey(`/api/v1/sessions/${sessionId}/pty`)}`);
       ws = socket;
       socket.binaryType = "arraybuffer";
 

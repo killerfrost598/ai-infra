@@ -162,7 +162,8 @@ def _cc_lookup_map() -> dict[str, str]:
     # 1. Redis — single HGETALL, then cached in-process for process lifetime
     try:
         import redis as _redis
-        r = _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=1)
+        from app.core.config import settings
+        r = _redis.from_url(settings.redis_cache_url, decode_responses=True, socket_connect_timeout=1)
         mapping = r.hgetall("gpu:cc_map:v1")
         if mapping:
             return mapping

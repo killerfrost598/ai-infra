@@ -1,10 +1,23 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
+from app.core.auth import request_auth_error
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_startup_security() -> None:
+    if settings.environment.strip().lower() == "production":
+        if not settings.inferix_api_key.strip():
+            raise RuntimeError("INFERIX_API_KEY must be set in production")
+        if not settings.inferix_secret_key.strip():
+            raise RuntimeError("INFERIX_SECRET_KEY must be set in production")
 
 
 @asynccontextmanager
@@ -16,11 +29,13 @@ async def lifespan(app: FastAPI):
     from app.services import session_store
     from app.services.compat.seeder import load_seeds
 
+    _validate_startup_security()
+
     db = SessionLocal()
     try:
         load_seeds(db)
     except Exception:
-        pass  # don't crash startup if seeds fail
+        logger.exception("Compatibility seed loading failed during startup")
 
     # B8: reconcile sessions stuck in ACTIVE state after a restart.
     # Any ACTIVE row with no corresponding in-memory handle is unreachable — terminate it.
@@ -35,7 +50,7 @@ async def lifespan(app: FastAPI):
         if stuck:
             db.commit()
     except Exception:
-        pass  # non-fatal; log if needed
+        logger.exception("Session reconciliation failed during startup")
     finally:
         db.close()
 
@@ -51,6 +66,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_api_key_middleware(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/v1") and path != "/api/v1/health":
+        auth_error = request_auth_error(request)
+        if auth_error is not None:
+            status_code, detail = auth_error
+            return JSONResponse(
+                {"detail": detail},
+                status_code=status_code,
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")

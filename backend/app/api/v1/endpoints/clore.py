@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,6 +26,17 @@ _OLD_KEYS = ["clore:offers:raw", "clore:offers:filtered", "clore:offers:meta"]
 _CACHE_TTL = 600  # 10 minutes
 
 router = APIRouter()
+
+_SECRET_ENV_KEY_RE = re.compile(r"(token|secret|password|api[_-]?key|credential)", re.IGNORECASE)
+
+
+def _redact_secret_env(env: dict[str, str] | None) -> dict[str, str] | None:
+    if env is None:
+        return None
+    redacted: dict[str, str] = {}
+    for key, value in env.items():
+        redacted[key] = "***" if _SECRET_ENV_KEY_RE.search(key) else value
+    return redacted
 
 
 def _resolve_clore_key(db: Session) -> str:
@@ -226,7 +238,7 @@ def rent_server_dry_run(payload: RentRequest, db: Session = Depends(get_db)) -> 
     if payload.ports:
         params["ports"] = payload.ports
     if payload.env:
-        params["env"] = payload.env
+        params["env"] = _redact_secret_env(payload.env)
     if payload.command:
         params["command"] = payload.command
     if payload.jupyter_token:
@@ -244,8 +256,8 @@ def rent_server(payload: RentRequest, db: Session = Depends(get_db)) -> Server:
 
     Supports all Clore.ai create_order parameters including SSH key auth,
     custom Docker images, port mappings, env vars, and spot pricing.
-    The ssh_password (if provided or returned by the API) is stored on
-    the Server record so terminal sessions can connect without re-entry.
+    The ssh_password, if provided, is stored on the Server record for SSH
+    connectivity but is never returned by Clore rental list/detail responses.
     """
     if not payload.ssh_password and not payload.ssh_key:
         raise HTTPException(

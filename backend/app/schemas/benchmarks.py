@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -13,7 +16,7 @@ class InferenceBenchmarkCreate(BaseModel):
     tokens_per_second_p95: float | None = None
     max_parallel_connections: int | None = None
     vram_used_gb: float | None = None
-    measured_at: str | None = None
+    measured_at: datetime | None = None
     notes: str | None = None
     ttft_ms_p50: float | None = None
     ttft_ms_p95: float | None = None
@@ -22,15 +25,15 @@ class InferenceBenchmarkCreate(BaseModel):
     concurrency_curve: list | None = None
     knee_concurrency: int | None = None
     profile: str | None = None
-    deployment_id: str | None = None
-    task_run_id: str | None = None
-    model_variant_id: str | None = None
+    deployment_id: UUID | None = None
+    task_run_id: UUID | None = None
+    model_variant_id: UUID | None = None
 
 
 class InferenceBenchmarkResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
+    id: UUID
     gpu_model: str
     gpu_vram_gb: int | None
     model_name: str
@@ -40,9 +43,9 @@ class InferenceBenchmarkResponse(BaseModel):
     tokens_per_second_p95: float | None
     max_parallel_connections: int | None
     vram_used_gb: float | None
-    measured_at: str | None
+    measured_at: datetime | None
     notes: str | None
-    created_at: str
+    created_at: datetime
     ttft_ms_p50: float | None = None
     ttft_ms_p95: float | None = None
     prefill_tokens_per_second: float | None = None
@@ -50,9 +53,9 @@ class InferenceBenchmarkResponse(BaseModel):
     concurrency_curve: list | None = None
     knee_concurrency: int | None = None
     profile: str | None = None
-    deployment_id: str | None = None
-    task_run_id: str | None = None
-    model_variant_id: str | None = None
+    deployment_id: UUID | None = None
+    task_run_id: UUID | None = None
+    model_variant_id: UUID | None = None
 
 
 class InferenceBenchmarkListResponse(BaseModel):

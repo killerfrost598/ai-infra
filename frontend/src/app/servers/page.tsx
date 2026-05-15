@@ -2,15 +2,27 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ArrowRight, KeyRound, Plus, Server as ServerIcon, Terminal, Trash2, Wifi } from "lucide-react";
 import { api } from "@/lib/api";
-import { keys, useServers, useRentals, useCreateServer, useDeleteServer, useCreateSession } from "@/lib/queries";
+import {
+  keys,
+  useServers,
+  useRentals,
+  useCloreBalance,
+  useCreateServer,
+  useDeleteServer,
+  useCreateSession,
+  useEndCloreRental,
+} from "@/lib/queries";
 import type { CloreRental, Server, ServerCreate, SSHTestResult } from "@/lib/types";
+import { cloreBillingLabels } from "@/lib/clore-billing";
 import { serverSchema, type ServerFormValues } from "@/lib/schemas";
+import { CloreAccountSummary } from "@/components/clore/CloreAccountSummary";
+import { TerminalModal } from "@/components/terminal/TerminalModal";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,21 +32,25 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/layouts/page-
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 
 export default function ServersPage() {
-  const router = useRouter();
   const { data: serversData, isLoading, error } = useServers();
   const { data: rentalsData } = useRentals();
+  const { data: balanceData } = useCloreBalance();
   const servers: Server[] = serversData?.items ?? [];
   const total = serversData?.total ?? 0;
   const rentals: CloreRental[] = rentalsData?.rentals ?? [];
 
   const createServer = useCreateServer();
   const deleteServer = useDeleteServer();
+  const endCloreRental = useEndCloreRental();
   const createSession = useCreateSession();
 
   const qc = useQueryClient();
 
   const [registeringId, setRegisteringId] = useState<string | null>(null);
   const [startingSSH, setStartingSSH] = useState<string | null>(null);
+  const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
+  const [terminalServer, setTerminalServer] = useState<Server | null>(null);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [sshTestResults, setSshTestResults] = useState<Record<string, SSHTestResult>>({});
@@ -43,6 +59,8 @@ export default function ServersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Server | null>(null);
+  const [endingRentalId, setEndingRentalId] = useState<string | null>(null);
+  const [endRentalTarget, setEndRentalTarget] = useState<CloreRental | null>(null);
   const [sshPrivateKey, setSshPrivateKey] = useState("");
 
   const form = useForm<ServerFormValues>({
@@ -61,6 +79,20 @@ export default function ServersPage() {
     const extIds = new Set(servers.map((s) => s.external_server_id));
     return rentals.filter((r) => !extIds.has(r.id));
   }, [rentals, servers]);
+
+  const rentalByExternalId = useMemo(
+    () => new Map(rentals.map((r) => [r.id, r])),
+    [rentals],
+  );
+
+  const registeredRentalCount = useMemo(
+    () => servers.filter((s) => rentalByExternalId.has(s.external_server_id)).length,
+    [servers, rentalByExternalId],
+  );
+
+  const readyCount = servers.filter((s) => s.status === "READY").length;
+  const provisioningCount = servers.filter((s) => s.status === "PROVISIONING").length;
+  const manualCount = servers.filter((s) => s.external_server_id?.startsWith("manual-")).length;
 
   // Auto-poll every 10 s while any server is in PROVISIONING state (S3)
   const hasProvisioning = servers.some((s) => s.status === "PROVISIONING");
@@ -107,11 +139,28 @@ export default function ServersPage() {
     setStartingSSH(serverId);
     try {
       const session = await createSession.mutateAsync({ server_id: serverId });
-      sessionStorage.setItem("lab_session_id", session.id);
-      router.push("/lab");
+      const server = servers.find((s) => s.id === serverId) ?? null;
+      setTerminalSessionId(session.id);
+      setTerminalServer(server);
+      setTerminalOpen(true);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start SSH session");
+    } finally {
       setStartingSSH(null);
+    }
+  }
+
+  async function handleDisconnectTerminal() {
+    const sessionId = terminalSessionId;
+    setTerminalOpen(false);
+    setTerminalSessionId(null);
+    setTerminalServer(null);
+    if (sessionId) {
+      try {
+        await api.sessions.terminate(sessionId);
+      } catch {
+        // Closing the modal should not be blocked by a stale session.
+      }
     }
   }
 
@@ -140,6 +189,10 @@ export default function ServersPage() {
     setDeleteTarget(server);
   }
 
+  function handleEndRental(rental: CloreRental) {
+    setEndRentalTarget(rental);
+  }
+
   function confirmDeleteServer() {
     if (!deleteTarget) return;
     setDeletingId(deleteTarget.id);
@@ -151,20 +204,51 @@ export default function ServersPage() {
     });
   }
 
+  function confirmEndRental() {
+    if (!endRentalTarget) return;
+    setEndingRentalId(endRentalTarget.id);
+    endCloreRental.mutate(endRentalTarget.id, {
+      onSettled: () => {
+        setEndingRentalId(null);
+        setEndRentalTarget(null);
+      },
+    });
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Servers"
-        description={!isLoading ? `${total} registered` : "Register external or rented servers and manage SSH access."}
+        description="Manage registered hosts, Clore rentals, SSH readiness, and rental spend."
         actions={(
-          <Button onClick={openForm}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Add Server
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/clore?tab=marketplace">
+                Rent GPU
+                <ArrowRight className="size-3.5" />
+              </Link>
+            </Button>
+            <Button variant="outline" onClick={openForm}>
+              <Plus className="size-3.5" />
+              Add External
+            </Button>
+          </div>
         )}
       />
+
+      <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
+        <CloreAccountSummary
+          balance={balanceData}
+          rentals={rentals}
+          registeredCount={registeredRentalCount}
+        />
+        <Card className="grid grid-cols-2 overflow-hidden">
+          <ServerMetric label="Registered" value={String(total)} />
+          <ServerMetric label="Ready" value={String(readyCount)} tone="green" />
+          <ServerMetric label="Provisioning" value={String(provisioningCount)} tone="amber" />
+          <ServerMetric label="External" value={String(manualCount)} />
+        </Card>
+      </div>
 
       {showForm && (
         <Card className="overflow-hidden">
@@ -254,33 +338,72 @@ export default function ServersPage() {
       {!isLoading && !error && servers.length === 0 && (
         <EmptyState
           title="No servers registered yet."
-          action={<Button variant="outline" size="sm" onClick={openForm}>Register your first server</Button>}
+          description="Rent a GPU from Clore or register an external SSH host to start running workloads."
+          action={(
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button asChild size="sm">
+                <Link href="/clore?tab=marketplace">Rent GPU</Link>
+              </Button>
+              <Button variant="outline" size="sm" onClick={openForm}>Add External</Button>
+            </div>
+          )}
         />
       )}
 
-      <div className="space-y-2">
-        {servers.map((s) => (
-          <div key={s.id} className="overflow-hidden rounded-xl border border-border bg-card transition-all hover:border-muted-foreground/30">
-            <div className="group flex items-center gap-4 px-5 py-4">
-              <div className="shrink-0">
-                <StatusBadge status={s.status} />
+      {servers.length > 0 && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">Registered Servers</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Open terminals, verify SSH, and track Clore billing on rented machines.
+            </p>
+          </div>
+          <p className="text-xs text-muted-foreground">{total} total</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        {servers.map((s) => {
+          const rental = rentalByExternalId.get(s.external_server_id);
+          const billing = rental ? cloreBillingLabels(rental) : null;
+          return (
+          <Card key={s.id} className="overflow-hidden transition-colors hover:border-muted-foreground/30">
+            <div className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <ServerIcon className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link href={`/servers/${s.id}`} className="truncate font-medium hover:underline">
+                      {s.hostname}
+                    </Link>
+                    <StatusBadge status={s.status} />
+                    {rental && (
+                      <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                        Clore rental
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span>{s.ssh_username}@{s.hostname}:{s.ssh_port}</span>
+                    <span className="inline-flex items-center gap-1">
+                      <KeyRound className="size-3" />
+                      {s.has_ssh_key ? "key" : s.has_ssh_password ? "password" : "no auth"}
+                    </span>
+                    <span>{s.gpu_model ?? "GPU unknown"}</span>
+                    {s.vram_gb != null && <span>{s.vram_gb} GB VRAM</span>}
+                    {s.cuda_version && <span>CUDA {s.cuda_version}</span>}
+                  </div>
+                  {billing && (billing.rate || billing.cost || billing.creationFee) && (
+                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      {[billing.rate, billing.cost, billing.creationFee ? `fee ${billing.creationFee}` : ""].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                </div>
               </div>
 
-              <Link href={`/servers/${s.id}`} className="flex flex-1 items-center gap-4 min-w-0">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{s.hostname}</p>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {s.ssh_username}@{s.hostname}:{s.ssh_port}
-                    {s.has_ssh_key ? " · key" : s.has_ssh_password ? " · password" : ""}
-                  </p>
-                </div>
-                <div className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">
-                  <p>{s.gpu_model ?? "GPU unknown"}</p>
-                  <p>{s.vram_gb != null ? `${s.vram_gb} GB VRAM` : ""}{s.cuda_version ? ` · CUDA ${s.cuda_version}` : ""}</p>
-                </div>
-              </Link>
-
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 transition-opacity sm:flex-nowrap">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -288,6 +411,7 @@ export default function ServersPage() {
                   disabled={s.status === "TERMINATED"}
                   onClick={() => handleTestSSH(s.id)}
                 >
+                  <Wifi className="size-3.5" />
                   {s.status === "PROVISIONING" ? "Re-check SSH" : "Test SSH"}
                 </Button>
                 <Button
@@ -297,16 +421,29 @@ export default function ServersPage() {
                   disabled={s.status === "TERMINATED"}
                   onClick={() => handleStartSSH(s.id)}
                 >
+                  <Terminal className="size-3.5" />
                   Open Terminal
                 </Button>
+                {rental && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-destructive/40 text-destructive hover:text-destructive"
+                    loading={endingRentalId === rental.id}
+                    onClick={() => handleEndRental(rental)}
+                  >
+                    End Rental
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-destructive hover:text-destructive"
+                  className="ml-auto text-destructive hover:text-destructive"
                   loading={deletingId === s.id}
                   onClick={() => handleDelete(s)}
                 >
-                  Delete
+                  <Trash2 className="size-3.5" />
+                  Remove
                 </Button>
               </div>
             </div>
@@ -345,8 +482,9 @@ export default function ServersPage() {
                 </div>
               </div>
             )}
-          </div>
-        ))}
+          </Card>
+          );
+        })}
       </div>
 
       {unregisteredRentals.length > 0 && (
@@ -357,7 +495,9 @@ export default function ServersPage() {
               These rentals exist on Clore.ai but aren&apos;t in your servers list. Register them to start SSH sessions.
             </p>
           </div>
-          {unregisteredRentals.map((r) => (
+          {unregisteredRentals.map((r) => {
+            const billing = cloreBillingLabels(r);
+            return (
             <Card key={r.id} className="overflow-hidden border-dashed">
               <div className="flex items-center gap-4 px-5 py-4">
                 <StatusBadge status={r.status.toUpperCase()} />
@@ -366,8 +506,21 @@ export default function ServersPage() {
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {r.hostname}:{r.ssh_port} · {r.ssh_username}
                     {r.vram_gb > 0 ? ` · ${r.vram_gb} GB VRAM` : ""}
+                    {billing.rate ? ` · ${billing.rate}` : ""}
                   </p>
+                  {billing.cost && (
+                    <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">{billing.cost}</p>
+                  )}
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-destructive/40 text-destructive hover:text-destructive"
+                  loading={endingRentalId === r.id}
+                  onClick={() => handleEndRental(r)}
+                >
+                  End Rental
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -384,7 +537,8 @@ export default function ServersPage() {
                 />
               )}
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -393,10 +547,35 @@ export default function ServersPage() {
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-        title={deleteTarget ? `Delete server ${deleteTarget.hostname}?` : "Delete server?"}
-        description="This removes the server record from the platform. This action cannot be undone."
-        confirmLabel="Delete Server"
+        title={deleteTarget ? `Remove server ${deleteTarget.hostname}?` : "Remove server?"}
+        description="This removes only the local server record from this platform. It does not stop a Clore.ai rental."
+        confirmLabel="Remove Server"
         onConfirm={confirmDeleteServer}
+      />
+      <ConfirmActionDialog
+        open={!!endRentalTarget}
+        onOpenChange={(open) => {
+          if (!open) setEndRentalTarget(null);
+        }}
+        title={endRentalTarget ? `End Clore rental on ${endRentalTarget.gpu_name}?` : "End Clore rental?"}
+        description="This stops the Clore.ai rental and billing for this machine. Any registered server record will be marked inactive after sync."
+        confirmLabel="End Rental"
+        onConfirm={confirmEndRental}
+      />
+      <TerminalModal
+        open={terminalOpen}
+        onOpenChange={(open) => {
+          if (!open) setTerminalOpen(false);
+          else setTerminalOpen(true);
+        }}
+        sessionId={terminalSessionId}
+        serverMeta={{
+          gpu_model: terminalServer?.gpu_model,
+          vram_gb: terminalServer?.vram_gb,
+          hostname: terminalServer?.hostname,
+          status: terminalServer?.status,
+        }}
+        onDisconnect={handleDisconnectTerminal}
       />
     </div>
   );
@@ -461,5 +640,29 @@ function RegisterRentalInline({
         <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
+  );
+}
+
+function ServerMetric({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "green" | "amber";
+}) {
+  const color =
+    tone === "green"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : tone === "amber"
+        ? "text-amber-600 dark:text-amber-400"
+        : "";
+
+  return (
+    <div className="min-h-[86px] border-b border-r border-border p-4 odd:border-l-0 even:border-r-0 [&:nth-last-child(-n+2)]:border-b-0">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={`mt-2 text-2xl font-semibold tabular-nums ${color}`}>{value}</p>
+    </div>
   );
 }

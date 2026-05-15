@@ -1,6 +1,8 @@
 from datetime import datetime
 from uuid import UUID
 
+from pydantic import Field
+
 from app.schemas.base import BaseSchema, UUIDSchema
 
 
@@ -8,7 +10,7 @@ class MachineSnapshotPayload(BaseSchema):
     driver_version: str | None = None
     cuda_runtime_host: str | None = None
     gpu_count: int = 0
-    gpus: list[dict] = []
+    gpus: list[dict] = Field(default_factory=list)
     nvlink_topology: str | None = None
     homogeneous: bool = True
     docker_present: bool = False

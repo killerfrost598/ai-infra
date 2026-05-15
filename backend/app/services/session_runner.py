@@ -11,7 +11,7 @@ import paramiko
 
 from app.models.entities import Server
 from app.services.session_store import SessionHandle
-from app.services.ssh_manager import _load_pkey_from_content
+from app.services.ssh_manager import _load_pkey_from_content, configure_host_key_policy
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ _strip_ansi = strip_ansi
 def open_session(server: Server) -> SessionHandle:
     """Open an SSH connection, invoke a PTY shell, and drain the initial prompt."""
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(client)
 
     connect_kwargs: dict = {
         "hostname": server.hostname,

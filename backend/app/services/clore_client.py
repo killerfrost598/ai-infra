@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class CloreOffer(BaseModel):
     id: str
     gpu_name: str
     gpu_count: int = 1
-    gpu_array: list[str] = []        # raw per-GPU strings (non-empty for mixed rigs)
+    gpu_array: list[str] = Field(default_factory=list)  # raw per-GPU strings (non-empty for mixed rigs)
     vram_gb: int
     cuda_version: str | None = None
     price_per_day: float
@@ -80,7 +80,7 @@ class CloreOffer(BaseModel):
     pcie_version: str | None = None
     pcie_width: int | None = None
     # Marketplace metadata
-    allowed_coins: list[str] = []
+    allowed_coins: list[str] = Field(default_factory=list)
     score: float | None = None       # server reliability / uptime score
     mrl: int | None = None           # minimum rental length in hours
     # Parsed GPU fields — None for mixed rigs (excluded from grouped view)
@@ -91,7 +91,7 @@ class CloreOffer(BaseModel):
 
 
 class CloreBalance(BaseModel):
-    balances: list[dict] = []
+    balances: list[dict] = Field(default_factory=list)
 
 
 class CloreServer(BaseModel):
@@ -101,10 +101,14 @@ class CloreServer(BaseModel):
     hostname: str
     ssh_port: int
     ssh_username: str
-    ssh_password: str | None = None
+    ssh_password: str | None = Field(default=None, exclude=True)
     cuda_version: str | None = None
     status: str
     price_per_day: float | None = None
+    currency: str | None = None
+    creation_fee: float | None = None
+    spend: float | None = None
+    total_cost: float | None = None
     rented_at: str | None = None  # ISO-8601 UTC timestamp
 
 
@@ -270,7 +274,7 @@ def _raw_order_to_server(raw: dict) -> CloreServer:
     if raw_id is None:
         raise ValueError("Clore order is missing id/order_id/rental_id")
 
-    # Price — Clore stores on-demand price at top-level or inside a price/specs object
+    # Billing fields from /my_orders. Values are in `currency`, not necessarily USD.
     price_per_day: float | None = None
     for field in ("price", "price_per_day", "cost_per_day"):
         v = raw.get(field)
@@ -279,6 +283,14 @@ def _raw_order_to_server(raw: dict) -> CloreServer:
             if extracted > 0:
                 price_per_day = extracted
                 break
+    currency = str(raw["currency"]) if raw.get("currency") is not None else None
+    creation_fee = _to_float(raw.get("creation_fee")) if raw.get("creation_fee") is not None else None
+    spend = _to_float(raw.get("spend")) if raw.get("spend") is not None else None
+    total_cost = (
+        (creation_fee or 0.0) + (spend or 0.0)
+        if creation_fee is not None or spend is not None
+        else None
+    )
 
     # Creation timestamp — `ct` is unix epoch seconds
     rented_at: str | None = None
@@ -300,6 +312,10 @@ def _raw_order_to_server(raw: dict) -> CloreServer:
         cuda_version=None,
         status=status,
         price_per_day=price_per_day,
+        currency=currency,
+        creation_fee=creation_fee,
+        spend=spend,
+        total_cost=total_cost,
         rented_at=rented_at,
     )
 

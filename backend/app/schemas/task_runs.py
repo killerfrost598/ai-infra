@@ -17,7 +17,6 @@ class TaskRunUpdate(BaseSchema):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     duration_seconds: int | None = None
-    logs_path: str | None = None
     error_summary: str | None = None
 
 

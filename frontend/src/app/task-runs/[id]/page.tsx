@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, withInferixApiKey } from "@/lib/api";
 import type { TaskRun } from "@/lib/types";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Card } from "@/components/ui/card";
@@ -75,7 +75,7 @@ export default function TaskRunDetailPage() {
     }
 
     function startLogStream(initialStatus: string) {
-      const es = new EventSource(`/api/v1/task-runs/${id}/logs/stream`);
+      const es = new EventSource(withInferixApiKey(`/api/v1/task-runs/${id}/logs/stream`));
       esRef.current = es;
       setStreaming(!TERMINAL.has(initialStatus));
 

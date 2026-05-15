@@ -6,6 +6,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Index, 
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.crypto import SECRET_SETTING_KEYS, decrypt_secret, decrypt_setting_value, encrypt_secret, encrypt_setting_value
 from app.db.base import Base
 
 
@@ -47,8 +48,8 @@ class Server(Base):
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
     ssh_port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)
     ssh_username: Mapped[str] = mapped_column(String(128), nullable=False)
-    ssh_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    ssh_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    _ssh_password: Mapped[str | None] = mapped_column("ssh_password", Text, nullable=True)
+    _ssh_private_key: Mapped[str | None] = mapped_column("ssh_private_key", Text, nullable=True)
     gpu_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     vram_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cuda_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -57,6 +58,22 @@ class Server(Base):
     os_image: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[ServerStatus] = mapped_column(Enum(ServerStatus), default=ServerStatus.NEW, nullable=False)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    @property
+    def ssh_password(self) -> str | None:
+        return decrypt_secret(self._ssh_password)
+
+    @ssh_password.setter
+    def ssh_password(self, value: str | None) -> None:
+        self._ssh_password = encrypt_secret(value)
+
+    @property
+    def ssh_private_key(self) -> str | None:
+        return decrypt_secret(self._ssh_private_key)
+
+    @ssh_private_key.setter
+    def ssh_private_key(self, value: str | None) -> None:
+        self._ssh_private_key = encrypt_secret(value)
 
 
 class Playbook(Base):
@@ -156,10 +173,20 @@ class PlatformSetting(Base):
     __tablename__ = "platform_settings"
 
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
-    value: Mapped[str] = mapped_column(Text, nullable=False)
+    _value: Mapped[str] = mapped_column("value", Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+    @property
+    def value(self) -> str:
+        if self.key in SECRET_SETTING_KEYS:
+            return decrypt_setting_value(self.key, self._value)
+        return self._value
+
+    @value.setter
+    def value(self, value: str) -> None:
+        self._value = encrypt_setting_value(self.key, value)
 
 
 class SessionStatus(str, enum.Enum):
@@ -472,4 +499,80 @@ class ModelRunAttempt(Base):
     __table_args__ = (
         Index("ix_runs_server_started", "server_id", "started_at"),
         Index("ix_runs_model_quant_succeeded", "model_id", "quant_id", "succeeded"),
+    )
+
+
+class LabServerState(Base):
+    __tablename__ = "lab_server_state"
+
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    initialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    vllm_installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    vllm_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    vllm_help_flags: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    active_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("models.id", ondelete="SET NULL"), nullable=True
+    )
+    active_quant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_quants.id", ondelete="SET NULL"), nullable=True
+    )
+    active_model_repo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    active_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    active_endpoint: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    active_profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    active_health_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    active_task_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    active_model_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_run_attempts.id", ondelete="SET NULL"), nullable=True
+    )
+    active_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    last_successful_profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_failed_profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_failure_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_failure_diagnosis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class LabModelCache(Base):
+    __tablename__ = "lab_model_caches"
+    __table_args__ = (
+        UniqueConstraint("server_id", "model_id", "quant_id", "repo_id", name="uq_lab_model_cache_repo"),
+        Index("ix_lab_model_caches_server_status", "server_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    model_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("models.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    quant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_quants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    repo_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    cache_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    total_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_download_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

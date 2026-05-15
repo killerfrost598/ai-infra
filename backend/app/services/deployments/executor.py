@@ -19,8 +19,27 @@ from fastapi.encoders import jsonable_encoder
 
 from app.db.session import SessionLocal
 from app.models.entities import FailureStage, ModelRunAttempt, RunStatus, TaskRun, TaskStatus
-from app.schemas.deployment_plan import DeploymentPlanStep
+from app.schemas.deployment_plan import DeploymentPlanStep, PipelineModelFlags
 from app.services import session_store
+from app.services.lab_state import (
+    clear_active_model,
+    mark_active_model,
+    mark_launch_failure,
+    mark_server_initialized,
+    mark_vllm_installed,
+    read_vllm_log_tail,
+    record_vllm_probe,
+)
+from app.services.lab_vllm import (
+    build_tmux_launch_cmd,
+    build_vllm_serve_cmd,
+    classify_vllm_failure,
+    ensure_c_compiler_cmd,
+    ensure_tmux_cmd,
+    profile_to_dict,
+    retry_profiles,
+    wait_for_vllm_ready_cmd,
+)
 from app.services.settings_service import get_setting
 from app.workers.utils import _finish_task_run, _log_path, _make_logger, _utcnow
 
@@ -108,6 +127,16 @@ def _extract_container_id(stdout: str) -> str | None:
         if len(candidate) >= 12 and all(ch in "0123456789abcdef" for ch in candidate.lower()):
             return candidate[:64]
     return None
+
+
+def _stage_for_known_issue(issue_id: str | None) -> FailureStage:
+    if issue_id == "cuda_oom":
+        return FailureStage.OOM
+    if issue_id in {"c_compiler_missing", "python_headers_missing", "missing_vllm"}:
+        return FailureStage.PLAN
+    if issue_id == "health_timeout":
+        return FailureStage.HEALTH_CHECK
+    return FailureStage.OTHER
 
 
 def _read_vram_used(client) -> float | None:
@@ -223,6 +252,15 @@ def run_deployment_task(
                     run.failure_message = "Deployment cancelled"
                     db.commit()
                     return
+
+                if step.kind == "structured_download":
+                    # Handled by model_download service via SSE; executor does not run it
+                    _update_step(
+                        task_run=task_run, db=db, step_id=step.id,
+                        status="SKIPPED", finished_at=_now(),
+                        notes="Structured download — handled by /api/v1/model-downloads.",
+                    )
+                    continue
 
                 if not step.command:
                     _update_step(task_run=task_run, db=db, step_id=step.id, status="SKIPPED", finished_at=_now())
@@ -348,6 +386,209 @@ def run_deployment_task(
         db.close()
 
 
+def _write_launch_attempts(task_run: TaskRun, db, attempts: list[dict]) -> None:
+    metadata = dict(task_run.metadata_json or {})
+    metadata["attempts"] = attempts
+    task_run.metadata_json = metadata
+    db.commit()
+
+
+def run_vllm_launch_retry_task(
+    *,
+    task_run_id: str,
+    model_run_id: str,
+    session_id: str,
+    server_id: str,
+    model_id: str,
+    quant_id: str,
+    hf_repo: str,
+    flags: dict,
+    health_timeout_seconds: int = 420,
+) -> None:
+    """Launch vLLM and retry known startup failure modes with safe profiles."""
+    db = SessionLocal()
+    log_file: str | None = None
+    task_run: TaskRun | None = None
+    run: ModelRunAttempt | None = None
+    attempts: list[dict] = []
+    try:
+        task_run = db.query(TaskRun).filter(TaskRun.id == UUID(task_run_id)).first()
+        run = db.query(ModelRunAttempt).filter(ModelRunAttempt.id == UUID(model_run_id)).first()
+        if not task_run or not run:
+            return
+
+        log_file = _log_path(task_run_id)
+        task_run.logs_path = log_file
+        task_run.status = TaskStatus.RUNNING
+        task_run.started_at = _utcnow()
+        run.status = RunStatus.RUNNING
+        db.commit()
+
+        handle = session_store.get(session_id)
+        if handle is None:
+            raise RuntimeError("No active SSH handle for this session")
+
+        hf_token = get_setting("hf_token", db)
+        mask_secrets = [hf_token] if hf_token else []
+        desired_flags = PipelineModelFlags.model_validate(flags)
+        profiles = retry_profiles(desired_flags)
+
+        with open(log_file, "w", encoding="utf-8") as log_f:
+            log = _make_logger(log_f)
+            log(f"[inferix] launch {hf_repo} with auto-retry\n\n")
+            log("[inferix] profiles: desired -> 8192/0.85 -> 4096/0.75/chunked/eager -> 2048/0.70/chunked/eager\n\n")
+
+            for idx, profile_flags in enumerate(profiles, start=1):
+                profile_name = "desired" if idx == 1 else f"fallback-{idx - 1}"
+                profile = profile_to_dict(profile_flags, name=profile_name)
+                attempt = {
+                    "index": idx,
+                    "profile": profile,
+                    "status": "RUNNING",
+                    "known_issue_matches": [],
+                    "started_at": _now().isoformat(),
+                }
+                attempts.append(attempt)
+                _write_launch_attempts(task_run, db, attempts)
+
+                log(f"[inferix] attempt {idx}/{len(profiles)} profile={profile_name} {profile}\n\n")
+                launch_cmd = build_tmux_launch_cmd(build_vllm_serve_cmd(hf_repo, profile_flags))
+                run.launch_command = _mask(launch_cmd, mask_secrets)
+                run.launch_plan_json = {"profile": profile, "retry_profiles": [profile_to_dict(p) for p in profiles]}
+                db.commit()
+
+                commands = [
+                    ("ensure tmux", ensure_tmux_cmd(), 1800),
+                    ("ensure C build dependencies", ensure_c_compiler_cmd(), 1800),
+                    ("stop previous vLLM session", "tmux kill-session -t inferix-vllm 2>/dev/null || true", 60),
+                    ("launch vLLM", launch_cmd, 120),
+                    (
+                        "wait for /v1/models",
+                        wait_for_vllm_ready_cmd(profile_flags.remote_port, timeout_seconds=health_timeout_seconds),
+                        max(60, health_timeout_seconds + 30),
+                    ),
+                ]
+
+                failed_text = ""
+                failed_rc = 0
+                for label, command, timeout in commands:
+                    log(f"$ {_mask(command, mask_secrets)}\n")
+                    try:
+                        out, err, rc = _exec(handle.client, command, timeout=timeout, hf_token=hf_token)
+                    except Exception as exc:
+                        out, err, rc = "", str(exc), 1
+                    masked_out = _mask(out, mask_secrets)
+                    masked_err = _mask(err, mask_secrets)
+                    if masked_out:
+                        log(_tail(masked_out) + ("\n" if not masked_out.endswith("\n") else ""))
+                    if masked_err:
+                        log("--- stderr ---\n" + _tail(masked_err) + ("\n" if not masked_err.endswith("\n") else ""))
+                    log(f"--- {label} exit code: {rc} ---\n\n")
+                    if label == "launch vLLM":
+                        run.container_id = _extract_container_id(out) or run.container_id
+                        db.commit()
+                    if rc != 0:
+                        failed_text = "\n".join([masked_out, masked_err, read_vllm_log_tail(handle.client)]).strip()
+                        failed_rc = rc
+                        break
+
+                if failed_rc == 0:
+                    vram_used = _read_vram_used(handle.client)
+                    run.status = RunStatus.SUCCESS
+                    run.succeeded = True
+                    run.failure_stage = None
+                    run.failure_message = None
+                    run.health_check_url = f"http://127.0.0.1:{profile_flags.remote_port}/v1/models"
+                    run.health_check_ok = True
+                    run.vram_used_gb = vram_used
+                    task_run.status = TaskStatus.SUCCESS
+                    attempt["status"] = "SUCCESS"
+                    attempt["finished_at"] = _now().isoformat()
+                    _write_launch_attempts(task_run, db, attempts)
+                    mark_active_model(
+                        db,
+                        server_id=UUID(server_id),
+                        model_id=UUID(model_id),
+                        quant_id=UUID(quant_id),
+                        repo_id=hf_repo,
+                        port=profile_flags.remote_port,
+                        profile=profile,
+                        task_run_id=task_run.id,
+                        model_run_id=run.id,
+                        health_ok=True,
+                    )
+                    log("[inferix] vLLM is healthy; launch complete\n")
+                    db.commit()
+                    return
+
+                matches = classify_vllm_failure(failed_text)
+                failure_kind = matches[0]["issue_id"] if matches else "unknown"
+                attempt["status"] = "FAILED"
+                attempt["exit_code"] = failed_rc
+                attempt["known_issue_matches"] = matches
+                attempt["finished_at"] = _now().isoformat()
+                attempt["error_tail"] = _tail(failed_text, 2000)
+                _write_launch_attempts(task_run, db, attempts)
+                mark_launch_failure(
+                    db,
+                    server_id=UUID(server_id),
+                    profile=profile,
+                    log_text=failed_text,
+                    reason=f"attempt {idx} failed: {failure_kind}",
+                )
+                run.status = RunStatus.FAILED
+                run.succeeded = False
+                run.failure_stage = _stage_for_known_issue(failure_kind)
+                run.failure_message = _tail(failed_text, 4000) or f"Launch failed with exit code {failed_rc}"
+                db.commit()
+
+                log(f"[inferix] diagnosis: {failure_kind}\n")
+                if matches:
+                    for match in matches:
+                        log(f"  - {match['title']}: {match['recommended_fix']}\n")
+                log("\n")
+
+                retryable = failure_kind in {"cuda_oom", "health_timeout", "port_in_use"} or (
+                    matches and matches[0].get("safe_to_auto_apply") and matches[0].get("remediation") == "lower_memory_profile"
+                )
+                if not retryable:
+                    log("[inferix] failure is not safe to resolve by launch-profile retry; stopping\n")
+                    break
+
+            task_run.status = TaskStatus.FAILED
+            task_run.error_summary = run.failure_message if run else "vLLM launch failed"
+            db.commit()
+
+    except Exception as exc:
+        logger.exception("vLLM retry launch task failed")
+        if task_run:
+            task_run.status = TaskStatus.FAILED
+            task_run.error_summary = str(exc)
+        if run:
+            run.status = RunStatus.FAILED
+            run.succeeded = False
+            run.failure_stage = FailureStage.OTHER
+            run.failure_message = str(exc)[:4000]
+        db.commit()
+        if log_file:
+            try:
+                with open(log_file, "a", encoding="utf-8") as log_f:
+                    log_f.write(f"\nERROR: {exc}\n")
+            except Exception:
+                pass
+    finally:
+        task_run = db.query(TaskRun).filter(TaskRun.id == UUID(task_run_id)).first()
+        run = db.query(ModelRunAttempt).filter(ModelRunAttempt.id == UUID(model_run_id)).first()
+        if run:
+            now = _now()
+            run.completed_at = now
+            if run.started_at:
+                run.duration_seconds = max(0, int((now - run.started_at).total_seconds()))
+        if task_run:
+            _finish_task_run(task_run, db)
+        db.close()
+
+
 def run_pipeline_step_task(
     *,
     task_run_id: str,
@@ -406,6 +647,22 @@ def run_pipeline_step_task(
 
             db.refresh(task_run)
             task_run.status = TaskStatus.SUCCESS
+            metadata = task_run.metadata_json or {}
+            pipeline_step = metadata.get("pipeline_step")
+            try:
+                if pipeline_step == "init_server" and task_run.server_id:
+                    mark_server_initialized(db, task_run.server_id)
+                elif pipeline_step == "install_vllm" and task_run.server_id:
+                    try:
+                        record_vllm_probe(db, task_run.server_id, handle.client)
+                    except Exception:
+                        logger.exception("Failed to probe vLLM install state")
+                        mark_vllm_installed(db, task_run.server_id)
+                elif pipeline_step == "stop_model" and task_run.server_id:
+                    clear_active_model(db, task_run.server_id)
+            except Exception:
+                logger.exception("Failed to persist Lab state for %s", pipeline_step)
+                db.rollback()
             log(f"[inferix] {step_name} complete\n")
             db.commit()
 

@@ -101,7 +101,7 @@ def test_ssh_connection(
         raise HTTPException(status_code=404, detail="Server not found")
 
     import paramiko
-    from app.services.ssh_manager import _load_pkey_from_content
+    from app.services.ssh_manager import _load_pkey_from_content, configure_host_key_policy
 
     steps: list[SSHTestStep] = []
 
@@ -124,7 +124,7 @@ def test_ssh_connection(
 
     # Step 2 — SSH authentication
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(client)
     connect_kwargs: dict = {
         "hostname": server.hostname,
         "port": server.ssh_port,

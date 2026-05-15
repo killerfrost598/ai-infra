@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
-from app.models.entities import Model, ModelQuant, Server
+from app.models.entities import LabServerState, Model, ModelQuant, Server, TaskRun
 from app.models.entities import Session as SessionModel
 from app.schemas.lab import LaunchRecommendation
 from app.services.settings_service import get_setting
@@ -20,6 +20,7 @@ from app.services.settings_service import get_setting
 
 SYSTEM_PROMPT = """You are helping an operator deploy an open-source LLM on a rented GPU host.
 Use only the supplied platform facts. Do not invent GPU specs, model metadata, or installed tools.
+For known failures, classify the failure and map it to the approved remediation in the supplied context. Do not propose arbitrary shell execution as an automatic action. Destructive or risky actions require explicit operator confirmation.
 Return a concise operator runbook with:
 1. Risk summary.
 2. Required preflight checks.
@@ -46,6 +47,20 @@ def build_deploy_context(
     quant = db.query(ModelQuant).filter(ModelQuant.id == quant_id).first()
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first() if session_id else None
     snapshot = (session.metadata_json or {}).get("host_snapshot") if session else None
+    lab_state = db.query(LabServerState).filter(LabServerState.server_id == server_id).first()
+    recent_task = (
+        db.query(TaskRun)
+        .filter(TaskRun.server_id == server_id)
+        .order_by(TaskRun.created_at.desc())
+        .first()
+    )
+    task_log_tail = ""
+    if recent_task and recent_task.logs_path:
+        try:
+            with open(recent_task.logs_path, encoding="utf-8") as f:
+                task_log_tail = f.read()[-6000:]
+        except Exception:
+            task_log_tail = ""
 
     return {
         "operator_goal": operator_goal,
@@ -83,6 +98,35 @@ def build_deploy_context(
             "gated": quant.gated if quant else None,
         },
         "platform_recommendation": recommendation.model_dump(mode="json"),
+        "lab_state": {
+            "initialized": bool(lab_state and lab_state.initialized_at),
+            "vllm_version": lab_state.vllm_version if lab_state else None,
+            "vllm_help_flags": lab_state.vllm_help_flags if lab_state else None,
+            "active_endpoint": lab_state.active_endpoint if lab_state else None,
+            "active_model_repo": lab_state.active_model_repo if lab_state else None,
+            "active_profile": lab_state.active_profile_json if lab_state else None,
+            "last_successful_profile": lab_state.last_successful_profile_json if lab_state else None,
+            "last_failed_profile": lab_state.last_failed_profile_json if lab_state else None,
+            "last_failure_kind": lab_state.last_failure_kind if lab_state else None,
+            "last_failure_reason": lab_state.last_failure_reason if lab_state else None,
+            "known_issue_matches": lab_state.last_failure_diagnosis_json if lab_state else None,
+        },
+        "recent_task": {
+            "id": str(recent_task.id) if recent_task else None,
+            "task_type": recent_task.task_type if recent_task else None,
+            "status": recent_task.status.value if recent_task else None,
+            "error_summary": recent_task.error_summary if recent_task else None,
+            "metadata": recent_task.metadata_json if recent_task else None,
+            "log_tail": task_log_tail,
+        },
+        "approved_remediations": [
+            "install_tmux",
+            "install_build_deps",
+            "lower_memory_profile",
+            "check_hf_token",
+            "restart_managed_session",
+            "install_vllm",
+        ],
     }
 
 

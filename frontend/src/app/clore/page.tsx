@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import {
   useTerminateRental, useCreateSession,
 } from "@/lib/queries";
 import type { CloreOffer, CloreOfferGroup, CloreRental, Server } from "@/lib/types";
+import { cloreBillingLabels, fmtCloreAmount } from "@/lib/clore-billing";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,6 +18,7 @@ import { CacheStatusBar } from "@/components/clore/CacheStatusBar";
 import { OfferCard, fmtSpeed } from "@/components/clore/OfferCard";
 import { RentDialog } from "@/components/clore/RentDialog";
 import { RegisterRentalForm } from "@/components/clore/RegisterRentalForm";
+import { CloreAccountSummary } from "@/components/clore/CloreAccountSummary";
 import { PageHeader } from "@/components/layouts/page-header";
 import { ErrorState, LoadingState } from "@/components/layouts/page-states";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
@@ -43,7 +45,20 @@ const TAB_DESCRIPTIONS: Record<Tab, string> = {
 };
 
 export default function ClorePage() {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("marketplace");
+
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested === "marketplace" || requested === "gpu-groups" || requested === "rentals") {
+      setTab(requested);
+    }
+  }, []);
+
+  function selectTab(nextTab: Tab) {
+    setTab(nextTab);
+    router.replace(`/clore?tab=${nextTab}`, { scroll: false });
+  }
 
   return (
     <div className="space-y-6">
@@ -55,7 +70,7 @@ export default function ClorePage() {
             {(["marketplace", "gpu-groups", "rentals"] as Tab[]).map((t) => (
               <button
                 key={t}
-                onClick={() => setTab(t)}
+                onClick={() => selectTab(t)}
                 className={`rounded-md px-3 py-1.5 transition-colors sm:px-4 ${
                   tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -69,7 +84,7 @@ export default function ClorePage() {
 
       {tab === "marketplace" && <MarketplaceTab />}
       {tab === "gpu-groups"  && <GpuGroupsTab />}
-      {tab === "rentals"     && <RentalsTab />}
+      {tab === "rentals"     && <RentalsTab onRentClick={() => selectTab("marketplace")} />}
     </div>
   );
 }
@@ -518,14 +533,7 @@ function fmtDuration(rentedAt: string | null): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-function fmtCost(pricePerDay: number | null, rentedAt: string | null): string {
-  if (!pricePerDay || !rentedAt) return "";
-  const hoursElapsed = Math.max(0, (Date.now() - new Date(rentedAt).getTime()) / 3_600_000);
-  const cost = (pricePerDay / 24) * hoursElapsed;
-  return `$${cost.toFixed(3)} spent`;
-}
-
-function RentalsTab() {
+function RentalsTab({ onRentClick }: { onRentClick: () => void }) {
   const router = useRouter();
   const { data: rentalsData, isLoading, error } = useRentals();
   const { data: serversData } = useServers(0, 100);
@@ -545,7 +553,10 @@ function RentalsTab() {
     [servers],
   );
 
-  const totalDailyBurn = rentals.reduce((sum, r) => sum + (r.price_per_day ?? 0), 0);
+  const registeredRentalCount = useMemo(
+    () => rentals.filter((r) => serverByExtId.has(r.id)).length,
+    [rentals, serverByExtId],
+  );
 
   function handleTerminate(id: string) {
     const target = rentals.find((r) => r.id === id) ?? null;
@@ -569,34 +580,22 @@ function RentalsTab() {
       {error && <ErrorState message={error.message} />}
       {isLoading && <LoadingState text="Loading rentals…" />}
 
-      {/* Balance + burn rate summary */}
-      {!isLoading && !error && (balanceData || rentals.length > 0) && (
-        <div className="flex flex-wrap gap-3">
-          {balanceData?.balances.map((b) => (
-            <Card key={b.currency} className="flex items-center gap-3 px-4 py-2.5">
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{b.currency} Balance</p>
-                <p className="text-sm font-semibold tabular-nums">{b.amount.toFixed(4)}</p>
-              </div>
-            </Card>
-          ))}
-          {totalDailyBurn > 0 && (
-            <Card className="flex items-center gap-3 px-4 py-2.5">
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Daily burn</p>
-                <p className="text-sm font-semibold tabular-nums text-amber-600 dark:text-amber-400">
-                  ${totalDailyBurn.toFixed(2)}/day
-                </p>
-              </div>
-            </Card>
-          )}
-        </div>
+      {!isLoading && !error && (
+        <CloreAccountSummary
+          balance={balanceData}
+          rentals={rentals}
+          registeredCount={registeredRentalCount}
+          onRentClick={onRentClick}
+        />
       )}
 
       {!isLoading && !error && rentals.length === 0 && (
-        <Card className="px-6 py-12 text-center">
-          <p className="text-sm text-muted-foreground">No active rentals.</p>
-          <p className="mt-1 text-xs text-muted-foreground/60">Rent a server from the Marketplace tab.</p>
+        <Card className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+          <div>
+            <p className="text-sm font-medium">No active Clore rentals</p>
+            <p className="mt-1 text-xs text-muted-foreground/60">Choose a GPU offer, rent it, then register SSH access here.</p>
+          </div>
+          <Button onClick={onRentClick}>Rent GPU</Button>
         </Card>
       )}
 
@@ -604,7 +603,7 @@ function RentalsTab() {
         {rentals.map((r) => {
           const server = serverByExtId.get(r.id);
           const isRegistering = registeringId === r.id;
-          const costLabel = fmtCost(r.price_per_day, r.rented_at);
+          const billing = cloreBillingLabels(r);
           const durationLabel = fmtDuration(r.rented_at);
           return (
             <Card key={r.id} className="overflow-hidden">
@@ -620,11 +619,12 @@ function RentalsTab() {
                     <span>{r.ssh_username}</span>
                     {r.vram_gb > 0 && <span>{r.vram_gb} GB VRAM</span>}
                     {r.cuda_version && <span>CUDA {r.cuda_version}</span>}
-                    {r.price_per_day != null && (
-                      <span className="text-foreground/70 font-medium">${r.price_per_day.toFixed(2)}/day</span>
+                    {billing.rate && <span className="text-foreground/70 font-medium">{billing.rate}</span>}
+                    {r.creation_fee != null && (
+                      <span className="text-muted-foreground/70">fee {fmtCloreAmount(r.creation_fee, r.currency)}</span>
                     )}
                     {durationLabel && <span className="text-muted-foreground/70">up {durationLabel}</span>}
-                    {costLabel && <span className="text-amber-600 dark:text-amber-400">{costLabel}</span>}
+                    {billing.cost && <span className="text-amber-600 dark:text-amber-400">{billing.cost}</span>}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -641,7 +641,7 @@ function RentalsTab() {
                   )}
                   <Button variant="destructive" size="sm" loading={terminateRental.isPending}
                     onClick={() => handleTerminate(r.id)}>
-                    Terminate
+                    End Rental
                   </Button>
                 </div>
               </div>
@@ -662,9 +662,9 @@ function RentalsTab() {
         onOpenChange={(open) => {
           if (!open) setTerminateTarget(null);
         }}
-        title={terminateTarget ? `Terminate rental on ${terminateTarget.gpu_name}?` : "Terminate rental?"}
-        description="The server will be stopped and rental data will be lost."
-        confirmLabel="Terminate Rental"
+        title={terminateTarget ? `End rental on ${terminateTarget.gpu_name}?` : "End rental?"}
+        description="This stops the Clore.ai rental and billing for this machine. The local server record will be marked inactive."
+        confirmLabel="End Rental"
         onConfirm={() => {
           if (!terminateTarget) return;
           terminateRental.mutate(terminateTarget.id, {
@@ -697,4 +697,3 @@ function NumInput({ value, onChange, min = 0, step = 1, placeholder }: {
       onChange={(e) => onChange(Number(e.target.value) || 0)} />
   );
 }
-

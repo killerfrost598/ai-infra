@@ -130,6 +130,144 @@ export interface PipelineModelFlags {
 export interface PipelineStartResponse {
   task_run_id: string;
   status: string;
+  download_id?: string | null;  // set for download-model step
+  model_run_id?: string | null;
+}
+
+export interface LabKnownIssueMatch {
+  issue_id: string;
+  title: string;
+  diagnosis: string;
+  recommended_fix: string;
+  remediation: string | null;
+  safe_to_auto_apply: boolean;
+  evidence: string;
+}
+
+export interface LabModelCache {
+  id: string;
+  server_id: string;
+  model_id: string;
+  quant_id: string;
+  repo_id: string;
+  cache_path: string | null;
+  status: string;
+  total_bytes: number | null;
+  cached_bytes: number | null;
+  last_download_task_id: string | null;
+  last_checked_at: string | null;
+  error: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LabActiveModel {
+  model_id: string | null;
+  quant_id: string | null;
+  repo_id: string | null;
+  port: number | null;
+  endpoint: string | null;
+  profile: Record<string, unknown> | null;
+  health_ok: boolean | null;
+  task_run_id: string | null;
+  model_run_id: string | null;
+  updated_at: string | null;
+}
+
+export interface LabState {
+  server_id: string;
+  initialized: boolean;
+  initialized_at: string | null;
+  vllm_installed: boolean;
+  vllm_installed_at: string | null;
+  vllm_version: string | null;
+  vllm_help_flags: Record<string, unknown> | null;
+  vllm_supported_flags: string[];
+  downloaded_models: LabModelCache[];
+  active_model: LabActiveModel | null;
+  last_successful_profile: Record<string, unknown> | null;
+  last_failed_profile: Record<string, unknown> | null;
+  last_failure_kind: string | null;
+  last_failure_reason: string | null;
+  last_failure_diagnosis: LabKnownIssueMatch[];
+  benchmarks: Array<Record<string, unknown>>;
+  help_note: string;
+  updated_at: string | null;
+}
+
+export interface LabChatRequest {
+  session_id: string;
+  server_id: string;
+  model_id?: string | null;
+  quant_id?: string | null;
+  port?: number | null;
+  messages: Array<{ role: string; content: string }>;
+  max_tokens?: number;
+  temperature?: number;
+}
+
+export interface LabChatResponse {
+  ok: boolean;
+  model: string | null;
+  content: string;
+  raw: Record<string, unknown> | null;
+  latency_ms: number;
+  usage: Record<string, unknown> | null;
+  error: string | null;
+}
+
+export interface LabBenchmarkActiveResponse {
+  task_run_id: string;
+  status: string;
+}
+
+// ── Model download types ────────────────────────────────────────────────────
+
+export interface DownloadStartRequest {
+  server_id: string;
+  session_id: string;
+  model_id: string;
+  quant_id: string;
+}
+
+export interface DownloadFile {
+  filename: string;
+  size: number;
+  size_mb: number;
+  status: "cached" | "pending" | "downloading" | "completed" | "failed";
+  downloaded: number;
+  downloaded_mb: number;
+  percent: number;
+  error: string;
+}
+
+export interface DownloadStartResponse {
+  download_id: string;
+  task_run_id: string;
+  repo_id: string;
+  files: DownloadFile[];
+  total_bytes: number;
+  cached_bytes: number;
+}
+
+export interface DownloadSnapshot {
+  event_type: string;
+  download_id: string;
+  repo_id: string;
+  files: DownloadFile[];
+  file_index: number;
+  total_files: number;
+  downloaded: number;
+  downloaded_mb: number;
+  total: number;
+  total_mb: number;
+  percent: number;
+  avg_speed_mbps: number;
+  elapsed: number;
+  eta_seconds: number;
+  finished: boolean;
+  error: string;
 }
 
 export interface PipelineStepRequest {
@@ -327,10 +465,13 @@ export interface CloreRental {
   hostname: string;
   ssh_port: number;
   ssh_username: string;
-  ssh_password: string | null;
   cuda_version: string | null;
   status: string;
   price_per_day: number | null;
+  currency: string | null;
+  creation_fee: number | null;
+  spend: number | null;
+  total_cost: number | null;
   rented_at: string | null;
 }
 

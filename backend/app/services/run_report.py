@@ -19,6 +19,9 @@ _API_KEY_RE = re.compile(
     r"ghs_[A-Za-z0-9]{10,}|sk-ant-[A-Za-z0-9\-]{10,}|"
     r"glpat-[A-Za-z0-9\-]{10,})"
 )
+_GENERIC_SECRET_RE = re.compile(
+    r"(?i)\b(api[_-]?key|token|password|secret|credential)\s*[:=]\s*['\"]?[^'\"\s,;]+"
+)
 _HOME_PATH_RE = re.compile(r"/(?:root|home/[^/]+)/\S*")
 _HOSTNAME_LIKE_RE = re.compile(r"\b[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.local\b")
 
@@ -28,6 +31,8 @@ def _slug(s: str) -> str:
 
 
 def _scrub_string(value: str, server_alias: str) -> str:
+    value = _API_KEY_RE.sub("[credential-redacted]", value)
+    value = _GENERIC_SECRET_RE.sub(lambda m: f"{m.group(1)}=[credential-redacted]", value)
     value = _IP_RE.sub("[ip-redacted]", value)
     value = _HOME_PATH_RE.sub("[path-redacted]", value)
     value = _HOSTNAME_LIKE_RE.sub("[host-redacted]", value)

@@ -13,6 +13,10 @@ import type {
   CloreRental,
   ModelDeploymentCreate,
   CommandsSummary,
+  DownloadFile,
+  DownloadSnapshot,
+  DownloadStartRequest,
+  DownloadStartResponse,
   ExecResult,
   FeasibilityReport,
   GpuProfileEntry,
@@ -28,6 +32,10 @@ import type {
   FeasibilityRequest,
   InferenceBenchmark,
   InferenceBenchmarkCreate,
+  LabBenchmarkActiveResponse,
+  LabChatRequest,
+  LabChatResponse,
+  LabState,
   LaunchRecommendation,
   LeaderboardRow,
   ListResponse,
@@ -72,9 +80,32 @@ import type {
 // Next.js rewrites forward those requests to the backend server-side.
 const BASE_URL = "";
 
+export function getInferixApiKey(): string {
+  const envKey = process.env.NEXT_PUBLIC_INFERIX_API_KEY ?? "";
+  if (typeof window === "undefined") return envKey;
+  return window.localStorage.getItem("inferix_api_key") || envKey;
+}
+
+function apiHeaders(headers?: HeadersInit): HeadersInit {
+  const apiKey = getInferixApiKey();
+  return {
+    ...(apiKey ? { "X-Inferix-Api-Key": apiKey } : {}),
+    ...headers,
+  };
+}
+
+export function withInferixApiKey(path: string): string {
+  const apiKey = getInferixApiKey();
+  if (!apiKey) return path;
+  const origin = typeof window === "undefined" ? "http://localhost" : window.location.origin;
+  const url = new URL(path, origin);
+  url.searchParams.set("api_key", apiKey);
+  return `${url.pathname}${url.search}`;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: apiHeaders({ "Content-Type": "application/json", ...init?.headers }),
     ...init,
   });
   if (!res.ok) {
@@ -86,7 +117,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 async function apiFetchText(path: string, init?: RequestInit): Promise<string> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { Accept: "text/plain", ...init?.headers },
+    headers: apiHeaders({ Accept: "text/plain", ...init?.headers }),
     ...init,
   });
   if (!res.ok) {
@@ -94,6 +125,17 @@ async function apiFetchText(path: string, init?: RequestInit): Promise<string> {
     throw new Error(`${res.status} ${res.statusText}: ${body}`);
   }
   return res.text();
+}
+
+async function apiFetchVoid(path: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: apiHeaders(init?.headers),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
 }
 
 export const api = {
@@ -108,7 +150,7 @@ export const api = {
     update: (id: string, data: Partial<Server>) =>
       apiFetch<Server>(`/api/v1/servers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) =>
-      fetch(`${BASE_URL}/api/v1/servers/${id}`, { method: "DELETE" }),
+      apiFetchVoid(`/api/v1/servers/${id}`, { method: "DELETE" }),
 
     reprobe: (id: string) =>
       apiFetch<{ task_run_id: string }>(`/api/v1/servers/${id}/reprobe`, { method: "POST" }),
@@ -139,7 +181,7 @@ export const api = {
         body: JSON.stringify(data),
       }),
     delete: (id: string) =>
-      fetch(`${BASE_URL}/api/v1/model-deployments/${id}`, { method: "DELETE" }),
+      apiFetchVoid(`/api/v1/model-deployments/${id}`, { method: "DELETE" }),
   },
 
   playbooks: {
@@ -149,7 +191,7 @@ export const api = {
     create: (data: Partial<Playbook>) =>
       apiFetch<Playbook>("/api/v1/playbooks", { method: "POST", body: JSON.stringify(data) }),
     delete: (id: string) =>
-      fetch(`${BASE_URL}/api/v1/playbooks/${id}`, { method: "DELETE" }),
+      apiFetchVoid(`/api/v1/playbooks/${id}`, { method: "DELETE" }),
     run: (playbookId: string, serverId: string) =>
       apiFetch<{ task_id: string; status: string }>(
         `/api/v1/playbooks/${playbookId}/run?server_id=${serverId}`,
@@ -183,11 +225,9 @@ export const api = {
         body: JSON.stringify({ value }),
       }),
     delete: (key: string) =>
-      fetch(`${BASE_URL}/api/v1/settings/${key}`, { method: "DELETE" }),
+      apiFetchVoid(`/api/v1/settings/${key}`, { method: "DELETE" }),
     generateKeypair: () =>
       apiFetch<{ public_key: string }>("/api/v1/settings/generate-ssh-keypair", { method: "POST" }),
-    getPrivateKey: () =>
-      apiFetch<{ private_key: string }>("/api/v1/settings/ssh-private-key"),
   },
 
   clore: {
@@ -204,7 +244,7 @@ export const api = {
         body: JSON.stringify(req),
       }),
     terminate: (rentalId: string) =>
-      fetch(`${BASE_URL}/api/v1/clore/rentals/${rentalId}`, { method: "DELETE" }),
+      apiFetchVoid(`/api/v1/clore/rentals/${rentalId}`, { method: "DELETE" }),
     balance: () => apiFetch<CloreBalance>("/api/v1/clore/balance"),
   },
 
@@ -229,7 +269,7 @@ export const api = {
         body: JSON.stringify(data),
       }),
     delete: (id: string) =>
-      fetch(`${BASE_URL}/api/v1/benchmarks/${id}`, { method: "DELETE" }),
+      apiFetchVoid(`/api/v1/benchmarks/${id}`, { method: "DELETE" }),
     run: (deploymentId: string, profile = "default") =>
       apiFetch<BenchmarkRunResponse>(
         `/api/v1/benchmarks/run/${deploymentId}?profile=${profile}`,
@@ -254,7 +294,7 @@ export const api = {
     create: (data: SessionCreate) =>
       apiFetch<Session>("/api/v1/sessions", { method: "POST", body: JSON.stringify(data) }),
     terminate: (id: string) =>
-      fetch(`${BASE_URL}/api/v1/sessions/${id}`, { method: "DELETE" }),
+      apiFetchVoid(`/api/v1/sessions/${id}`, { method: "DELETE" }),
     runCommand: (id: string, command: string, timeout = 30) =>
       apiFetch<SessionCommand>(`/api/v1/sessions/${id}/commands`, {
         method: "POST",
@@ -266,7 +306,10 @@ export const api = {
         body: JSON.stringify({ command, timeout }),
       }),
     interrupt: (id: string) =>
-      fetch(`${BASE_URL}/api/v1/sessions/${id}/interrupt`, { method: "POST" }),
+      fetch(`${BASE_URL}/api/v1/sessions/${id}/interrupt`, {
+        method: "POST",
+        headers: apiHeaders(),
+      }),
     commandsSummary: (id: string) =>
       apiFetch<CommandsSummary>(`/api/v1/sessions/${id}/commands/summary`),
     toPlaybook: (
@@ -284,9 +327,9 @@ export const api = {
         { method: "POST", body: JSON.stringify(body) },
       );
     },
-    downloadTranscriptUrl: (id: string) => `${BASE_URL}/api/v1/sessions/${id}/download`,
+    downloadTranscriptUrl: (id: string) => `${BASE_URL}${withInferixApiKey(`/api/v1/sessions/${id}/download`)}`,
     downloadCommandUrl: (sessionId: string, cmdId: string) =>
-      `${BASE_URL}/api/v1/sessions/${sessionId}/commands/${cmdId}/download`,
+      `${BASE_URL}${withInferixApiKey(`/api/v1/sessions/${sessionId}/commands/${cmdId}/download`)}`,
     refreshSnapshot: (id: string) =>
       apiFetch<MachineSnapshotPayload>(`/api/v1/sessions/${id}/refresh-snapshot`, { method: "POST" }),
   },
@@ -351,7 +394,7 @@ export const api = {
       apiFetch<ModelEntry>("/api/v1/models", { method: "POST", body: JSON.stringify(data) }),
     update: (id: string, data: Partial<ModelCreate>) =>
       apiFetch<ModelEntry>(`/api/v1/models/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-    delete: (id: string) => fetch(`${BASE_URL}/api/v1/models/${id}`, { method: "DELETE" }),
+    delete: (id: string) => apiFetchVoid(`/api/v1/models/${id}`, { method: "DELETE" }),
 
     addQuant: (modelId: string, data: ModelQuantCreate) =>
       apiFetch<ModelQuant>(`/api/v1/models/${modelId}/quants`, {
@@ -364,7 +407,7 @@ export const api = {
         body: JSON.stringify(data),
       }),
     deleteQuant: (modelId: string, quantId: string) =>
-      fetch(`${BASE_URL}/api/v1/models/${modelId}/quants/${quantId}`, { method: "DELETE" }),
+      apiFetchVoid(`/api/v1/models/${modelId}/quants/${quantId}`, { method: "DELETE" }),
 
     seed: (repo_id: string) =>
       apiFetch<SeedResponse>("/api/v1/models/seed", {
@@ -389,6 +432,23 @@ export const api = {
   },
 
   lab: {
+    state: (serverId: string, opts?: { sessionId?: string; refresh?: boolean }) => {
+      const params = new URLSearchParams();
+      if (opts?.sessionId) params.set("session_id", opts.sessionId);
+      if (opts?.refresh) params.set("refresh", "true");
+      const q = params.toString();
+      return apiFetch<LabState>(`/api/v1/lab/state/${serverId}${q ? `?${q}` : ""}`);
+    },
+    chat: (data: LabChatRequest) =>
+      apiFetch<LabChatResponse>("/api/v1/lab/chat", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    benchmarkActive: (data: { session_id: string; server_id: string; profile?: string }) =>
+      apiFetch<LabBenchmarkActiveResponse>("/api/v1/lab/benchmark-active", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
     recommend: (data: RecommendRequest) =>
       apiFetch<LaunchRecommendation>("/api/v1/lab/recommend", {
         method: "POST",
@@ -436,6 +496,11 @@ export const api = {
       }),
     inject: (sessionId: string, data: { command: string; dry_run?: boolean; model_run_id?: string }) =>
       apiFetch<{ injected: boolean; command: string }>(`/api/v1/lab/sessions/${sessionId}/inject`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    observe: (sessionId: string, data: { health_check_url?: string; model_run_id?: string }) =>
+      apiFetch<{ health_ok: boolean | null; vram_used_gb: number | null; gpu_utilization_pct: number | null; raw: Record<string, unknown> }>(`/api/v1/lab/sessions/${sessionId}/observe`, {
         method: "POST",
         body: JSON.stringify(data),
       }),
@@ -517,5 +582,21 @@ export const api = {
       const qs = q.toString();
       return apiFetch<ModelRunAggregate[]>(`/api/v1/model-runs/aggregate${qs ? `?${qs}` : ""}`);
     },
+  },
+
+  modelDownloads: {
+    start: (data: DownloadStartRequest) =>
+      apiFetch<DownloadStartResponse>("/api/v1/model-downloads", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    get: (downloadId: string) =>
+      apiFetch<DownloadSnapshot>(`/api/v1/model-downloads/${downloadId}`),
+    streamUrl: (downloadId: string) =>
+      `${BASE_URL}${withInferixApiKey(`/api/v1/model-downloads/${encodeURIComponent(downloadId)}/stream`)}`,
+    cancel: (downloadId: string) =>
+      apiFetch<{ cancelled: boolean }>(`/api/v1/model-downloads/${downloadId}/cancel`, {
+        method: "POST",
+      }),
   },
 };

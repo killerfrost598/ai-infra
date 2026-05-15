@@ -174,7 +174,7 @@ export default function VramCalculatorPage() {
         <SectionHeading>Why KV-cache grows with context × batch</SectionHeading>
         <div className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground space-y-3 text-sm leading-relaxed">
           <p>
-            During the decode phase, each token needs access to every previous token's key and
+            During the decode phase, each token needs access to every previous token&apos;s key and
             value vectors. This cached tensor is the <strong className="text-foreground">KV-cache</strong>.
             Its size is exactly:
           </p>
@@ -193,7 +193,7 @@ export default function VramCalculatorPage() {
           <p>
             This is why <code className="rounded bg-muted px-1 py-0.5 text-xs">--max-model-len</code> (vLLM) and{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-xs">--context-length</code> (SGLang) are critical on
-            constrained hardware — set them to the longest context you actually need, not the model's
+            constrained hardware — set them to the longest context you actually need, not the model&apos;s
             native maximum.
           </p>
         </div>

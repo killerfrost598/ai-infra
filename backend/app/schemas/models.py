@@ -21,7 +21,7 @@ class ModelQuantCreate(BaseSchema):
     quant_format: str = "unknown"
     quant_variant: str | None = None
     safetensors_dtypes: dict | None = None
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
     library_name: str | None = None
     gated: str | None = None
     hf_downloads: int | None = None
@@ -93,7 +93,7 @@ class ModelCreate(BaseSchema):
     hf_url: str | None = None
     hf_repo: str | None = None
     max_context_k: int
-    tags: list[str] = []
+    tags: list[str] = Field(default_factory=list)
     use_case: str = "chat"
     is_reasoning: bool = False
     supports_tools: bool = False
@@ -102,10 +102,10 @@ class ModelCreate(BaseSchema):
     moe_active_params_b: float | None = None
     num_attention_heads: int | None = None
     tp_allowed_sizes: list[int] | None = None
-    kv_cache: dict = {}
-    recommended_engines: list[dict] = []
-    recommended_flags: dict = {}
-    quants: list[ModelQuantCreate] = []
+    kv_cache: dict = Field(default_factory=dict)
+    recommended_engines: list[dict] = Field(default_factory=list)
+    recommended_flags: dict = Field(default_factory=dict)
+    quants: list[ModelQuantCreate] = Field(default_factory=list)
     # Extended HF metadata
     org: str | None = None
     architecture: str | None = None
@@ -189,7 +189,7 @@ class ModelResponse(UUIDSchema):
     hf_synced_at: datetime | None
     is_archived: bool
     updated_at: datetime
-    quants: list[ModelQuantResponse] = []
+    quants: list[ModelQuantResponse] = Field(default_factory=list)
     # Extended HF metadata
     org: str | None
     architecture: str | None

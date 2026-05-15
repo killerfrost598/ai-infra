@@ -15,7 +15,7 @@ from app.services.hf_constants import _MODEL_EXPAND, _QUANT_LIST_EXPAND
 from app.services.settings_service import get_setting
 
 _CACHE_TTL = 24 * 3600
-_USER_AGENT = "ai-infra-seeder/0.2 (+local)"
+_USER_AGENT = "inferix-seeder/0.2 (+local)"
 
 
 # ── Redis cache ────────────────────────────────────────────────────────────────

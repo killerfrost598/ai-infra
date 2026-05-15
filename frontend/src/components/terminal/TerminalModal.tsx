@@ -20,6 +20,7 @@ import {
   type PtyStats,
 } from "@/components/PtyTerminal";
 import { Button } from "@/components/ui/button";
+import { withInferixApiKey } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface ServerMeta {
@@ -276,7 +277,7 @@ export function TerminalModal({
 
   const handleDownloadLog = useCallback(() => {
     if (!sessionId) return;
-    window.open(`/api/v1/sessions/${sessionId}/pty/log`, "_blank", "noopener");
+    window.open(withInferixApiKey(`/api/v1/sessions/${sessionId}/download`), "_blank", "noopener");
   }, [sessionId]);
 
   const handleDisconnect = useCallback(() => {
@@ -497,4 +498,3 @@ export function TerminalModal({
     </div>
   );
 }
-

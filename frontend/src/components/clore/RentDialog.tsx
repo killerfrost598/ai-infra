@@ -43,9 +43,6 @@ export function RentDialog({ offer, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [generatingKey, setGeneratingKey] = useState(false);
   const [keyGenMsg, setKeyGenMsg] = useState<string | null>(null);
-  const [showPrivateKey, setShowPrivateKey] = useState(false);
-  const [privateKey, setPrivateKey] = useState<string | null>(null);
-  const [fetchingPrivateKey, setFetchingPrivateKey] = useState(false);
 
   useEffect(() => {
     if (!balance?.balances?.length) return;
@@ -156,7 +153,7 @@ export function RentDialog({ offer, onClose }: Props) {
                       const { api } = await import("@/lib/api");
                       const { public_key } = await api.settings.generateKeypair();
                       setSshKey(public_key);
-                      setKeyGenMsg("Key pair generated — private key saved to platform settings.");
+                      setKeyGenMsg("Key pair generated; private key stored in platform settings.");
                     } catch (e) {
                       setKeyGenMsg(e instanceof Error ? e.message : "Generation failed");
                     } finally { setGeneratingKey(false); }
@@ -168,45 +165,7 @@ export function RentDialog({ offer, onClose }: Props) {
                 placeholder="ssh-ed25519 AAAA… or ssh-rsa AAAA… (or click Generate)"
                 value={sshKey} onChange={(e) => setSshKey(e.target.value)} />
               {keyGenMsg && (
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{keyGenMsg}</p>
-                  <Button type="button" variant="outline" size="sm" disabled={fetchingPrivateKey}
-                    onClick={async () => {
-                      setFetchingPrivateKey(true);
-                      try {
-                        const { api } = await import("@/lib/api");
-                        const { private_key } = await api.settings.getPrivateKey();
-                        setPrivateKey(private_key);
-                        setShowPrivateKey(true);
-                      } catch (e) {
-                        setKeyGenMsg(e instanceof Error ? e.message : "Failed to retrieve private key");
-                      } finally { setFetchingPrivateKey(false); }
-                    }}>
-                    {fetchingPrivateKey ? "Loading…" : "Show Private Key"}
-                  </Button>
-                </div>
-              )}
-              {showPrivateKey && privateKey && (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Private key — copy and store safely</p>
-                    <Button type="button" variant="outline" size="sm" className="h-5 px-2 text-[10px]"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(privateKey).catch(() => {
-                          const ta = document.createElement("textarea");
-                          ta.value = privateKey;
-                          ta.style.cssText = "position:fixed;opacity:0;pointer-events:none";
-                          document.body.appendChild(ta);
-                          ta.select();
-                          document.execCommand("copy");
-                          document.body.removeChild(ta);
-                        });
-                      }}>
-                      Copy
-                    </Button>
-                  </div>
-                  <textarea readOnly rows={4} className="input w-full text-[10px] font-mono resize-none select-all" value={privateKey} />
-                </div>
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{keyGenMsg}</p>
               )}
               <div className="rounded bg-muted/40 border border-border px-3 py-2 text-xs text-muted-foreground">
                 <span className="text-foreground/70 font-medium">Private key:</span> the platform will use the SSH private key

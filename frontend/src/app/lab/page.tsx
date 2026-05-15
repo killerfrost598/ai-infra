@@ -296,9 +296,9 @@ export default function LabPage() {
       ]);
       setSession(nextSession);
       setCommands(summary.commands);
-      toast.success("Session terminated");
+      toast.success("Session closed");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to terminate");
+      toast.error(err instanceof Error ? err.message : "Failed to close session");
     } finally {
       setIsTerminatingActive(false);
     }
@@ -391,18 +391,18 @@ export default function LabPage() {
               <AlertDialogTrigger asChild>
                 <Button variant="destructive-secondary" size="sm" disabled={isTerminatingActive} className="h-7 gap-1.5 text-xs">
                   <Power className="h-3 w-3" />
-                  Terminate
+                  Close Session
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Terminate this session?</AlertDialogTitle>
-                  <AlertDialogDescription>This will disconnect the terminal and mark the session as terminated.</AlertDialogDescription>
+                  <AlertDialogTitle>Close this terminal session?</AlertDialogTitle>
+                  <AlertDialogDescription>This disconnects the terminal session. It does not stop the server or end any rental.</AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction onClick={handleTerminateActive} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                    Terminate Session
+                    Close Session
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -508,7 +508,7 @@ export default function LabPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Close this terminal?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will terminate the active SSH session on <strong>{closingTab?.label}</strong>.
+              This closes the active SSH session on <strong>{closingTab?.label}</strong>. It does not stop the server or end any rental.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -517,7 +517,7 @@ export default function LabPage() {
               onClick={() => closingTabId && doCloseTab(closingTabId)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Close &amp; Terminate
+              Close Session
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -577,7 +577,7 @@ function AvailableServersPanel({ onStart, onManageServers }: { onStart: (session
             <div className="min-w-0">
               <h1 className="text-xl font-semibold">Inferix Lab</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Connect to a GPU server, then follow the 4-step pipeline to initialize, install vLLM, download, and run your model.
+                Connect to a GPU server, then follow the 3-step pipeline: init server, pick a model (install vLLM + download run in parallel), then run and tweak.
               </p>
             </div>
             <Button className="ml-auto gap-1.5" onClick={onManageServers}>

@@ -125,7 +125,7 @@ export function SeedModelDialog({ open, onOpenChange }: Props) {
         {step === "input" && (
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              Enter a HuggingFace repo ID or URL. We'll fetch the base model and all community quants via Celery.
+              Enter a HuggingFace repo ID or URL. We&apos;ll fetch the base model and all community quants via Celery.
             </p>
             <Input
               value={input}

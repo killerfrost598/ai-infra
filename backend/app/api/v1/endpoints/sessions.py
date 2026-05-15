@@ -13,6 +13,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.auth import websocket_api_key_valid
 from app.db.session import SessionLocal, get_db
 from app.models.entities import Server, Session as SessionModel, SessionCommand, SessionStatus
 from app.schemas.sessions import (
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _SNAPSHOT_STALE_SECONDS = 86400  # 24 h
+_MAX_PTY_LOG_CHARS = 2_000_000
 
 
 def _build_snapshot(session: SessionModel) -> MachineSnapshotPayload | None:
@@ -258,6 +260,10 @@ async def pty_websocket(session_id: UUID, websocket: WebSocket) -> None:
     B5: no long-lived DB session is held for the WebSocket lifetime.
     Each flush opens its own SessionLocal() and closes it immediately.
     """
+    if not websocket_api_key_valid(websocket):
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
     with SessionLocal() as _db:
         _session = _db.query(SessionModel).filter(SessionModel.id == session_id).first()
         if not _session:
@@ -282,10 +288,7 @@ async def pty_websocket(session_id: UUID, websocket: WebSocket) -> None:
     # Short read timeout so recv() in the executor yields regularly.
     handle.channel.settimeout(0.05)
 
-    pty_chunks: list[bytes] = []
-    # Tracks how many bytes (joined) have already been flushed to DB so periodic
-    # and final flushes never double-write the same bytes.
-    flushed_len: list[int] = [0]
+    pending_pty_chunks: list[bytes] = []
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
@@ -296,16 +299,18 @@ async def pty_websocket(session_id: UUID, websocket: WebSocket) -> None:
         Opens a fresh DB session per flush so the connection is not held open
         for the full WebSocket lifetime (B5 fix).
         """
-        all_data = b"".join(pty_chunks)
-        new_data = all_data[flushed_len[0]:]
-        if not new_data:
+        if not pending_pty_chunks:
             return
-        text = new_data.decode(errors="replace")
-        flushed_len[0] = len(all_data)
+        data = b"".join(pending_pty_chunks)
+        pending_pty_chunks.clear()
+        text = data.decode(errors="replace")
         with SessionLocal() as _db:
             session_obj = _db.query(SessionModel).filter(SessionModel.id == session_id).first()
             if session_obj:
-                session_obj.pty_log = (session_obj.pty_log or "") + text
+                merged = (session_obj.pty_log or "") + text
+                if len(merged) > _MAX_PTY_LOG_CHARS:
+                    merged = merged[-_MAX_PTY_LOG_CHARS:]
+                session_obj.pty_log = merged
                 _db.commit()
 
     async def _send_output() -> None:
@@ -316,7 +321,7 @@ async def pty_websocket(session_id: UUID, websocket: WebSocket) -> None:
                 if not data:
                     stop_event.set()
                     break
-                pty_chunks.append(data)
+                pending_pty_chunks.append(data)
                 await websocket.send_bytes(data)
             except TimeoutError:
                 continue

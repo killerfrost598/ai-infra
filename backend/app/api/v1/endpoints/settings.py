@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.cache import get_redis_client
+from app.core.crypto import SECRET_SETTING_KEYS
 from app.db.session import get_db
 from app.models.entities import PlatformSetting
 from app.schemas.settings import SettingResponse, SettingUpsert, SettingsListResponse
@@ -9,21 +11,13 @@ from app.services.settings_service import CLORE_FILTER_KEYS, KNOWN_KEYS, get_set
 router = APIRouter()
 
 _FILTERED_CACHE_KEYS = ("clore:offers:filtered", "clore:offers:meta")
-_SECRET_KEYS: frozenset[str] = frozenset({
-    "clore_api_key",
-    "hf_token",
-    "anthropic_api_key",
-    "openai_api_key",
-    "ssh_private_key",
-    "github_token",
-})
+_SECRET_KEYS = SECRET_SETTING_KEYS
 
 
 def _invalidate_filtered_cache() -> None:
     """Delete the filtered offers cache so the next page load re-applies settings."""
     try:
-        import redis as _redis
-        r = _redis.from_url("redis://redis:6379/2", decode_responses=True, socket_connect_timeout=2)
+        r = get_redis_client()
         r.delete(*_FILTERED_CACHE_KEYS)
     except Exception:
         pass  # Non-fatal — cache will expire naturally
@@ -81,9 +75,8 @@ def set_setting(
 def generate_ssh_keypair(db: Session = Depends(get_db)) -> dict:
     """Generate an Ed25519 SSH keypair.
 
-    Stores the private key in platform_settings['ssh_private_key'] and returns
-    the OpenSSH public key. Use the public key in Clore.ai rent requests so the
-    platform's stored private key can authenticate terminal sessions.
+    Stores the private key in platform_settings['ssh_private_key'] and returns the
+    OpenSSH public key only. The private key is not exportable over HTTP.
     """
     try:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -107,15 +100,6 @@ def generate_ssh_keypair(db: Session = Depends(get_db)) -> dict:
         return {"public_key": public_key}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Key generation failed: {exc}") from exc
-
-
-@router.get("/ssh-private-key")
-def get_ssh_private_key(db: Session = Depends(get_db)) -> dict:
-    """Return the stored SSH private key from platform settings."""
-    key = get_setting("ssh_private_key", db)
-    if not key:
-        raise HTTPException(status_code=404, detail="No SSH private key found. Generate one first.")
-    return {"private_key": key}
 
 
 @router.delete("/{key}", status_code=204)

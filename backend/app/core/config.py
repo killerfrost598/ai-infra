@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "AI Inference Platform API"
+    app_name: str = "Inferix API"
     app_version: str = "0.1.0"
     environment: str = "development"
 
@@ -10,15 +10,20 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     backend_cors_origins: str = "http://localhost:3000"
 
-    database_url: str = "postgresql+psycopg2://ai_user:ai_password@postgres:5432/ai_inference"
+    database_url: str = "postgresql+psycopg2://inferix_user:change_me@postgres:5432/inferix"
 
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
+    redis_cache_url: str = "redis://redis:6379/2"
+
+    inferix_api_key: str = ""
+    inferix_secret_key: str = ""
+    ssh_trust_unknown_hosts: bool = False
 
     clore_api_key: str = "replace_me"
     playbooks_git_repo: str = ""
     playbooks_git_branch: str = "main"
-    logs_base_path: str = "/var/log/aip"
+    logs_base_path: str = "/var/log/inferix"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
