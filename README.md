@@ -97,7 +97,7 @@ DB migrations run automatically on backend startup (`alembic upgrade head`).
 ## Monorepo layout
 
 ```
-ai-infra/
+inferix/
 ├── docker-compose.yml
 ├── .env.example
 ├── DEVELOPMENT.md      # ADRs, architecture, conventions, bugs, SDK notes

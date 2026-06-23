@@ -16,6 +16,7 @@ import {
   SheetContent,
   SheetDescription,
   SheetHeader,
+  SheetBody,
   SheetTitle,
 } from "@/components/ui/sheet";
 import { ErrorState } from "@/components/layouts/page-states";
@@ -157,9 +158,9 @@ export function ModelAdvisorSheet({ offer, open, onOpenChange, onDeployRequested
         </SheetHeader>
 
         {/* ── Body ───────────────────────────────────────────────────────── */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <SheetBody className="min-h-0 overflow-hidden p-0 gap-0">
           {/* Error state */}
-          {error && <ErrorState message="Failed to load model catalogue. Check console for details." className="m-4" />}
+          {error && <ErrorState message="Failed to load model catalogue. Check console for details." className="mx-6 my-4" />}
 
           {/* Loading state */}
           {isLoading && (
@@ -173,7 +174,7 @@ export function ModelAdvisorSheet({ offer, open, onOpenChange, onDeployRequested
           {!isLoading && selectedModel && (
             <div className="flex flex-1 flex-col overflow-hidden">
               {/* Detail tabs */}
-              <div className="flex shrink-0 gap-1 border-b border-border bg-muted/20 px-6 py-2">
+              <div className="flex shrink-0 gap-1 border-b border-border bg-muted/20 px-6 py-3">
                 <TabButton active={detailTab === "vram"} onClick={() => setDetailTab("vram")}>
                   VRAM Calculator
                 </TabButton>
@@ -229,7 +230,7 @@ export function ModelAdvisorSheet({ offer, open, onOpenChange, onDeployRequested
           {!isLoading && !selectedModel && catalogue && (
             <div className="flex flex-1 flex-col overflow-hidden">
               {/* Sheet tabs */}
-              <div className="shrink-0 border-b border-border px-6 py-2">
+              <div className="shrink-0 border-b border-border px-6 py-3">
                 <div className="flex gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
                   {(["recommended", "all", "calculator"] as SheetTab[]).map((t) => (
                     <button
@@ -254,7 +255,7 @@ export function ModelAdvisorSheet({ offer, open, onOpenChange, onDeployRequested
               <div className="flex-1 overflow-y-auto">
                 {/* Recommended tab */}
                 {sheetTab === "recommended" && (
-                  <div className="space-y-1.5 px-4 py-3">
+                  <div className="space-y-1.5 px-6 py-3">
                     {recommended.length === 0 && (
                       <EmptyState message="No models fit this GPU at the default context/batch settings." />
                     )}
@@ -274,7 +275,7 @@ export function ModelAdvisorSheet({ offer, open, onOpenChange, onDeployRequested
                 {sheetTab === "all" && (
                   <div className="flex flex-col">
                     {/* Search + family filter */}
-                    <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur-sm px-4 py-3 space-y-2">
+                    <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur-sm px-6 py-3 space-y-2">
                       <div className="relative">
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50" />
                         <input
@@ -312,7 +313,7 @@ export function ModelAdvisorSheet({ offer, open, onOpenChange, onDeployRequested
                       </div>
                     </div>
 
-                    <div className="space-y-1.5 px-4 py-3">
+                    <div className="space-y-1.5 px-6 py-3">
                       {filteredAll.length === 0 && (
                         <EmptyState message="No models match your search." />
                       )}
@@ -336,7 +337,7 @@ export function ModelAdvisorSheet({ offer, open, onOpenChange, onDeployRequested
               </div>
             </div>
           )}
-        </div>
+        </SheetBody>
       </SheetContent>
     </Sheet>
   );

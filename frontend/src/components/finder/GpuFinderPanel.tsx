@@ -469,7 +469,13 @@ export function GpuFinderPanel() {
       </div>
 
       {/* ── Overlays ──────────────────────────────────────────────────── */}
-      {rentTarget && <RentDialog offer={rentTarget} onClose={() => setRentTarget(null)} />}
+      {rentTarget && (
+        <RentDialog
+          offer={rentTarget}
+          open={true}
+          onOpenChange={(o) => { if (!o) setRentTarget(null); }}
+        />
+      )}
       <ModelAdvisorSheet
         offer={advisorOffer}
         open={advisorOpen}

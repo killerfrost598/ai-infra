@@ -9,7 +9,7 @@ Playbooks are **shell scripts** executed over SSH via Paramiko. Despite the dire
    - SSH-connects to the target server
    - `git clone` (or pull) the repo to a temp dir on the server
    - Executes the script via PTY
-   - Streams stdout/stderr to a log file (`/var/log/aip/{task_run_id}/`)
+   - Streams stdout/stderr to a log file (`/var/log/inferix/{task_run_id}/`)
    - Updates the `TaskRun` record with final status
 3. Live output is available via `GET /task-runs/{id}/logs/stream` (SSE).
 

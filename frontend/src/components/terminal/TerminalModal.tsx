@@ -12,7 +12,6 @@ import {
   Power,
   Save,
   Trash2,
-  X,
 } from "lucide-react";
 import {
   PtyTerminal,
@@ -20,6 +19,14 @@ import {
   type PtyStats,
 } from "@/components/PtyTerminal";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogBody,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { withInferixApiKey } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -216,19 +223,6 @@ export function TerminalModal({
     lastByteAtRef.current = performance.now();
   }, [open, sessionId]);
 
-  // ESC closes the modal
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onOpenChange(false);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onOpenChange]);
-
   const handleData = useCallback(
     (data: Uint8Array) => {
       lastByteAtRef.current = performance.now();
@@ -263,8 +257,6 @@ export function TerminalModal({
   }, [serverMeta?.hostname, stats.cols, stats.rows]);
 
   const handleCopyAll = useCallback(async () => {
-    // xterm doesn't expose a public buffer-to-text API on our import surface.
-    // Best effort: copy the visible selection if any; otherwise no-op.
     const sel = window.getSelection?.()?.toString() ?? "";
     if (sel) {
       try {
@@ -285,45 +277,30 @@ export function TerminalModal({
     onOpenChange(false);
   }, [onDisconnect, onOpenChange]);
 
-  if (!open) return null;
-
   const isLive = state === "connecting" || state === "connected" || state === "idle";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Terminal session"
-    >
-      {/* backdrop */}
-      <div
-        className="absolute inset-0 bg-foreground/30 backdrop-blur-[1px]"
-        onClick={() => onOpenChange(false)}
-      />
-
-      {/* modal shell */}
-      <div
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        size="full"
         className={cn(
-          "relative flex flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
-          fullscreen
-            ? "h-[calc(100vh-16px)] w-[calc(100vw-16px)]"
-            : "h-[min(640px,calc(100vh-32px))] w-[min(880px,calc(100vw-32px))]",
+          fullscreen && "!max-w-none !h-dvh !rounded-none",
         )}
+        closeOnInteractionOutside={false}
       >
         {/* HEADER */}
-        <div className="flex items-start justify-between gap-3 border-b border-border bg-background/95 px-4 py-3">
+        <DialogHeader className="px-4 py-3">
           <div className="flex min-w-0 items-start gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
               <span className="font-mono text-sm font-bold">{">_"}</span>
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold leading-tight">Terminal</h2>
-                <span className="font-mono text-xs text-muted-foreground">
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="flex items-center gap-2">
+                Terminal
+                <span className="font-mono text-xs font-normal text-muted-foreground">
                   {sessionLabel ?? shortId(sessionId)}
                 </span>
-              </div>
+              </DialogTitle>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
                 {gpuLabel && <span className="font-medium">{gpuLabel}</span>}
                 {gpuLabel && serverMeta?.hostname && <span aria-hidden>·</span>}
@@ -338,41 +315,38 @@ export function TerminalModal({
                 )}
               </div>
             </div>
+            {/* Toolbar icon buttons — close X is provided by DialogHeader */}
+            <div className="flex shrink-0 items-center gap-0.5">
+              <HeaderIconButton label="Copy selection" onClick={handleCopyAll}>
+                <Copy className="h-3.5 w-3.5" />
+              </HeaderIconButton>
+              <HeaderIconButton label="Save log" onClick={handleDownloadLog}>
+                <Save className="h-3.5 w-3.5" />
+              </HeaderIconButton>
+              <HeaderIconButton label="Clear scrollback" onClick={() => setReconnectKey((k) => k + 1)}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </HeaderIconButton>
+              <HeaderIconButton label="Download log" onClick={handleDownloadLog}>
+                <Download className="h-3.5 w-3.5" />
+              </HeaderIconButton>
+              <HeaderIconButton
+                label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+                onClick={() => setFullscreen((v) => !v)}
+              >
+                {fullscreen ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </HeaderIconButton>
+            </div>
           </div>
+        </DialogHeader>
 
-          <div className="flex shrink-0 items-center gap-0.5">
-            <HeaderIconButton label="Copy selection" onClick={handleCopyAll}>
-              <Copy className="h-3.5 w-3.5" />
-            </HeaderIconButton>
-            <HeaderIconButton label="Save log" onClick={handleDownloadLog}>
-              <Save className="h-3.5 w-3.5" />
-            </HeaderIconButton>
-            <HeaderIconButton label="Clear scrollback" onClick={() => setReconnectKey((k) => k + 1)}>
-              <Trash2 className="h-3.5 w-3.5" />
-            </HeaderIconButton>
-            <HeaderIconButton label="Download log" onClick={handleDownloadLog}>
-              <Download className="h-3.5 w-3.5" />
-            </HeaderIconButton>
-            <HeaderIconButton
-              label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-              onClick={() => setFullscreen((v) => !v)}
-            >
-              {fullscreen ? (
-                <Minimize2 className="h-3.5 w-3.5" />
-              ) : (
-                <Maximize2 className="h-3.5 w-3.5" />
-              )}
-            </HeaderIconButton>
-            <HeaderIconButton label="Close" onClick={() => onOpenChange(false)}>
-              <X className="h-4 w-4" />
-            </HeaderIconButton>
-          </div>
-        </div>
-
-        {/* STATUS BAR */}
+        {/* STATUS BAR — direct child of DialogContent, between header and body */}
         <div
           className={cn(
-            "flex items-center justify-between gap-3 border-b px-4 py-1.5 text-[11px]",
+            "flex shrink-0 items-center justify-between gap-3 border-b px-4 py-1.5 text-[11px]",
             meta.bannerClass,
           )}
         >
@@ -397,7 +371,7 @@ export function TerminalModal({
         </div>
 
         {/* TERMINAL BODY */}
-        <div className="relative flex flex-1 flex-col overflow-hidden bg-muted/30 p-3">
+        <DialogBody className="overflow-hidden p-3 gap-0 bg-muted/30">
           <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-sm">
             {/* inner browser-like titlebar */}
             <div className="relative flex h-7 shrink-0 items-center justify-center border-b border-border bg-muted/40 px-2">
@@ -474,10 +448,10 @@ export function TerminalModal({
               )}
             </div>
           </div>
-        </div>
+        </DialogBody>
 
         {/* FOOTER */}
-        <div className="flex items-center justify-between gap-3 border-t border-border bg-background/95 px-4 py-2">
+        <DialogFooter className="px-4 py-2 sm:justify-between">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <ShortcutChip keys={["^", "C"]} label="interrupt" />
             <ShortcutChip keys={["^", "D"]} label="EOF" />
@@ -493,8 +467,8 @@ export function TerminalModal({
             <Power className="mr-1.5 h-3 w-3" />
             Disconnect session
           </Button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

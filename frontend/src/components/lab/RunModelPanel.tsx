@@ -492,7 +492,8 @@ export function PipelineStepperView({ session, models, modelsLoading }: Pipeline
         <ModelDownloadModal
           downloadId={setup.downloadId}
           repoId={setup.downloadRepoId ?? setup.downloadId}
-          onClose={() => setSetup((prev) => ({ ...prev, showModal: false }))}
+          open={true}
+          onOpenChange={(o) => { if (!o) setSetup((prev) => ({ ...prev, showModal: false })); }}
           onComplete={handleDownloadModalComplete}
         />
       )}

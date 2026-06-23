@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { Slot } from "@radix-ui/react-slot";
 import { X } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 
@@ -35,10 +36,11 @@ const dialogContentVariants = cva(
   {
     variants: {
       size: {
+        sm:      "max-w-md max-h-[85vh]",
         default: "max-w-lg max-h-[85vh]",
-        lg: "max-w-4xl max-h-[85vh]",
-        xl: "max-w-7xl h-[90vh]",
-        xxl: "max-w-[95vw] h-[90vh]",
+        lg:      "max-w-2xl max-h-[85vh]",
+        xl:      "max-w-4xl max-h-[85vh]",
+        full:    "max-w-7xl h-[90vh]",
       },
     },
     defaultVariants: {
@@ -110,7 +112,7 @@ const DialogHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "dialog-header bg-background sticky top-0 z-30 flex shrink-0 flex-col space-y-1.5 rounded-t-lg border-b p-4",
+      "dialog-header bg-background sticky top-0 z-30 flex shrink-0 flex-col space-y-1.5 rounded-t-lg border-b px-6 py-4",
       className,
     )}
     {...props}
@@ -131,14 +133,17 @@ DialogHeader.displayName = "DialogHeader";
 
 const DialogBody = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn("flex flex-1 flex-col gap-4 overflow-y-auto p-4", className)}
-    {...props}
-  />
-));
+  React.HTMLAttributes<HTMLDivElement> & { asChild?: boolean }
+>(({ className, asChild = false, ...props }, ref) => {
+  const Comp = asChild ? Slot : "div";
+  return (
+    <Comp
+      ref={ref as React.Ref<HTMLDivElement>}
+      className={cn("flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-5", className)}
+      {...props}
+    />
+  );
+});
 DialogBody.displayName = "DialogBody";
 
 const DialogFooter = ({
@@ -147,7 +152,7 @@ const DialogFooter = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "dialog-footer bg-background sticky bottom-0 z-10 flex shrink-0 flex-col-reverse rounded-b-lg border-t p-6 px-6 sm:flex-row sm:justify-end sm:space-x-2",
+      "dialog-footer bg-background sticky bottom-0 z-10 flex shrink-0 flex-col-reverse rounded-b-lg border-t px-6 py-4 sm:flex-row sm:justify-end sm:space-x-2",
       className,
     )}
     {...props}
@@ -161,7 +166,7 @@ const DialogTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn("text-xl leading-none font-semibold tracking-tight", className)}
+    className={cn("text-lg font-semibold tracking-tight", className)}
     {...props}
   />
 ));

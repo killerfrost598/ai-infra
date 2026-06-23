@@ -63,3 +63,11 @@ htmlcov/
 
 # Alembic (keep versions, exclude cached)
 backend/app/**/__pycache__/
+
+# Instruction / planning docs — kept local, never committed
+/CLAUDE.md
+/DEVELOPMENT.md
+/PLUGIN_MARKETPLACE_PLAN.md
+/VLLM_DEPLOYMENT_FRAMEWORK_PLAN.md
+/report.md
+frontend/MODALRULES.md

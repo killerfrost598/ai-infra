@@ -13,6 +13,15 @@ import { PtyTerminal } from "@/components/PtyTerminal";
 import { SessionLogsModal } from "@/components/SessionLogsModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogBody,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   AlertDialog,
@@ -670,41 +679,46 @@ function ServerPickerModal({ onClose, onStart }: { onClose: () => void; onStart:
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-      <Card className="w-full max-w-md p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Start New Session</h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
-        </div>
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading servers…</p>
-        ) : readyServers.length === 0 ? (
-          <div className="py-4 text-center">
-            <p className="text-sm text-muted-foreground">No servers available.</p>
-            <Link href="/servers" className="mt-1 inline-block text-xs text-primary underline-offset-4 hover:underline">Go to Servers →</Link>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {readyServers.map((server: Server) => (
-              <button
-                key={server.id}
-                onClick={() => handleStart(server)}
-                disabled={!!startingId}
-                className="w-full rounded-md border border-border px-4 py-3 text-left transition-colors hover:bg-muted/40 disabled:opacity-50"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">{server.hostname}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{server.gpu_model ?? "GPU unknown"} · {server.ssh_username}</p>
+    <Dialog open={true} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle>Start New Session</DialogTitle>
+          <DialogDescription>Select a ready server to open a terminal session.</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading servers…</p>
+          ) : readyServers.length === 0 ? (
+            <div className="py-4 text-center">
+              <p className="text-sm text-muted-foreground">No servers available.</p>
+              <Link href="/servers" className="mt-1 inline-block text-xs text-primary underline-offset-4 hover:underline">Go to Servers →</Link>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {readyServers.map((server: Server) => (
+                <button
+                  key={server.id}
+                  onClick={() => handleStart(server)}
+                  disabled={!!startingId}
+                  className="w-full rounded-md border border-border px-4 py-3 text-left transition-colors hover:bg-muted/40 disabled:opacity-50"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">{server.hostname}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{server.gpu_model ?? "GPU unknown"} · {server.ssh_username}</p>
+                    </div>
+                    {startingId === server.id && <span className="text-xs text-muted-foreground">Connecting…</span>}
                   </div>
-                  {startingId === server.id && <span className="text-xs text-muted-foreground">Connecting…</span>}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </Card>
-    </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

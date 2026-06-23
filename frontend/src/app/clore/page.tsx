@@ -284,7 +284,13 @@ function MarketplaceTab() {
         ))}
       </div>
 
-      {dialogOffer && <RentDialog offer={dialogOffer} onClose={() => setDialogOffer(null)} />}
+      {dialogOffer && (
+        <RentDialog
+          offer={dialogOffer}
+          open={true}
+          onOpenChange={(o) => { if (!o) setDialogOffer(null); }}
+        />
+      )}
 
       <ModelAdvisorSheet
         offer={advisorOffer}
@@ -410,7 +416,13 @@ function GpuGroupsTab() {
         ))}
       </div>
 
-      {rentDialogOffer && <RentDialog offer={rentDialogOffer} onClose={() => setRentDialogOffer(null)} />}
+      {rentDialogOffer && (
+        <RentDialog
+          offer={rentDialogOffer}
+          open={true}
+          onOpenChange={(o) => { if (!o) setRentDialogOffer(null); }}
+        />
+      )}
 
       <ModelAdvisorSheet
         offer={advisorOffer}

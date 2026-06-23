@@ -9,6 +9,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogBody,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -62,7 +64,6 @@ export function SeedModelDialog({ open, onOpenChange }: Props) {
       sawRunningRef.current = false;
       setStep("seeding");
       setStatus("RUNNING");
-      // Brief delay to let Celery worker pick up the task and create the TaskRun
       timeoutRef.current = setTimeout(() => startPolling(), 1500);
     },
     onError: (e) => {
@@ -73,7 +74,6 @@ export function SeedModelDialog({ open, onOpenChange }: Props) {
   function startPolling() {
     let polls = 0;
     pollRef.current = setInterval(async () => {
-      // Safety limit: stop after 3 minutes to avoid eternal polling
       if (++polls > 90) {
         stopPolling();
         setStatus("FAILED");
@@ -91,7 +91,6 @@ export function SeedModelDialog({ open, onOpenChange }: Props) {
 
         setStatus(s);
 
-        // Only act on terminal states after we've seen RUNNING
         if (sawRunningRef.current && (s === "SUCCESS" || s === "PARTIAL")) {
           stopPolling();
           qc.invalidateQueries({ queryKey: ["models"] });
@@ -117,36 +116,39 @@ export function SeedModelDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onOpenChange(false); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>Seed model from HuggingFace</DialogTitle>
+          <DialogDescription>
+            Enter a HuggingFace repo ID or URL. We&apos;ll fetch the base model and all
+            community quants via Celery.
+          </DialogDescription>
         </DialogHeader>
 
         {step === "input" && (
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground">
-              Enter a HuggingFace repo ID or URL. We&apos;ll fetch the base model and all community quants via Celery.
-            </p>
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Qwen/Qwen3-4B  or  https://huggingface.co/…"
-              onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
-              autoFocus
-            />
+          <>
+            <DialogBody>
+              <Input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Qwen/Qwen3-4B  or  https://huggingface.co/…"
+                onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
+                autoFocus
+              />
+            </DialogBody>
             <DialogFooter>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleSubmit} disabled={!input.trim() || seed.isPending}>
-                {seed.isPending ? "Queuing…" : "Seed"}
+              <Button onClick={handleSubmit} loading={seed.isPending} disabled={!input.trim()}>
+                Seed
               </Button>
             </DialogFooter>
-          </div>
+          </>
         )}
 
         {step === "seeding" && (
-          <div className="py-4 space-y-4">
+          <DialogBody>
             {(status === "RUNNING" || status === null) && (
               <div className="flex items-center gap-3 text-sm text-muted-foreground">
                 <Spinner size="md" className="border-t-primary shrink-0" />
@@ -174,7 +176,7 @@ export function SeedModelDialog({ open, onOpenChange }: Props) {
                 </DialogFooter>
               </div>
             )}
-          </div>
+          </DialogBody>
         )}
       </DialogContent>
     </Dialog>

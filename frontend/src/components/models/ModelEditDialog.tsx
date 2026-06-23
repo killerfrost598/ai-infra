@@ -13,6 +13,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogBody,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -90,57 +92,66 @@ export function ModelEditDialog({ model, open, onOpenChange, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent size="default">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit model" : "Add model"}</DialogTitle>
+          <DialogDescription>
+            Register a model so it appears in the catalogue and advisor.
+          </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit((v) => save.mutate(v))} className="space-y-4 py-2">
-          <Field label="Model key (unique slug)" error={form.formState.errors.model_key?.message}>
-            <Input {...form.register("model_key")} placeholder="qwen3-4b" disabled={isEdit} />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Display name" error={form.formState.errors.name?.message}>
-              <Input {...form.register("name")} placeholder="Qwen3 4B" />
+        <DialogBody asChild>
+          <form
+            id="model-edit-form"
+            onSubmit={form.handleSubmit((v) => save.mutate(v))}
+            className="flex flex-col gap-4"
+          >
+            <Field label="Model key (unique slug)" error={form.formState.errors.model_key?.message}>
+              <Input {...form.register("model_key")} placeholder="qwen3-4b" disabled={isEdit} />
             </Field>
-            <Field label="Family" error={form.formState.errors.family?.message}>
-              <Input {...form.register("family")} placeholder="Qwen" />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Display name" error={form.formState.errors.name?.message}>
+                <Input {...form.register("name")} placeholder="Qwen3 4B" />
+              </Field>
+              <Field label="Family" error={form.formState.errors.family?.message}>
+                <Input {...form.register("family")} placeholder="Qwen" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Parameters (B)" error={form.formState.errors.param_count_b?.message}>
+                <Input {...form.register("param_count_b", { valueAsNumber: true })} type="number" step="0.1" placeholder="4.0" />
+              </Field>
+              <Field label="Max context (k tokens)" error={form.formState.errors.max_context_k?.message}>
+                <Input {...form.register("max_context_k", { valueAsNumber: true })} type="number" placeholder="128" />
+              </Field>
+            </div>
+            <Field label="HuggingFace URL">
+              <Input {...form.register("hf_url")} placeholder="https://huggingface.co/Qwen/Qwen3-4B" />
             </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Parameters (B)" error={form.formState.errors.param_count_b?.message}>
-              <Input {...form.register("param_count_b", { valueAsNumber: true })} type="number" step="0.1" placeholder="4.0" />
+            <Field label="HF repo ID (for API)">
+              <Input {...form.register("hf_repo")} placeholder="Qwen/Qwen3-4B" />
             </Field>
-            <Field label="Max context (k tokens)" error={form.formState.errors.max_context_k?.message}>
-              <Input {...form.register("max_context_k", { valueAsNumber: true })} type="number" placeholder="128" />
+            <Field label="Use case">
+              <Input {...form.register("use_case")} placeholder="chat" />
             </Field>
-          </div>
-          <Field label="HuggingFace URL">
-            <Input {...form.register("hf_url")} placeholder="https://huggingface.co/Qwen/Qwen3-4B" />
-          </Field>
-          <Field label="HF repo ID (for API)">
-            <Input {...form.register("hf_repo")} placeholder="Qwen/Qwen3-4B" />
-          </Field>
-          <Field label="Use case">
-            <Input {...form.register("use_case")} placeholder="chat" />
-          </Field>
 
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            {(["is_reasoning", "supports_tools", "is_code_model", "is_moe"] as const).map((field) => (
-              <label key={field} className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" {...form.register(field)} className="rounded" />
-                <span className="text-muted-foreground capitalize">{field.replace("is_", "").replace("_", " ")}</span>
-              </label>
-            ))}
-          </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              {(["is_reasoning", "supports_tools", "is_code_model", "is_moe"] as const).map((field) => (
+                <label key={field} className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" {...form.register(field)} className="rounded" />
+                  <span className="text-muted-foreground capitalize">{field.replace("is_", "").replace("_", " ")}</span>
+                </label>
+              ))}
+            </div>
+          </form>
+        </DialogBody>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
-        </form>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" form="model-edit-form" loading={save.isPending}>
+            Save
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -151,7 +162,7 @@ function Field({ label, error, children }: { label: string; error?: string; chil
     <div className="space-y-1">
       <label className="text-xs font-medium text-muted-foreground">{label}</label>
       {children}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

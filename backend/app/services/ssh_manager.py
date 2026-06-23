@@ -8,8 +8,6 @@ from typing import Optional
 
 import paramiko
 
-from app.core.config import settings
-
 logger = logging.getLogger(__name__)
 
 _KEY_CLASSES = tuple(
@@ -38,13 +36,13 @@ def _load_pkey_from_content(key_content: str) -> paramiko.PKey:
 
 
 def configure_host_key_policy(client: paramiko.SSHClient) -> None:
-    """Load known hosts and reject unknown hosts unless explicitly allowed."""
-    client.load_system_host_keys()
-    if settings.ssh_trust_unknown_hosts:
-        logger.warning("SSH unknown-host trust is enabled; this is unsafe for production")
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    else:
-        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    """Auto-accept host keys.
+
+    Every Clore rental exposes a fresh domain + port + host key, so known_hosts
+    pinning is structurally impossible — every connect is first contact. AutoAdd
+    is the only workable and correct policy for ephemeral rented hosts.
+    """
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
 
 class SSHManager:

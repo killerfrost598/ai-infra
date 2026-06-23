@@ -167,8 +167,8 @@ export function ServerInfoModal({ offer, open, onOpenChange, onRent }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        overlayClassName="bg-black/70 backdrop-blur-[2px]"
-        className="max-h-[90vh] max-w-[760px] overflow-hidden rounded-xl border border-slate-300 p-0 dark:border-zinc-800"
+        size="xl"
+        className="overflow-hidden rounded-xl border border-slate-300 p-0 dark:border-zinc-800"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>{offer.gpu_name} server details</DialogTitle>

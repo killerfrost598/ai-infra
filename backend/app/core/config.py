@@ -18,7 +18,6 @@ class Settings(BaseSettings):
 
     inferix_api_key: str = ""
     inferix_secret_key: str = ""
-    ssh_trust_unknown_hosts: bool = False
 
     clore_api_key: str = "replace_me"
     playbooks_git_repo: str = ""

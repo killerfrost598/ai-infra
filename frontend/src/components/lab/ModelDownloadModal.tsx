@@ -1,15 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Loader2, Check, AlertTriangle, XCircle } from "lucide-react";
+import { Loader2, Check, AlertTriangle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogBody,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import type { DownloadFile, DownloadSnapshot } from "@/lib/types";
 
 interface ModelDownloadModalProps {
   downloadId: string;
   repoId: string;
-  onClose: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onComplete: (success: boolean) => void;
 }
 
@@ -45,6 +55,9 @@ const BADGE_CLASSES: Record<DownloadFile["status"], string> = {
   failed: "bg-red-900/40 text-red-400 border border-red-800/50",
 };
 
+// suppress unused var lint — STATUS_COLORS is retained for potential future use
+void STATUS_COLORS;
+
 function FileRow({ file }: { file: DownloadFile }) {
   return (
     <div
@@ -65,7 +78,6 @@ function FileRow({ file }: { file: DownloadFile }) {
         </span>
       </div>
 
-      {/* Per-file progress bar */}
       <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted/60">
         <div
           className={`h-full rounded-full transition-all duration-300 ${
@@ -96,7 +108,8 @@ function FileRow({ file }: { file: DownloadFile }) {
 export function ModelDownloadModal({
   downloadId,
   repoId,
-  onClose,
+  open,
+  onOpenChange,
   onComplete,
 }: ModelDownloadModalProps) {
   const [snap, setSnap] = useState<DownloadSnapshot | null>(null);
@@ -105,16 +118,12 @@ export function ModelDownloadModal({
   const sourceRef = useRef<EventSource | null>(null);
   const onCompleteRef = useRef(onComplete);
 
-  // Keep the callback ref current without re-running the SSE effect.
-  // Parent re-renders (polling, etc.) recreate onComplete; if it were in the
-  // dep array, every parent render would tear down and rebuild the EventSource,
-  // and the new connection would race the old one for queue events — both
-  // losing them in the process.
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
 
   useEffect(() => {
+    if (!open) return;
     const url = api.modelDownloads.streamUrl(downloadId);
     const src = new EventSource(url);
     sourceRef.current = src;
@@ -149,7 +158,7 @@ export function ModelDownloadModal({
     return () => {
       src.close();
     };
-  }, [downloadId]);
+  }, [downloadId, open]);
 
   const handleCancel = async () => {
     setCancelling(true);
@@ -171,113 +180,103 @@ export function ModelDownloadModal({
   const hasError = snap?.error || snap?.files.some((f) => f.status === "failed");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="flex w-[600px] max-w-[95vw] flex-col rounded-xl border border-border bg-background shadow-2xl">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="default">
+        <DialogHeader>
+          <DialogTitle>Model Download</DialogTitle>
+          <DialogDescription className="font-mono text-[11px]">{repoId}</DialogDescription>
+        </DialogHeader>
 
-        {/* Header */}
-        <div className="flex items-start justify-between border-b border-border px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight">Model Download</h2>
-            <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">{repoId}</p>
+        <DialogBody className="gap-0 p-0">
+          {/* Aggregate stats */}
+          <div className="grid grid-cols-3 gap-px border-b border-border bg-border shrink-0">
+            <div className="bg-background px-4 py-3 text-center">
+              <p className="font-mono text-xl font-bold tabular-nums text-foreground">
+                {avgSpeed.toFixed(1)}
+              </p>
+              <p className="mt-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">MB/s</p>
+            </div>
+            <div className="bg-background px-4 py-3 text-center">
+              <p className="font-mono text-xl font-bold tabular-nums text-foreground">
+                {fmtTime(elapsed)}
+              </p>
+              <p className="mt-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">Elapsed</p>
+            </div>
+            <div className="bg-background px-4 py-3 text-center">
+              <p className="font-mono text-xl font-bold tabular-nums text-foreground">
+                {isDone ? (hasError ? "—" : "Done") : fmtTime(eta)}
+              </p>
+              <p className="mt-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">ETA</p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            title="Close (download continues in background)"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
 
-        {/* Aggregate stats */}
-        <div className="grid grid-cols-3 gap-px border-b border-border bg-border">
-          <div className="bg-background px-4 py-3 text-center">
-            <p className="font-mono text-xl font-bold tabular-nums text-foreground">
-              {avgSpeed.toFixed(1)}
-            </p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">MB/s</p>
-          </div>
-          <div className="bg-background px-4 py-3 text-center">
-            <p className="font-mono text-xl font-bold tabular-nums text-foreground">
-              {fmtTime(elapsed)}
-            </p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">Elapsed</p>
-          </div>
-          <div className="bg-background px-4 py-3 text-center">
-            <p className="font-mono text-xl font-bold tabular-nums text-foreground">
-              {isDone ? (hasError ? "—" : "Done") : fmtTime(eta)}
-            </p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">ETA</p>
-          </div>
-        </div>
-
-        {/* Overall progress */}
-        <div className="px-5 py-3">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              {fileIndex} / {totalFiles} files
-            </span>
-            <span className="font-mono font-semibold text-foreground">
-              {percent.toFixed(1)}%
-            </span>
-            {snap && (
+          {/* Overall progress */}
+          <div className="px-6 py-3 shrink-0">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
-                {fmtMb(snap.downloaded_mb)} / {fmtMb(snap.total_mb)}
+                {fileIndex} / {totalFiles} files
               </span>
+              <span className="font-mono font-semibold text-foreground">
+                {percent.toFixed(1)}%
+              </span>
+              {snap && (
+                <span>
+                  {fmtMb(snap.downloaded_mb)} / {fmtMb(snap.total_mb)}
+                </span>
+              )}
+            </div>
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  hasError ? "bg-red-500" : isDone ? "bg-emerald-500" : "bg-blue-500"
+                }`}
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+          </div>
+
+          {/* File list */}
+          <div className="flex-1 overflow-y-auto px-6 pb-2">
+            {snap ? (
+              <div className="space-y-1.5">
+                {snap.files.map((f) => (
+                  <FileRow key={f.filename} file={f} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Connecting to download stream...
+              </div>
             )}
           </div>
-          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
-            <div
-              className={`h-full rounded-full transition-all duration-300 ${
-                hasError ? "bg-red-500" : isDone ? "bg-emerald-500" : "bg-blue-500"
-              }`}
-              style={{ width: `${percent}%` }}
-            />
-          </div>
-        </div>
 
-        {/* File list */}
-        <div className="max-h-64 flex-1 overflow-y-auto px-5 pb-2">
-          {snap ? (
-            <div className="space-y-1.5">
-              {snap.files.map((f) => (
-                <FileRow key={f.filename} file={f} />
-              ))}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Connecting to download stream...
+          {/* Terminal state banner */}
+          {isDone && (
+            <div
+              className={`mx-6 mb-3 rounded-md border px-4 py-2.5 text-sm shrink-0 ${
+                hasError
+                  ? "border-red-800/50 bg-red-950/30 text-red-400"
+                  : "border-emerald-800/50 bg-emerald-950/30 text-emerald-400"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {hasError ? (
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                ) : (
+                  <Check className="h-4 w-4 shrink-0" />
+                )}
+                {hasError
+                  ? snap?.error
+                    ? `Failed: ${snap.error}`
+                    : "One or more files failed to download."
+                  : `Complete in ${fmtTime(elapsed)}.`}
+              </div>
             </div>
           )}
-        </div>
+        </DialogBody>
 
-        {/* Terminal state banner */}
-        {isDone && (
-          <div
-            className={`mx-5 mb-3 rounded-md border px-4 py-2.5 text-sm ${
-              hasError
-                ? "border-red-800/50 bg-red-950/30 text-red-400"
-                : "border-emerald-800/50 bg-emerald-950/30 text-emerald-400"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              {hasError ? (
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-              ) : (
-                <Check className="h-4 w-4 shrink-0" />
-              )}
-              {hasError
-                ? snap?.error
-                  ? `Failed: ${snap.error}`
-                  : "One or more files failed to download."
-                : `Complete in ${fmtTime(elapsed)}.`}
-            </div>
-          </div>
-        )}
-
-        {/* Footer actions */}
-        <div className="flex items-center justify-between border-t border-border px-5 py-3">
+        <DialogFooter className="sm:justify-between">
           <p className="text-[10px] text-muted-foreground">
             Closing this modal does not cancel the download.
           </p>
@@ -286,29 +285,23 @@ export function ModelDownloadModal({
               <Button
                 size="sm"
                 variant="destructive"
-                className="h-7 gap-1 px-3 text-xs"
                 onClick={handleCancel}
-                disabled={cancelling}
+                loading={cancelling}
               >
-                {cancelling ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <XCircle className="h-3 w-3" />
-                )}
+                <XCircle className="h-3 w-3" />
                 Cancel
               </Button>
             )}
             <Button
               size="sm"
               variant="outline"
-              className="h-7 px-3 text-xs"
-              onClick={onClose}
+              onClick={() => onOpenChange(false)}
             >
               {isDone ? "Close" : "Hide"}
             </Button>
           </div>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

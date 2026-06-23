@@ -13,6 +13,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogBody,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -92,61 +94,68 @@ export function QuantEditDialog({ model, quant, open, onOpenChange, onSaved }: P
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>
             {isEdit ? `Edit quant — ${quant.name}` : `Add quant — ${model.name}`}
           </DialogTitle>
+          <DialogDescription>
+            {isEdit ? "Update quantization metadata." : `Add a quant variant to ${model.name}.`}
+          </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit((v) => save.mutate(v))} className="space-y-4 py-2">
-          <Field label="Name" error={form.formState.errors.name?.message}>
-            <Input {...form.register("name")} placeholder="FP16 / AWQ-4bit / Q8" />
-          </Field>
-          <div className="grid grid-cols-3 gap-2">
-            <Field label="Bits/weight" error={form.formState.errors.bits_per_weight?.message}>
-              <Input {...form.register("bits_per_weight", { valueAsNumber: true })} type="number" step="0.5" placeholder="16" />
+        <DialogBody asChild>
+          <form
+            id="quant-edit-form"
+            onSubmit={form.handleSubmit((v) => save.mutate(v))}
+            className="flex flex-col gap-4"
+          >
+            <Field label="Name" error={form.formState.errors.name?.message}>
+              <Input {...form.register("name")} placeholder="FP16 / AWQ-4bit / Q8" />
             </Field>
-            <Field label="Disk (GB)" error={form.formState.errors.disk_size_gb?.message}>
-              <Input {...form.register("disk_size_gb", { valueAsNumber: true })} type="number" step="0.1" placeholder="8.4" />
+            <div className="grid grid-cols-3 gap-2">
+              <Field label="Bits/weight" error={form.formState.errors.bits_per_weight?.message}>
+                <Input {...form.register("bits_per_weight", { valueAsNumber: true })} type="number" step="0.5" placeholder="16" />
+              </Field>
+              <Field label="Disk (GB)" error={form.formState.errors.disk_size_gb?.message}>
+                <Input {...form.register("disk_size_gb", { valueAsNumber: true })} type="number" step="0.1" placeholder="8.4" />
+              </Field>
+              <Field label="VRAM (GB)" error={form.formState.errors.vram_weights_gb?.message}>
+                <Input {...form.register("vram_weights_gb", { valueAsNumber: true })} type="number" step="0.1" placeholder="8.0" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Quality score (0–1)" error={form.formState.errors.quality_score?.message}>
+                <Input {...form.register("quality_score", { valueAsNumber: true })} type="number" step="0.01" min="0" max="1" placeholder="1.0" />
+              </Field>
+              <Field label="Min compute cap.">
+                <Input {...form.register("cc_min")} placeholder="8.0" />
+              </Field>
+            </div>
+            <Field label="HF repo (if different from model)">
+              <Input {...form.register("hf_repo")} placeholder="Qwen/Qwen3-4B-AWQ" />
             </Field>
-            <Field label="VRAM (GB)" error={form.formState.errors.vram_weights_gb?.message}>
-              <Input {...form.register("vram_weights_gb", { valueAsNumber: true })} type="number" step="0.1" placeholder="8.0" />
+            <Field label="HF URL">
+              <Input {...form.register("hf_url")} placeholder="https://huggingface.co/…" />
             </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Quality score (0–1)" error={form.formState.errors.quality_score?.message}>
-              <Input {...form.register("quality_score", { valueAsNumber: true })} type="number" step="0.01" min="0" max="1" placeholder="1.0" />
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              {(["arch_vllm", "arch_sglang"] as const).map((field) => (
+                <label key={field} className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" {...form.register(field)} className="rounded" />
+                  <span className="text-muted-foreground">{field === "arch_vllm" ? "vLLM" : "SGLang"} supported</span>
+                </label>
+              ))}
+            </div>
+            <Field label="Notes">
+              <Input {...form.register("notes")} placeholder="Notable quality degradation, etc." />
             </Field>
-            <Field label="Min compute cap.">
-              <Input {...form.register("cc_min")} placeholder="8.0" />
-            </Field>
-          </div>
-          <Field label="HF repo (if different from model)">
-            <Input {...form.register("hf_repo")} placeholder="Qwen/Qwen3-4B-AWQ" />
-          </Field>
-          <Field label="HF URL">
-            <Input {...form.register("hf_url")} placeholder="https://huggingface.co/…" />
-          </Field>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            {(["arch_vllm", "arch_sglang"] as const).map((field) => (
-              <label key={field} className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" {...form.register(field)} className="rounded" />
-                <span className="text-muted-foreground">{field === "arch_vllm" ? "vLLM" : "SGLang"} supported</span>
-              </label>
-            ))}
-          </div>
-          <Field label="Notes">
-            <Input {...form.register("notes")} placeholder="Notable quality degradation, etc." />
-          </Field>
+          </form>
+        </DialogBody>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
-        </form>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" form="quant-edit-form" loading={save.isPending}>Save</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
